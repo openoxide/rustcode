@@ -741,6 +741,43 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: live CLI probe:
     - `cargo run -q -p rustcode-cli -- --json mcp login github` returns JSON failure envelope and non-zero exit.
 
+39. MCP Server Config Source (List + Login Resolution)
+- Status: completed
+- Deliverables:
+  - Added MCP server config source resolution for CLI MCP flows:
+    - `RUSTCODE_MCP_SERVERS_PATH` (explicit file override)
+    - `XDG_CONFIG_HOME/rustcode/mcp_servers.json`
+    - `~/.config/rustcode/mcp_servers.json`
+  - Added config merge behavior in MCP commands:
+    - `mcp list` now unions auth-store server names with configured server names.
+    - list output includes config metadata (`configured`, `url`, `oauth_enabled`) in both text and JSON modes.
+  - Added config-aware URL resolution for `mcp login <name>`:
+    - accepts configured `url` when `--url` is omitted.
+    - blocks OAuth login when config sets `oauth=false` with actionable guidance to use `--from-env`.
+  - Added integration coverage for configured MCP server listing and login URL resolution.
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration tests:
+    - `mcp_list_includes_configured_servers_without_credentials`
+    - `mcp_login_resolves_url_from_configured_server`
+  - Pass: live CLI probes:
+    - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode-cli -- --json mcp list` returns configured rows with `oauth_enabled`.
+    - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode-cli -- --json mcp login readonly` returns actionable validation error for `oauth=false`.
+
+40. MCP OAuth Callback + Token Exchange
+- Status: in progress
+- Deliverables:
+  - Add real MCP OAuth browser callback/token exchange path beyond discovery/import hints.
+  - Persist MCP OAuth tokens in auth store with explicit schema and expiry handling.
+  - Add staged JSON contracts for callback-wait, token-received, persisted, and failure states.
+  - Ensure cancellation and timeout behavior is explicit and test-covered.
+- Validation target:
+  - `cargo test -p rustcode-auth -p rustcode-cli`
+  - `./scripts/ci_matrix.sh`
+  - live flow probe against a real OAuth-capable MCP endpoint (or user-provided app credentials when required)
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -777,10 +814,43 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 1. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 2. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
 3. Implement MCP OAuth callback/token-exchange flow (beyond discovery/import) with explicit staged events and cancellation handling.
-4. Add MCP server config source (project/user config) so `mcp list/login/logout` operate on declared servers instead of auth-store-only names.
+4. Fold MCP server definitions into layered `rustcode-config` TOML resolution (global/user/project trust model) so MCP config is not JSON-sidecar-only.
 
 ## Update Log
 - 2026-02-17:
+  - Started Milestone 40 MCP OAuth callback + token exchange:
+    - implementation target set for full MCP OAuth completion path (callback listener, token exchange, token persistence).
+  - Milestone 40 start references (code + docs):
+    - `opencode/packages/opencode/src/cli/cmd/mcp.ts`
+    - `opencode/packages/opencode/src/mcp/index.ts`
+    - `codex/codex-rs/cli/src/mcp_cmd.rs`
+    - `codex/codex-rs/rmcp-client/src/auth_status.rs`
+    - `codex/codex-rs/core/src/config/mod.rs`
+    - `https://opencode.ai/docs`
+    - `https://developers.openai.com/codex/`
+  - Completed Milestone 39 MCP server config source:
+    - added MCP server config lookup via `RUSTCODE_MCP_SERVERS_PATH`, XDG config path, and HOME fallback path.
+    - updated `mcp list` to include configured servers and metadata (`configured`, `url`, `oauth_enabled`) in JSON/text.
+    - added config-driven URL resolution in `mcp login` with `oauth=false` guardrail.
+    - added integration tests:
+      - `mcp_list_includes_configured_servers_without_credentials`
+      - `mcp_login_resolves_url_from_configured_server`
+  - Milestone 39 references (code + docs):
+    - `opencode/packages/opencode/src/cli/cmd/mcp.ts`
+    - `opencode/packages/opencode/src/mcp/index.ts`
+    - `opencode/packages/opencode/src/config/config.ts`
+    - `codex/codex-rs/cli/src/mcp_cmd.rs`
+    - `codex/codex-rs/core/src/config/mod.rs`
+    - `codex/codex-rs/rmcp-client/src/auth_status.rs`
+    - `https://opencode.ai/docs`
+    - `https://developers.openai.com/codex/`
+  - Validation passed:
+    - `cargo fmt --all`
+    - `cargo test -p rustcode-cli`
+    - `./scripts/ci_matrix.sh`
+    - live probes:
+      - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode-cli -- --json mcp list`
+      - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode-cli -- --json mcp login readonly`
   - Completed Milestone 38 MCP login JSON failure envelope:
     - added structured `stage=failed` payloads for `--json mcp login` errors.
     - added `error_kind` classification (`validation`/`provider`/`network`).

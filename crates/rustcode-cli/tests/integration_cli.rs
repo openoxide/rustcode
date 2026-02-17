@@ -1145,6 +1145,101 @@ fn mcp_json_contracts_are_parseable() {
 }
 
 #[test]
+fn mcp_list_includes_configured_servers_without_credentials() {
+    let auth_path = make_temp_file_path("mcp-auth-config-list");
+    let config_path = make_temp_file_path("mcp-servers-config-list");
+    std::fs::write(
+        &config_path,
+        r#"{
+  "github": { "url": "https://mcp.github.local/sse", "oauth": true },
+  "readonly": { "url": "https://mcp.readonly.local/sse", "oauth": false }
+}"#,
+    )
+    .expect("must write mcp server config fixture");
+
+    let output = Command::new(rustcode_bin())
+        .args(["--json", "mcp", "list"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_MCP_SERVERS_PATH", &config_path)
+        .output()
+        .expect("must run rustcode mcp list");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_str(
+        String::from_utf8(output.stdout)
+            .expect("stdout must be utf8")
+            .trim(),
+    )
+    .expect("must parse json");
+    let servers = payload["servers"]
+        .as_array()
+        .expect("servers should be array");
+    let github = servers
+        .iter()
+        .find(|row| row["name"].as_str() == Some("github"))
+        .expect("github row should exist");
+    assert_eq!(github["credential"].as_str(), Some("none"));
+    assert_eq!(github["configured"].as_bool(), Some(true));
+    assert_eq!(github["url"].as_str(), Some("https://mcp.github.local/sse"));
+    assert_eq!(github["oauth_enabled"].as_bool(), Some(true));
+
+    let readonly = servers
+        .iter()
+        .find(|row| row["name"].as_str() == Some("readonly"))
+        .expect("readonly row should exist");
+    assert_eq!(readonly["credential"].as_str(), Some("none"));
+    assert_eq!(readonly["configured"].as_bool(), Some(true));
+    assert_eq!(readonly["oauth_enabled"].as_bool(), Some(false));
+}
+
+#[test]
+fn mcp_login_resolves_url_from_configured_server() {
+    let Some((port, handle)) = spawn_mcp_discovery_server() else {
+        return;
+    };
+    let expected_url = format!("http://127.0.0.1:{port}/mcp");
+    let auth_path = make_temp_file_path("mcp-auth-config-login");
+    let config_path = make_temp_file_path("mcp-servers-config-login");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"{{
+  "github": {{ "url": "{expected_url}", "oauth": true }}
+}}"#
+        ),
+    )
+    .expect("must write mcp server config fixture");
+
+    let output = Command::new(rustcode_bin())
+        .args(["--json", "mcp", "login", "github", "--scopes", "read,write"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_MCP_SERVERS_PATH", &config_path)
+        .output()
+        .expect("must run rustcode mcp login");
+
+    handle.join().expect("discovery server should join");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2, "stdout: {stdout}");
+    let discovered: Value = serde_json::from_str(lines[0]).expect("discovered line must parse");
+    assert_eq!(discovered["name"].as_str(), Some("github"));
+    assert_eq!(discovered["stage"].as_str(), Some("oauth_discovered"));
+    assert_eq!(discovered["url"].as_str(), Some(expected_url.as_str()));
+}
+
+#[test]
 fn mcp_login_requires_from_env_in_non_interactive_mode() {
     let output = Command::new(rustcode_bin())
         .args(["mcp", "login", "github"])

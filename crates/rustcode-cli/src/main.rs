@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -744,23 +744,35 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
 
 async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()> {
     let store = AuthStore::open_default();
+    let configured_servers = load_mcp_servers_config()?;
     match command {
         McpCommand::List => {
-            let mut servers = store
+            let stored_servers = store
                 .providers()?
                 .into_iter()
                 .filter_map(|provider| provider.strip_prefix("mcp:").map(|name| name.to_string()))
                 .collect::<Vec<_>>();
-            servers.sort();
+            let mut names = BTreeSet::new();
+            for name in stored_servers {
+                names.insert(name);
+            }
+            for name in configured_servers.keys() {
+                names.insert(name.clone());
+            }
+            let servers = names.into_iter().collect::<Vec<_>>();
 
             if json_output {
                 let rows = servers
                     .iter()
                     .map(|server| {
                         let key = mcp_store_key(server);
+                        let configured = configured_servers.get(server);
                         Ok(serde_json::json!({
                             "name": server,
                             "credential": render_stored_credential(store.get(&key)?),
+                            "configured": configured.is_some(),
+                            "url": configured.and_then(|entry| entry.url.clone()),
+                            "oauth_enabled": configured.map(|entry| entry.oauth_enabled()).unwrap_or(false),
                         }))
                     })
                     .collect::<Result<Vec<_>>>()?;
@@ -786,10 +798,19 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
             }
             for server in servers {
                 let key = mcp_store_key(&server);
-                if !write_stdout_line(&format!(
+                let configured = configured_servers.get(&server);
+                let mut row = format!(
                     "name={server}\tcredential={}",
                     render_stored_credential(store.get(&key)?)
-                ))? {
+                );
+                if let Some(configured) = configured {
+                    row.push_str("\tconfigured=true");
+                    if let Some(url) = &configured.url {
+                        row.push_str(&format!("\turl={url}"));
+                    }
+                    row.push_str(&format!("\toauth_enabled={}", configured.oauth_enabled()));
+                }
+                if !write_stdout_line(&row)? {
                     return Ok(());
                 }
             }
@@ -839,11 +860,11 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
                 return Ok(());
             }
 
-            let Some(url) = url else {
-                anyhow::bail!("MCP login requires either --from-env <ENV_VAR> or --url <MCP_URL>");
-            };
+            let resolved_url =
+                resolve_mcp_login_url(&name, url.as_deref(), configured_servers.get(&name))
+                    .context("failed to resolve MCP login URL")?;
 
-            let discovery = discover_mcp_oauth(&url).await?;
+            let discovery = discover_mcp_oauth(&resolved_url).await?;
             if !discovery.supported {
                 anyhow::bail!(
                     "MCP server does not advertise OAuth endpoints; provide --from-env <ENV_VAR> or confirm server OAuth metadata"
@@ -856,7 +877,7 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
                     "command": "mcp.login",
                     "name": name,
                     "stage": "oauth_discovered",
-                    "url": url,
+                    "url": resolved_url,
                     "metadata_url": discovery.metadata_url,
                     "authorization_endpoint": discovery.authorization_endpoint,
                     "token_endpoint": discovery.token_endpoint,
@@ -886,7 +907,7 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
 
             if !write_stdout_line(&format!("name={name}"))?
                 || !write_stdout_line("stage=oauth_discovered")?
-                || !write_stdout_line(&format!("url={url}"))?
+                || !write_stdout_line(&format!("url={resolved_url}"))?
                 || !write_stdout_line(&format!(
                     "metadata_url={}",
                     discovery.metadata_url.as_deref().unwrap_or("<unknown>")
@@ -943,6 +964,74 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
         }
     }
     Ok(())
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct McpConfigEntry {
+    #[serde(default)]
+    url: Option<String>,
+    #[serde(default)]
+    oauth: Option<bool>,
+}
+
+impl McpConfigEntry {
+    fn oauth_enabled(&self) -> bool {
+        self.oauth.unwrap_or(true)
+    }
+}
+
+fn resolve_mcp_login_url(
+    name: &str,
+    provided_url: Option<&str>,
+    configured: Option<&McpConfigEntry>,
+) -> Result<String> {
+    if let Some(url) = provided_url {
+        return Ok(url.to_string());
+    }
+    if let Some(configured) = configured {
+        if !configured.oauth_enabled() {
+            anyhow::bail!("configured MCP server has oauth disabled; provide --from-env");
+        }
+        if let Some(url) = &configured.url {
+            return Ok(url.clone());
+        }
+        anyhow::bail!("configured MCP server `{name}` is missing `url`");
+    }
+    anyhow::bail!("MCP login requires either --from-env <ENV_VAR>, --url <MCP_URL>, or a configured MCP server URL")
+}
+
+fn load_mcp_servers_config() -> Result<BTreeMap<String, McpConfigEntry>> {
+    let path = match resolve_mcp_servers_path() {
+        Some(path) => path,
+        None => return Ok(BTreeMap::new()),
+    };
+    let raw = std::fs::read_to_string(&path)
+        .with_context(|| format!("failed to read MCP servers config {}", path.display()))?;
+    serde_json::from_str::<BTreeMap<String, McpConfigEntry>>(&raw)
+        .with_context(|| format!("failed to parse MCP servers config {}", path.display()))
+}
+
+fn resolve_mcp_servers_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("RUSTCODE_MCP_SERVERS_PATH") {
+        let candidate = PathBuf::from(path);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        return None;
+    }
+    if let Ok(path) = std::env::var("XDG_CONFIG_HOME") {
+        let candidate = PathBuf::from(path).join("rustcode/mcp_servers.json");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    if let Ok(path) = std::env::var("HOME") {
+        let candidate = PathBuf::from(path).join(".config/rustcode/mcp_servers.json");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn mcp_store_key(name: &str) -> String {
