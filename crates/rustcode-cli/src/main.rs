@@ -2,11 +2,14 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use rustcode_auth::{methods_for_provider, oauth_login_hint, AuthStore, StoredCredential};
+use rustcode_auth::{
+    known_oauth_providers, methods_for_provider, oauth_login_hint,
+    poll_device_code_flow_for_api_key, start_device_code_flow, AuthStore, StoredCredential,
+};
 use serde::Deserialize;
 use serde_json::Value;
 use tokio::sync::mpsc;
@@ -36,7 +39,7 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
     if let TopCommand::Auth { command } = &cli.command {
-        return handle_auth_command(command.clone());
+        return handle_auth_command(command.clone()).await;
     }
     if let TopCommand::Models { provider } = &cli.command {
         let config = load_effective_config(&cli)?;
@@ -106,7 +109,7 @@ async fn main() -> Result<()> {
     }
 }
 
-fn handle_auth_command(command: AuthCommand) -> Result<()> {
+async fn handle_auth_command(command: AuthCommand) -> Result<()> {
     let store = AuthStore::open_default();
     match command {
         AuthCommand::Methods { provider } => {
@@ -163,26 +166,84 @@ fn handle_auth_command(command: AuthCommand) -> Result<()> {
                 return Ok(());
             }
         }
-        AuthCommand::Login { provider } => {
+        AuthCommand::Login {
+            provider,
+            from_env,
+            domain,
+            no_wait,
+            timeout_secs,
+        } => {
+            if provider.is_none() {
+                if from_env.is_some() {
+                    anyhow::bail!("`--from-env` requires a provider: `rustcode auth login <provider> --from-env <ENV_VAR>`");
+                }
+                return list_auth_login_providers();
+            }
+            let provider = provider.expect("provider is checked").to_ascii_lowercase();
+
+            if let Some(env_name) = from_env {
+                let key = std::env::var(&env_name).with_context(|| {
+                    format!("environment variable {env_name} is not set; cannot store key")
+                })?;
+                store.set_api_key(&provider, &key)?;
+                if !write_stdout_line(&format!("stored api key for provider={provider}"))?
+                    || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+                {
+                    return Ok(());
+                }
+                return Ok(());
+            }
+
             let methods = methods_for_provider(&provider);
             if !methods
                 .iter()
                 .any(|method| method.as_str() == "oauth_device_code")
             {
                 anyhow::bail!(
-                    "provider={provider} does not advertise oauth device login; use `rustcode auth set-key {provider} --from-env <ENV_VAR>`"
+                    "provider={provider} does not advertise oauth device login; use `rustcode auth login {provider} --from-env <ENV_VAR>`"
                 );
             }
-            let hint = oauth_login_hint(&provider).ok_or_else(|| {
-                anyhow::anyhow!(
-                    "oauth login adapter for provider={provider} is not implemented yet"
-                )
-            })?;
-            if !write_stdout_line(&format!("provider={provider}"))?
-                || !write_stdout_line(&format!("authorize_url={}", hint.authorize_url))?
-                || !write_stdout_line(&format!("instructions={}", hint.instructions))?
-            {
-                return Ok(());
+            if provider == "github-copilot" || provider == "github-copilot-enterprise" {
+                let flow = start_device_code_flow(&provider, domain.as_deref()).await?;
+                if !write_stdout_line(&format!("provider={provider}"))?
+                    || !write_stdout_line(&format!("authorize_url={}", flow.verification_uri))?
+                    || !write_stdout_line(&format!("user_code={}", flow.user_code))?
+                    || !write_stdout_line(&format!("interval_secs={}", flow.interval_secs))?
+                    || !write_stdout_line(&format!("expires_in_secs={}", flow.expires_in_secs))?
+                {
+                    return Ok(());
+                }
+
+                if no_wait {
+                    if !write_stdout_line("status=awaiting_user_authorization")? {
+                        return Ok(());
+                    }
+                    return Ok(());
+                }
+
+                if !write_stdout_line("status=polling_for_token")? {
+                    return Ok(());
+                }
+                let timeout = Duration::from_secs(timeout_secs.max(1));
+                let token = poll_device_code_flow_for_api_key(&flow, timeout).await?;
+                store.set_api_key(&provider, &token)?;
+                if !write_stdout_line("status=authorized")?
+                    || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+                {
+                    return Ok(());
+                }
+            } else {
+                let hint = oauth_login_hint(&provider).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "oauth login adapter for provider={provider} is not implemented yet"
+                    )
+                })?;
+                if !write_stdout_line(&format!("provider={provider}"))?
+                    || !write_stdout_line(&format!("authorize_url={}", hint.authorize_url))?
+                    || !write_stdout_line(&format!("instructions={}", hint.instructions))?
+                {
+                    return Ok(());
+                }
             }
         }
     }
@@ -197,12 +258,7 @@ struct ModelsProvider {
 }
 
 fn handle_models_command(provider_filter: Option<&str>, config: &ResolvedConfig) -> Result<()> {
-    let models_path = resolve_models_path()
-        .ok_or_else(|| anyhow::anyhow!("models index not found; set RUSTCODE_MODELS_PATH"))?;
-    let raw = std::fs::read_to_string(&models_path)
-        .with_context(|| format!("failed to read models index {}", models_path.display()))?;
-    let index = serde_json::from_str::<BTreeMap<String, ModelsProvider>>(&raw)
-        .with_context(|| format!("failed to parse models index {}", models_path.display()))?;
+    let index = load_models_index()?;
 
     if let Some(provider) = provider_filter {
         let Some(entry) = index.get(provider) else {
@@ -296,6 +352,89 @@ fn write_stdout_line(line: &str) -> Result<bool> {
         Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => Ok(false),
         Err(err) => Err(anyhow::anyhow!("stdout write failed: {err}")),
     }
+}
+
+fn list_auth_login_providers() -> Result<()> {
+    let index = load_models_index();
+    let mut rows: Vec<(String, String, String)> = match index {
+        Ok(index) => {
+            let mut rows = index
+                .into_iter()
+                .map(|(provider_id, provider)| {
+                    let methods = render_auth_methods(&methods_for_provider(&provider_id));
+                    let display_name = provider.name.unwrap_or_else(|| provider_id.clone());
+                    (provider_id, display_name, methods)
+                })
+                .collect::<Vec<_>>();
+            rows.sort_by(|a, b| {
+                auth_login_priority(&a.0)
+                    .cmp(&auth_login_priority(&b.0))
+                    .then_with(|| a.1.cmp(&b.1))
+            });
+            rows
+        }
+        Err(err) => {
+            if !write_stdout_line(&format!("warning={err}"))? {
+                return Ok(());
+            }
+            let mut rows = known_oauth_providers()
+                .iter()
+                .map(|provider| {
+                    (
+                        (*provider).to_string(),
+                        (*provider).to_string(),
+                        render_auth_methods(&methods_for_provider(provider)),
+                    )
+                })
+                .collect::<Vec<_>>();
+            rows.sort_by(|a, b| a.0.cmp(&b.0));
+            rows
+        }
+    };
+
+    if !write_stdout_line("usage=rustcode auth login <provider> --from-env <ENV_VAR>")?
+        || !write_stdout_line(&format!("providers={}", rows.len()))?
+    {
+        return Ok(());
+    }
+    for (provider_id, display_name, methods) in rows.drain(..) {
+        if !write_stdout_line(&format!(
+            "provider={provider_id}\tname={display_name}\tmethods={methods}"
+        ))? {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn render_auth_methods(methods: &[rustcode_auth::AuthMethod]) -> String {
+    methods
+        .iter()
+        .map(|method| method.as_str())
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn auth_login_priority(provider_id: &str) -> usize {
+    match provider_id {
+        "opencode" => 0,
+        "anthropic" => 1,
+        "github-copilot" => 2,
+        "openai" => 3,
+        "google" => 4,
+        "openrouter" => 5,
+        "vercel" => 6,
+        _ => 99,
+    }
+}
+
+fn load_models_index() -> Result<BTreeMap<String, ModelsProvider>> {
+    let models_path = resolve_models_path()
+        .ok_or_else(|| anyhow::anyhow!("models index not found; set RUSTCODE_MODELS_PATH"))?;
+    let raw = std::fs::read_to_string(&models_path)
+        .with_context(|| format!("failed to read models index {}", models_path.display()))?;
+    serde_json::from_str::<BTreeMap<String, ModelsProvider>>(&raw)
+        .with_context(|| format!("failed to parse models index {}", models_path.display()))
 }
 
 fn render_protocol(protocol: &ProviderProtocolName) -> &'static str {

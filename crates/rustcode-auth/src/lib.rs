@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+use tokio::time::sleep;
 
 #[derive(Debug, Error)]
 pub enum AuthError {
@@ -15,6 +17,12 @@ pub enum AuthError {
     Parse(String),
     #[error("failed to validate input: {0}")]
     Validation(String),
+    #[error("network request failed: {0}")]
+    Network(String),
+    #[error("oauth authorization timeout")]
+    OAuthTimeout,
+    #[error("oauth authorization failed: {0}")]
+    OAuthFailed(String),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -180,15 +188,15 @@ pub fn oauth_login_hint(provider_id: &str) -> Option<OAuthLoginHint> {
     let (url, instructions) = match provider.as_str() {
         "openai" => (
             "https://chatgpt.com",
-            "Complete ChatGPT authorization flow, then store the resulting token with `rustcode auth set-key openai --from-env <ENV_VAR>`.",
+            "Complete ChatGPT authorization flow, then store the resulting token with `rustcode auth login openai --from-env <ENV_VAR>`.",
         ),
         "github-copilot" | "github-copilot-enterprise" => (
             "https://github.com/login/device",
-            "Complete GitHub device login, then store the resulting token with `rustcode auth set-key <provider> --from-env <ENV_VAR>`.",
+            "Complete GitHub device login, then store the resulting token with `rustcode auth login <provider> --from-env <ENV_VAR>`.",
         ),
         "gitlab" => (
             "https://gitlab.com/oauth/authorize",
-            "Complete GitLab OAuth login in browser, then store the resulting token with `rustcode auth set-key <provider> --from-env <ENV_VAR>`.",
+            "Complete GitLab OAuth login in browser, then store the resulting token with `rustcode auth login <provider> --from-env <ENV_VAR>`.",
         ),
         _ => return None,
     };
@@ -200,6 +208,189 @@ pub fn oauth_login_hint(provider_id: &str) -> Option<OAuthLoginHint> {
 
 pub fn known_oauth_providers() -> &'static [&'static str] {
     OAUTH_PROVIDERS
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceCodeFlowStart {
+    pub provider: String,
+    pub domain: String,
+    pub verification_uri: String,
+    pub user_code: String,
+    pub device_code: String,
+    pub interval_secs: u64,
+    pub expires_in_secs: u64,
+}
+
+pub async fn start_device_code_flow(
+    provider: &str,
+    domain: Option<&str>,
+) -> Result<DeviceCodeFlowStart, AuthError> {
+    match provider {
+        "github-copilot" | "github-copilot-enterprise" => {
+            let normalized_domain = normalize_domain(domain.unwrap_or("github.com"))?;
+            start_github_device_code(provider, &normalized_domain).await
+        }
+        other => Err(AuthError::Validation(format!(
+            "provider {other} does not support device code flow"
+        ))),
+    }
+}
+
+pub async fn poll_device_code_flow_for_api_key(
+    flow: &DeviceCodeFlowStart,
+    timeout: Duration,
+) -> Result<String, AuthError> {
+    match flow.provider.as_str() {
+        "github-copilot" | "github-copilot-enterprise" => {
+            poll_github_device_code(flow, timeout).await
+        }
+        other => Err(AuthError::Validation(format!(
+            "provider {other} does not support device code polling"
+        ))),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubDeviceCodeResponse {
+    verification_uri: String,
+    user_code: String,
+    device_code: String,
+    interval: Option<u64>,
+    expires_in: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GithubTokenResponse {
+    access_token: Option<String>,
+    error: Option<String>,
+    error_description: Option<String>,
+    interval: Option<u64>,
+}
+
+const GITHUB_CLIENT_ID: &str = "Ov23li8tweQw6odWQebz";
+
+async fn start_github_device_code(
+    provider: &str,
+    domain: &str,
+) -> Result<DeviceCodeFlowStart, AuthError> {
+    let url = format!("https://{domain}/login/device/code");
+    let client = reqwest::Client::new();
+    let response = client
+        .post(url)
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "client_id": GITHUB_CLIENT_ID,
+            "scope": "read:user"
+        }))
+        .send()
+        .await
+        .map_err(|err| AuthError::Network(err.to_string()))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| AuthError::Network(err.to_string()))?;
+    if !status.is_success() {
+        return Err(AuthError::OAuthFailed(format!(
+            "device code request failed with {status}: {body}"
+        )));
+    }
+
+    let parsed: GithubDeviceCodeResponse =
+        serde_json::from_str(&body).map_err(|err| AuthError::Parse(err.to_string()))?;
+
+    Ok(DeviceCodeFlowStart {
+        provider: provider.to_string(),
+        domain: domain.to_string(),
+        verification_uri: parsed.verification_uri,
+        user_code: parsed.user_code,
+        device_code: parsed.device_code,
+        interval_secs: parsed.interval.unwrap_or(5).max(1),
+        expires_in_secs: parsed.expires_in.unwrap_or(900),
+    })
+}
+
+async fn poll_github_device_code(
+    flow: &DeviceCodeFlowStart,
+    timeout: Duration,
+) -> Result<String, AuthError> {
+    let client = reqwest::Client::new();
+    let token_url = format!("https://{}/login/oauth/access_token", flow.domain);
+    let deadline = Instant::now() + timeout;
+    let mut interval = flow.interval_secs.max(1);
+
+    while Instant::now() < deadline {
+        let response = client
+            .post(&token_url)
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "client_id": GITHUB_CLIENT_ID,
+                "device_code": flow.device_code,
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+            }))
+            .send()
+            .await
+            .map_err(|err| AuthError::Network(err.to_string()))?;
+
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|err| AuthError::Network(err.to_string()))?;
+        if !status.is_success() {
+            return Err(AuthError::OAuthFailed(format!(
+                "oauth polling failed with {status}: {body}"
+            )));
+        }
+
+        let parsed: GithubTokenResponse =
+            serde_json::from_str(&body).map_err(|err| AuthError::Parse(err.to_string()))?;
+        if let Some(token) = parsed.access_token {
+            return Ok(token);
+        }
+
+        let error = parsed
+            .error
+            .unwrap_or_else(|| "unknown_error".to_string())
+            .to_ascii_lowercase();
+        match error.as_str() {
+            "authorization_pending" => {}
+            "slow_down" => {
+                interval = interval.saturating_add(1);
+            }
+            "expired_token" => return Err(AuthError::OAuthTimeout),
+            _ => {
+                return Err(AuthError::OAuthFailed(
+                    parsed
+                        .error_description
+                        .unwrap_or_else(|| "device flow failed".to_string()),
+                ))
+            }
+        }
+
+        if let Some(server_interval) = parsed.interval {
+            interval = interval.max(server_interval);
+        }
+        sleep(Duration::from_secs(interval)).await;
+    }
+
+    Err(AuthError::OAuthTimeout)
+}
+
+fn normalize_domain(raw: &str) -> Result<String, AuthError> {
+    if raw.trim().is_empty() {
+        return Err(AuthError::Validation(
+            "domain must not be empty".to_string(),
+        ));
+    }
+    let without_scheme = raw
+        .trim()
+        .trim_start_matches("https://")
+        .trim_start_matches("http://");
+    Ok(without_scheme.trim_end_matches('/').to_string())
 }
 
 fn validate_provider(provider: &str) -> Result<(), AuthError> {
@@ -292,6 +483,18 @@ mod tests {
     fn oauth_hint_exists_for_supported_provider() {
         let hint = oauth_login_hint("gitlab").expect("hint must exist");
         assert!(hint.authorize_url.contains("gitlab"));
+    }
+
+    #[test]
+    fn normalizes_domain_for_device_flow() {
+        assert_eq!(
+            normalize_domain("https://github.com/").expect("must normalize"),
+            "github.com"
+        );
+        assert_eq!(
+            normalize_domain("company.ghe.com").expect("must normalize"),
+            "company.ghe.com"
+        );
     }
 
     fn make_temp_file_path(name: &str) -> PathBuf {

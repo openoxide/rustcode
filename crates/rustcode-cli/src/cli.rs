@@ -86,7 +86,15 @@ pub enum AuthCommand {
         provider: String,
     },
     Login {
-        provider: String,
+        provider: Option<String>,
+        #[arg(long = "from-env")]
+        from_env: Option<String>,
+        #[arg(long)]
+        domain: Option<String>,
+        #[arg(long, default_value_t = false)]
+        no_wait: bool,
+        #[arg(long, default_value_t = 300)]
+        timeout_secs: u64,
     },
 }
 
@@ -229,6 +237,59 @@ mod tests {
                 assert_eq!(provider.as_deref(), Some("openrouter"));
             }
             _ => panic!("expected models command"),
+        }
+    }
+
+    #[test]
+    fn auth_login_accepts_domain_and_no_wait() {
+        let cli = Cli::try_parse_from([
+            "rustcode",
+            "auth",
+            "login",
+            "github-copilot-enterprise",
+            "--domain",
+            "company.ghe.com",
+            "--no-wait",
+            "--timeout-secs",
+            "15",
+        ])
+        .expect("cli should parse");
+
+        match cli.command {
+            TopCommand::Auth {
+                command:
+                    AuthCommand::Login {
+                        provider,
+                        from_env,
+                        domain,
+                        no_wait,
+                        timeout_secs,
+                    },
+            } => {
+                assert_eq!(provider.as_deref(), Some("github-copilot-enterprise"));
+                assert!(from_env.is_none());
+                assert_eq!(domain.as_deref(), Some("company.ghe.com"));
+                assert!(no_wait);
+                assert_eq!(timeout_secs, 15);
+            }
+            _ => panic!("expected auth login command"),
+        }
+    }
+
+    #[test]
+    fn auth_login_allows_providerless_mode() {
+        let cli = Cli::try_parse_from(["rustcode", "auth", "login"]).expect("cli should parse");
+        match cli.command {
+            TopCommand::Auth {
+                command:
+                    AuthCommand::Login {
+                        provider, from_env, ..
+                    },
+            } => {
+                assert!(provider.is_none());
+                assert!(from_env.is_none());
+            }
+            _ => panic!("expected auth login command"),
         }
     }
 }

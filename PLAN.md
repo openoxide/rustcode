@@ -249,6 +249,29 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `rustcode models | head -n 5` exits without broken-pipe panic
   - Pass: live unsandboxed OpenRouter execution after diagnostics changes returned `DIAG_OK`.
 
+15. Auth Login UX Parity and Device Flow
+- Status: completed
+- Deliverables:
+  - `auth login` now supports providerless mode and lists providers from models index (opencode-style discovery flow).
+  - Added `auth login <provider> --from-env <ENV_VAR>` for direct API-key storage in the login path.
+  - Added provider priority sorting for login listing to match opencode UX emphasis:
+    - `opencode`, `anthropic`, `github-copilot`, `openai`, `google`, `openrouter`, `vercel`, then alphabetical.
+  - Implemented GitHub Copilot device-code OAuth start/poll primitives in `rustcode-auth`:
+    - supports `github-copilot` and `github-copilot-enterprise`
+    - supports `--domain`, `--no-wait`, and `--timeout-secs` in CLI.
+  - Added fallback login listing when models index is unavailable (known OAuth providers with warning).
+  - Updated OAuth guidance text to use `auth login ... --from-env` flow consistently.
+- Validation:
+  - Pass: `cargo check --workspace` (2026-02-17)
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: live CLI usage probes:
+    - `rustcode auth login` lists 91 providers with methods and priority ordering.
+    - `RUSTCODE_AUTH_FILE=/tmp/... RUSTCODE_TEST_KEY=... rustcode auth login openrouter --from-env RUSTCODE_TEST_KEY` stores key.
+    - `RUSTCODE_AUTH_FILE=/tmp/... rustcode auth status openrouter` reports `credential=stored:api_key`.
+    - `rustcode auth login openai` prints OAuth URL + updated instructions.
+    - `rustcode auth login github-copilot --no-wait --timeout-secs 5` exercises network error path with structured failure in this environment.
+    - models-missing fallback probe (`HOME/XDG_CACHE_HOME` isolated + missing `RUSTCODE_MODELS_PATH`) shows warning + known OAuth providers.
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -282,8 +305,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
-2. Implement real OAuth token exchange adapters (device/browser flows) behind `rustcode-auth`.
+2. Implement remaining real OAuth token exchange adapters (OpenAI browser/device and GitLab OAuth callback) behind `rustcode-auth`.
 3. Add provider diagnostics JSON mode (`rustcode models --json`) for machine-readable health/status checks.
+4. Add provider/tool selection policy doc + config knobs using weighted scoring (model flexibility, automation depth, extensibility, privacy) to operationalize Codex vs OpenCode tradeoffs.
 
 ## Update Log
 - 2026-02-17:
@@ -418,6 +442,28 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - reports RSS and peak-footprint deltas for trend checks.
   - Added benchmark assertion utility:
     - `scripts/benchmark_assert.sh <artifact>`
+  - Completed Milestone 15 auth login UX parity and provider discovery:
+    - `auth login` now supports providerless provider listing from models index, matching opencode discovery-first flow.
+    - added `auth login <provider> --from-env <ENV_VAR>` as the direct API-key path.
+    - added Copilot device OAuth start/poll implementation in `rustcode-auth` with enterprise domain support.
+    - added CLI controls `--domain`, `--no-wait`, `--timeout-secs` for device-flow operation.
+    - added fallback listing behavior when models index is unavailable.
+    - updated OAuth guidance text to use `auth login ... --from-env` consistently.
+    - added integration tests:
+      - `auth_login_without_provider_lists_models_and_methods`
+      - `auth_login_from_env_stores_key`
+      - `auth_login_from_env_requires_provider`
+    - referenced parity sources while implementing:
+      - `opencode/packages/opencode/src/cli/cmd/auth.ts`
+      - `opencode/packages/opencode/src/plugin/copilot.ts`
+      - `opencode/packages/opencode/src/plugin/codex.ts`
+      - `opencode/packages/web/src/content/docs/cli.mdx`
+      - `opencode/packages/web/src/content/docs/providers.mdx`
+      - `codex/codex-rs/login/src/device_code_auth.rs`
+    - validated via:
+      - `cargo check --workspace`
+      - `cargo test --workspace`
+      - live CLI probes for provider listing, key storage/status, OAuth hint path, device-flow network-failure path, and missing-models fallback.
     - enforces conservative memory thresholds with environment overrides.
   - Extended benchmark harness with drift mode and captured sample stability run:
     - `./scripts/benchmark.sh drift 12 4`

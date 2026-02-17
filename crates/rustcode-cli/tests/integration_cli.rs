@@ -102,6 +102,93 @@ fn auth_set_key_and_status_round_trip() {
 }
 
 #[test]
+fn auth_login_without_provider_lists_models_and_methods() {
+    let models_path = make_temp_file_path("auth-login-models");
+    std::fs::write(
+        &models_path,
+        r#"{
+  "openai": { "name": "OpenAI", "models": { "gpt-5": {} } },
+  "openrouter": { "name": "OpenRouter", "models": { "openai/gpt-5": {} } },
+  "anthropic": { "name": "Anthropic", "models": { "claude-sonnet": {} } }
+}"#,
+    )
+    .expect("must write models fixture");
+
+    let output = Command::new(rustcode_bin())
+        .args(["auth", "login"])
+        .env("RUSTCODE_MODELS_PATH", &models_path)
+        .output()
+        .expect("must run rustcode auth login");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains("usage=rustcode auth login <provider> --from-env <ENV_VAR>"));
+    assert!(stdout.contains("provider=anthropic\tname=Anthropic\tmethods=api_key"));
+    assert!(stdout.contains("provider=openai\tname=OpenAI\tmethods=oauth_device_code|api_key"));
+    assert!(stdout.contains("provider=openrouter\tname=OpenRouter\tmethods=api_key"));
+}
+
+#[test]
+fn auth_login_from_env_stores_key() {
+    let auth_path = make_temp_file_path("auth-login-set-key");
+
+    let login_output = Command::new(rustcode_bin())
+        .args([
+            "auth",
+            "login",
+            "openrouter",
+            "--from-env",
+            "RUSTCODE_TEST_KEY",
+        ])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_TEST_KEY", "integration-login-secret")
+        .output()
+        .expect("must run rustcode auth login from env");
+
+    assert!(
+        login_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&login_output.stdout),
+        String::from_utf8_lossy(&login_output.stderr)
+    );
+    let login_stdout = String::from_utf8(login_output.stdout).expect("stdout must be utf8");
+    assert!(login_stdout.contains("stored api key for provider=openrouter"));
+
+    let status_output = Command::new(rustcode_bin())
+        .args(["auth", "status", "openrouter"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode auth status");
+
+    assert!(
+        status_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&status_output.stdout),
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+    let status_stdout = String::from_utf8(status_output.stdout).expect("stdout must be utf8");
+    assert!(status_stdout.contains("credential=stored:api_key"));
+}
+
+#[test]
+fn auth_login_from_env_requires_provider() {
+    let output = Command::new(rustcode_bin())
+        .args(["auth", "login", "--from-env", "RUSTCODE_TEST_KEY"])
+        .output()
+        .expect("must run rustcode auth login");
+
+    assert!(!output.status.success(), "command should fail");
+    let stderr = String::from_utf8(output.stderr).expect("stderr must be utf8");
+    assert!(stderr.contains("`--from-env` requires a provider"));
+}
+
+#[test]
 fn models_command_reads_custom_models_index() {
     let models_path = make_temp_file_path("models-index");
     std::fs::write(
