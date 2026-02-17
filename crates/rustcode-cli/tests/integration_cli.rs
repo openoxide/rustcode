@@ -298,6 +298,8 @@ fn auth_login_gitlab_browser_requires_client_id() {
             "gitlab",
             "--method",
             "oauth_browser",
+            "--domain",
+            "gitlab.example.com",
             "--no-wait",
         ])
         .output()
@@ -305,7 +307,38 @@ fn auth_login_gitlab_browser_requires_client_id() {
 
     assert!(!output.status.success(), "command should fail");
     let stderr = String::from_utf8(output.stderr).expect("stderr must be utf8");
-    assert!(stderr.contains("GITLAB_OAUTH_CLIENT_ID"));
+    assert!(
+        stderr.contains("GITLAB_OAUTH_CLIENT_ID"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
+fn auth_login_gitlab_dot_com_browser_no_wait_uses_bundled_client_id() {
+    let output = Command::new(rustcode_bin())
+        .args([
+            "auth",
+            "login",
+            "gitlab",
+            "--method",
+            "oauth_browser",
+            "--oauth-port",
+            "19081",
+            "--no-wait",
+        ])
+        .output()
+        .expect("must run rustcode auth login gitlab");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains("provider=gitlab"));
+    assert!(stdout.contains("authorize_url=https://gitlab.com/oauth/authorize"));
+    assert!(stdout.contains("status=awaiting_browser_callback"));
 }
 
 #[test]

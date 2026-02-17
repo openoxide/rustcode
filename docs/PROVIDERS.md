@@ -90,7 +90,9 @@ For OAuth-capable providers:
 rustcode auth login openai
 rustcode auth login openai --method oauth_browser --oauth-port 1455
 rustcode auth login github-copilot
-GITLAB_OAUTH_CLIENT_ID=... rustcode auth login gitlab --method oauth_browser
+rustcode auth login gitlab --method oauth_browser
+# self-hosted GitLab:
+GITLAB_OAUTH_CLIENT_ID=... rustcode auth login gitlab --method oauth_browser --domain gitlab.example.com
 ```
 
 `auth login` supports method negotiation:

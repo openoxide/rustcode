@@ -464,6 +464,23 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `models_json_summary_is_parseable`
     - `models_json_provider_detail_includes_models_array`
 
+25. GitLab OAuth Defaults Parity (OpenCode-aligned)
+- Status: completed
+- Deliverables:
+  - Updated GitLab browser OAuth client-id resolution:
+    - `gitlab.com` defaults to bundled OpenCode-compatible client ID.
+    - self-hosted domains now require `GITLAB_OAUTH_CLIENT_ID`.
+  - Removed unconditional CLI requirement for `GITLAB_OAUTH_CLIENT_ID`; enforcement now depends on domain.
+  - Added test coverage for both default and self-hosted-required paths.
+  - Updated provider/credential docs to reflect conditional client-id requirements.
+- Validation:
+  - Pass: `cargo test -p rustcode-auth -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: live CLI probes:
+    - `rustcode auth login gitlab --method oauth_browser --no-wait --oauth-port 18080` (gitlab.com bundled client ID)
+    - `rustcode auth login gitlab --method oauth_browser --domain gitlab.example.com --no-wait` (fails with missing `GITLAB_OAUTH_CLIENT_ID`)
+    - `GITLAB_OAUTH_CLIENT_ID=test-app-id rustcode auth login gitlab --method oauth_browser --domain gitlab.example.com --no-wait` (self-hosted path succeeds)
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -498,7 +515,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
-2. Align GitLab OAuth browser defaults with opencode behavior for gitlab.com vs self-hosted app credentials.
+2. Add explicit provider-auth source selection UX for `auth login` (OAuth vs API key) with parity-oriented prompts.
 3. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 
 ## Update Log
@@ -737,6 +754,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - provider auto-selection now evaluates backend policy weights and credential availability.
     - diagnostics and `models` output include `policy_score`, `policy_selected`, `policy_available`.
     - validated with new llm unit tests, updated CLI integration tests, and full CI matrix.
+  - Completed Milestone 25 GitLab OAuth defaults parity:
+    - `gitlab.com` browser OAuth now uses bundled OpenCode-compatible client ID by default.
+    - self-hosted GitLab domains explicitly require `GITLAB_OAUTH_CLIENT_ID`.
+    - updated credential/provider docs and added integration + unit coverage for both branches.
   - Completed Milestone 21 OAuth credential runtime consumption:
     - `rustcode-llm` now resolves OAuth access tokens from auth store when env/config keys are absent.
     - added unit coverage for OAuth fallback (`resolves_oauth_access_from_auth_store_when_env_missing`).

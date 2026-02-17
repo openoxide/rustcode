@@ -306,9 +306,7 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
                             domain
                                 .or_else(|| std::env::var("GITLAB_INSTANCE_URL").ok())
                                 .unwrap_or_else(|| "gitlab.com".to_string()),
-                            Some(std::env::var("GITLAB_OAUTH_CLIENT_ID").with_context(|| {
-                                "environment variable GITLAB_OAUTH_CLIENT_ID is required for gitlab browser oauth; set it from your GitLab OAuth app"
-                            })?),
+                            std::env::var("GITLAB_OAUTH_CLIENT_ID").ok(),
                             std::env::var("GITLAB_OAUTH_CLIENT_SECRET").ok(),
                         ),
                         "openai" => (
@@ -323,9 +321,18 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
                                 )
                             })?;
                             if !write_stdout_line(&format!("provider={provider}"))?
-                                || !write_stdout_line(&format!("method={}", selected_method.as_str()))?
-                                || !write_stdout_line(&format!("authorize_url={}", hint.authorize_url))?
-                                || !write_stdout_line(&format!("instructions={}", hint.instructions))?
+                                || !write_stdout_line(&format!(
+                                    "method={}",
+                                    selected_method.as_str()
+                                ))?
+                                || !write_stdout_line(&format!(
+                                    "authorize_url={}",
+                                    hint.authorize_url
+                                ))?
+                                || !write_stdout_line(&format!(
+                                    "instructions={}",
+                                    hint.instructions
+                                ))?
                             {
                                 return Ok(());
                             }

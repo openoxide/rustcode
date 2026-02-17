@@ -403,6 +403,8 @@ struct GitlabTokenExchangeResponse {
 const OPENAI_ISSUER: &str = "https://auth.openai.com";
 const OPENAI_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const GITHUB_CLIENT_ID: &str = "Ov23li8tweQw6odWQebz";
+const GITLAB_BUNDLED_CLIENT_ID: &str =
+    "1d89f9fdb23ee96d4e603201f6861dab6e143c5c3c00469a018a2d94bdc03d4e";
 const GITLAB_DEFAULT_SCOPES: &str = "api read_user read_repository";
 const OPENAI_BROWSER_SCOPES: &str = "openid profile email offline_access";
 const GITLAB_OAUTH_CALLBACK_PATH: &str = "/callback";
@@ -711,16 +713,6 @@ fn start_gitlab_browser_oauth_flow(
     client_id: Option<&str>,
     callback_port: u16,
 ) -> Result<BrowserOAuthFlowStart, AuthError> {
-    let client_id = client_id.ok_or_else(|| {
-        AuthError::Validation(
-            "gitlab oauth client id is required to start browser oauth flow".to_string(),
-        )
-    })?;
-    if client_id.trim().is_empty() {
-        return Err(AuthError::Validation(
-            "gitlab oauth client id must not be empty".to_string(),
-        ));
-    }
     if callback_port == 0 {
         return Err(AuthError::Validation(
             "oauth callback port must be between 1 and 65535".to_string(),
@@ -728,6 +720,18 @@ fn start_gitlab_browser_oauth_flow(
     }
 
     let normalized_domain = normalize_domain(domain.unwrap_or("gitlab.com"))?;
+    let is_gitlab_dot_com = normalized_domain.eq_ignore_ascii_case("gitlab.com");
+    let client_id = client_id.map(str::trim).filter(|value| !value.is_empty());
+    let resolved_client_id = match (client_id, is_gitlab_dot_com) {
+        (Some(value), _) => value.to_string(),
+        (None, true) => GITLAB_BUNDLED_CLIENT_ID.to_string(),
+        (None, false) => {
+            return Err(AuthError::Validation(
+                "gitlab browser oauth for self-hosted domains requires GITLAB_OAUTH_CLIENT_ID"
+                    .to_string(),
+            ))
+        }
+    };
     let redirect_uri = format!("http://127.0.0.1:{callback_port}{GITLAB_OAUTH_CALLBACK_PATH}");
     let state = generate_oauth_state();
     let code_verifier = generate_code_verifier();
@@ -740,7 +744,7 @@ fn start_gitlab_browser_oauth_flow(
 
     {
         let mut query = authorize_url.query_pairs_mut();
-        query.append_pair("client_id", client_id);
+        query.append_pair("client_id", &resolved_client_id);
         query.append_pair("redirect_uri", &redirect_uri);
         query.append_pair("response_type", "code");
         query.append_pair("scope", GITLAB_DEFAULT_SCOPES);
@@ -754,7 +758,7 @@ fn start_gitlab_browser_oauth_flow(
         domain: normalized_domain,
         authorize_url: authorize_url.to_string(),
         redirect_uri,
-        client_id: client_id.to_string(),
+        client_id: resolved_client_id,
         state,
         code_verifier,
     })
@@ -1293,6 +1297,28 @@ mod tests {
             .authorize_url
             .contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"));
         assert!(flow.authorize_url.contains("code_challenge_method=S256"));
+    }
+
+    #[tokio::test]
+    async fn gitlab_browser_flow_uses_bundled_client_id_for_gitlab_com() {
+        let flow = start_browser_oauth_flow("gitlab", None, None, 1456)
+            .await
+            .expect("gitlab.com browser flow should start");
+        let authorize_url =
+            reqwest::Url::parse(&flow.authorize_url).expect("authorize url should parse");
+        let client_id = authorize_url
+            .query_pairs()
+            .find_map(|(key, value)| (key == "client_id").then(|| value.into_owned()))
+            .expect("client_id query parameter should exist");
+        assert_eq!(client_id, GITLAB_BUNDLED_CLIENT_ID);
+    }
+
+    #[tokio::test]
+    async fn gitlab_browser_flow_requires_client_id_for_self_hosted() {
+        let error = start_browser_oauth_flow("gitlab", Some("gitlab.example.com"), None, 1457)
+            .await
+            .expect_err("self-hosted gitlab flow should require client id");
+        assert!(error.to_string().contains("GITLAB_OAUTH_CLIENT_ID"));
     }
 
     #[test]

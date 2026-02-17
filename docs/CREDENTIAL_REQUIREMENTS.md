@@ -18,7 +18,7 @@ This document is the single source of truth for runtime credentials required by 
 | `github-copilot` | `oauth_device_code` | none | `--domain` for enterprise variants | Uses built-in Copilot client ID `Ov23li8tweQw6odWQebz`. |
 | `github-copilot-enterprise` | `oauth_device_code` | none | `--domain` recommended | Domain should target enterprise host. |
 | `github-copilot` / `github-copilot-enterprise` | `api_key` | `--from-env <ENV_VAR>` value | none | Manual token mode. |
-| `gitlab` | `oauth_browser` | `GITLAB_OAUTH_CLIENT_ID` | `GITLAB_OAUTH_CLIENT_SECRET`, `GITLAB_INSTANCE_URL` | Uses PKCE + localhost callback + `/oauth/token`. |
+| `gitlab` | `oauth_browser` | none for `gitlab.com`; `GITLAB_OAUTH_CLIENT_ID` for self-hosted instances | `GITLAB_OAUTH_CLIENT_SECRET`, `GITLAB_INSTANCE_URL` | Uses PKCE + localhost callback + `/oauth/token`; defaults to bundled OpenCode-compatible client ID on `gitlab.com`. |
 | `gitlab` | `api_key` | `--from-env <ENV_VAR>` value | none | Personal Access Token mode. |
 | any provider | `api_key` | `--from-env <ENV_VAR>` value | none | Generic fallback. |
 
@@ -26,7 +26,7 @@ This document is the single source of truth for runtime credentials required by 
 
 Ask the user for these before running live external auth validation:
 
-- `GITLAB_OAUTH_CLIENT_ID` for GitLab browser OAuth.
+- `GITLAB_OAUTH_CLIENT_ID` for self-hosted GitLab browser OAuth.
 - `GITLAB_OAUTH_CLIENT_SECRET` when their app configuration requires it.
 - Provider-specific API keys when validating `--from-env` auth paths against real endpoints.
 
