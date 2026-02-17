@@ -7,9 +7,10 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result};
 use clap::Parser;
 use rustcode_auth::{
-    complete_browser_oauth_flow, discover_mcp_oauth, known_oauth_providers, methods_for_provider,
-    oauth_login_hint, poll_device_code_flow_for_credential, start_browser_oauth_flow,
-    start_device_code_flow, AuthMethod, AuthStore, StoredCredential,
+    complete_browser_oauth_flow, complete_mcp_browser_oauth_flow, discover_mcp_oauth,
+    known_oauth_providers, methods_for_provider, oauth_login_hint,
+    poll_device_code_flow_for_credential, start_browser_oauth_flow, start_device_code_flow,
+    start_mcp_browser_oauth_flow, AuthMethod, AuthStore, StoredCredential,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -818,10 +819,20 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
         McpCommand::Login {
             name,
             from_env,
+            method,
             scopes,
             url,
+            oauth_port,
+            no_wait,
+            timeout_secs,
+            client_id,
+            client_secret_env,
         } => {
+            let selected_method = resolve_mcp_login_method(method.as_deref())?;
             if let Some(from_env) = from_env {
+                if selected_method == McpLoginMethod::OAuthBrowser {
+                    anyhow::bail!("--from-env cannot be combined with --method oauth_browser");
+                }
                 let token = std::env::var(&from_env).with_context(|| {
                     format!(
                         "environment variable {from_env} is not set; cannot store MCP credential"
@@ -835,6 +846,7 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
                         "schema_version": 1,
                         "command": "mcp.login",
                         "name": name,
+                        "method": selected_method.as_str(),
                         "stage": "authorized",
                         "source": "env",
                         "credential": "stored:api_key",
@@ -860,9 +872,9 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
                 return Ok(());
             }
 
-            let resolved_url =
-                resolve_mcp_login_url(&name, url.as_deref(), configured_servers.get(&name))
-                    .context("failed to resolve MCP login URL")?;
+            let configured_server = configured_servers.get(&name);
+            let resolved_url = resolve_mcp_login_url(&name, url.as_deref(), configured_server)
+                .context("failed to resolve MCP login URL")?;
 
             let discovery = discover_mcp_oauth(&resolved_url).await?;
             if !discovery.supported {
@@ -876,6 +888,7 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
                     "schema_version": 1,
                     "command": "mcp.login",
                     "name": name,
+                    "method": selected_method.as_str(),
                     "stage": "oauth_discovered",
                     "url": resolved_url,
                     "metadata_url": discovery.metadata_url,
@@ -889,23 +902,8 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
                 )? {
                     return Ok(());
                 }
-                let awaiting = serde_json::json!({
-                    "schema_version": 1,
-                    "command": "mcp.login",
-                    "name": name,
-                    "stage": "awaiting_token_import",
-                    "usage": "rustcode mcp login <name> --from-env <ENV_VAR>",
-                });
-                if !write_stdout_line(
-                    &serde_json::to_string(&awaiting)
-                        .context("failed to serialize mcp login json")?,
-                )? {
-                    return Ok(());
-                }
-                return Ok(());
-            }
-
-            if !write_stdout_line(&format!("name={name}"))?
+            } else if !write_stdout_line(&format!("name={name}"))?
+                || !write_stdout_line(&format!("method={}", selected_method.as_str()))?
                 || !write_stdout_line("stage=oauth_discovered")?
                 || !write_stdout_line(&format!("url={resolved_url}"))?
                 || !write_stdout_line(&format!(
@@ -929,10 +927,167 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
             if !scopes.is_empty() && !write_stdout_line(&format!("scopes={}", scopes.join(",")))? {
                 return Ok(());
             }
-            if !write_stdout_line("stage=awaiting_token_import")?
-                || !write_stdout_line("usage=rustcode mcp login <name> --from-env <ENV_VAR>")?
-            {
-                return Ok(());
+
+            match selected_method {
+                McpLoginMethod::TokenImport => {
+                    if json_output {
+                        let awaiting = serde_json::json!({
+                            "schema_version": 1,
+                            "command": "mcp.login",
+                            "name": name,
+                            "method": selected_method.as_str(),
+                            "stage": "awaiting_token_import",
+                            "usage": "rustcode mcp login <name> --from-env <ENV_VAR>",
+                        });
+                        if !write_stdout_line(
+                            &serde_json::to_string(&awaiting)
+                                .context("failed to serialize mcp login json")?,
+                        )? {
+                            return Ok(());
+                        }
+                        return Ok(());
+                    }
+
+                    if !write_stdout_line("stage=awaiting_token_import")?
+                        || !write_stdout_line(
+                            "usage=rustcode mcp login <name> --from-env <ENV_VAR>",
+                        )?
+                    {
+                        return Ok(());
+                    }
+                }
+                McpLoginMethod::OAuthBrowser => {
+                    let oauth_client_id = resolve_mcp_oauth_client_id(
+                        client_id.as_deref(),
+                        configured_server.and_then(McpConfigEntry::oauth_client_id),
+                    )?;
+                    let oauth_client_secret = resolve_mcp_oauth_client_secret(
+                        client_secret_env.as_deref(),
+                        configured_server.and_then(McpConfigEntry::oauth_client_secret_env),
+                    )?;
+                    let flow = start_mcp_browser_oauth_flow(
+                        &name,
+                        &resolved_url,
+                        &discovery,
+                        &oauth_client_id,
+                        oauth_port,
+                        &scopes,
+                    )?;
+
+                    if json_output {
+                        let challenge = serde_json::json!({
+                            "schema_version": 1,
+                            "command": "mcp.login",
+                            "name": name,
+                            "method": selected_method.as_str(),
+                            "stage": "challenge",
+                            "url": resolved_url,
+                            "authorize_url": flow.authorize_url,
+                            "redirect_uri": flow.redirect_uri,
+                            "oauth_port": oauth_port,
+                        });
+                        if !write_stdout_line(
+                            &serde_json::to_string(&challenge)
+                                .context("failed to serialize mcp login json")?,
+                        )? {
+                            return Ok(());
+                        }
+                    } else if !write_stdout_line("stage=challenge")?
+                        || !write_stdout_line(&format!("authorize_url={}", flow.authorize_url))?
+                        || !write_stdout_line(&format!("redirect_uri={}", flow.redirect_uri))?
+                        || !write_stdout_line(&format!("oauth_port={oauth_port}"))?
+                    {
+                        return Ok(());
+                    }
+
+                    if no_wait {
+                        if json_output {
+                            let awaiting = serde_json::json!({
+                                "schema_version": 1,
+                                "command": "mcp.login",
+                                "name": name,
+                                "method": selected_method.as_str(),
+                                "stage": "awaiting_browser_callback",
+                            });
+                            if !write_stdout_line(
+                                &serde_json::to_string(&awaiting)
+                                    .context("failed to serialize mcp login json")?,
+                            )? {
+                                return Ok(());
+                            }
+                            return Ok(());
+                        }
+                        if !write_stdout_line("stage=awaiting_browser_callback")? {
+                            return Ok(());
+                        }
+                        return Ok(());
+                    }
+
+                    if json_output {
+                        let waiting = serde_json::json!({
+                            "schema_version": 1,
+                            "command": "mcp.login",
+                            "name": name,
+                            "method": selected_method.as_str(),
+                            "stage": "waiting_for_callback",
+                        });
+                        if !write_stdout_line(
+                            &serde_json::to_string(&waiting)
+                                .context("failed to serialize mcp login json")?,
+                        )? {
+                            return Ok(());
+                        }
+                    } else if !write_stdout_line("stage=waiting_for_callback")? {
+                        return Ok(());
+                    }
+
+                    let timeout = Duration::from_secs(timeout_secs.max(1));
+                    let credential = complete_mcp_browser_oauth_flow(
+                        &flow,
+                        timeout,
+                        oauth_client_secret.as_deref(),
+                    )
+                    .await?;
+                    let key = mcp_store_key(&name);
+                    let expires_at_unix = credential.expires_in_secs.map(|secs| {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|now| now.as_secs().saturating_add(secs) as i64)
+                            .unwrap_or(secs as i64)
+                    });
+                    store.set_oauth(
+                        &key,
+                        &credential.access_token,
+                        credential.refresh_token.as_deref(),
+                        expires_at_unix,
+                        credential.account_id.as_deref(),
+                    )?;
+                    if json_output {
+                        let payload = serde_json::json!({
+                            "schema_version": 1,
+                            "command": "mcp.login",
+                            "name": name,
+                            "method": selected_method.as_str(),
+                            "stage": "authorized",
+                            "credential": "stored:oauth",
+                            "auth_file": store.path().display().to_string(),
+                        });
+                        if !write_stdout_line(
+                            &serde_json::to_string(&payload)
+                                .context("failed to serialize mcp login json")?,
+                        )? {
+                            return Ok(());
+                        }
+                        return Ok(());
+                    }
+
+                    if !write_stdout_line("stage=authorized")?
+                        || !write_stdout_line("credential=stored:oauth")?
+                        || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+                    {
+                        return Ok(());
+                    }
+                }
             }
         }
         McpCommand::Logout { name } => {
@@ -971,12 +1126,70 @@ struct McpConfigEntry {
     #[serde(default)]
     url: Option<String>,
     #[serde(default)]
-    oauth: Option<bool>,
+    oauth: Option<McpOAuthConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum McpOAuthConfig {
+    Enabled(bool),
+    Settings(McpOAuthSettings),
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct McpOAuthSettings {
+    #[serde(default)]
+    enabled: Option<bool>,
+    #[serde(default)]
+    client_id: Option<String>,
+    #[serde(default)]
+    client_secret_env: Option<String>,
 }
 
 impl McpConfigEntry {
     fn oauth_enabled(&self) -> bool {
-        self.oauth.unwrap_or(true)
+        match &self.oauth {
+            None => true,
+            Some(McpOAuthConfig::Enabled(enabled)) => *enabled,
+            Some(McpOAuthConfig::Settings(settings)) => settings.enabled.unwrap_or(true),
+        }
+    }
+
+    fn oauth_client_id(&self) -> Option<&str> {
+        match &self.oauth {
+            Some(McpOAuthConfig::Settings(settings)) => settings.client_id.as_deref(),
+            _ => None,
+        }
+    }
+
+    fn oauth_client_secret_env(&self) -> Option<&str> {
+        match &self.oauth {
+            Some(McpOAuthConfig::Settings(settings)) => settings.client_secret_env.as_deref(),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum McpLoginMethod {
+    TokenImport,
+    OAuthBrowser,
+}
+
+impl McpLoginMethod {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::TokenImport => "token_import",
+            Self::OAuthBrowser => "oauth_browser",
+        }
+    }
+}
+
+fn resolve_mcp_login_method(raw: Option<&str>) -> Result<McpLoginMethod> {
+    match raw.unwrap_or("token_import") {
+        "token_import" => Ok(McpLoginMethod::TokenImport),
+        "oauth_browser" => Ok(McpLoginMethod::OAuthBrowser),
+        other => anyhow::bail!("unsupported mcp login method: {other}"),
     }
 }
 
@@ -998,6 +1211,64 @@ fn resolve_mcp_login_url(
         anyhow::bail!("configured MCP server `{name}` is missing `url`");
     }
     anyhow::bail!("MCP login requires either --from-env <ENV_VAR>, --url <MCP_URL>, or a configured MCP server URL")
+}
+
+fn resolve_mcp_oauth_client_id(
+    cli_client_id: Option<&str>,
+    configured_client_id: Option<&str>,
+) -> Result<String> {
+    if let Some(client_id) = cli_client_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(client_id.to_string());
+    }
+    if let Some(client_id) = configured_client_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        return Ok(client_id.to_string());
+    }
+    if let Ok(client_id) = std::env::var("RUSTCODE_MCP_OAUTH_CLIENT_ID") {
+        let trimmed = client_id.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+    anyhow::bail!(
+        "mcp oauth browser login requires --client-id, configured oauth.client_id, or RUSTCODE_MCP_OAUTH_CLIENT_ID"
+    )
+}
+
+fn resolve_mcp_oauth_client_secret(
+    cli_secret_env: Option<&str>,
+    configured_secret_env: Option<&str>,
+) -> Result<Option<String>> {
+    if let Some(name) = cli_secret_env
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let value = std::env::var(name).with_context(|| {
+            format!("environment variable {name} is not set for MCP client secret")
+        })?;
+        return Ok(Some(value));
+    }
+    if let Some(name) = configured_secret_env
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let value = std::env::var(name).with_context(|| {
+            format!("environment variable {name} is not set for MCP client secret")
+        })?;
+        return Ok(Some(value));
+    }
+    if let Ok(value) = std::env::var("RUSTCODE_MCP_OAUTH_CLIENT_SECRET") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            return Ok(Some(trimmed.to_string()));
+        }
+    }
+    Ok(None)
 }
 
 fn load_mcp_servers_config() -> Result<BTreeMap<String, McpConfigEntry>> {
@@ -1075,6 +1346,13 @@ fn classify_auth_error(err: &anyhow::Error) -> &'static str {
 
 fn classify_mcp_error(err: &anyhow::Error) -> &'static str {
     let msg = err.to_string().to_ascii_lowercase();
+    if msg.contains("requires --client-id")
+        || msg.contains("cannot be combined")
+        || msg.contains("requires either --from-env")
+        || msg.contains("failed to resolve mcp login url")
+    {
+        return "validation";
+    }
     if msg.contains("network")
         || msg.contains("timed out")
         || msg.contains("timeout")

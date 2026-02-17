@@ -131,10 +131,22 @@ pub enum McpCommand {
         name: String,
         #[arg(long = "from-env")]
         from_env: Option<String>,
+        #[arg(long = "method", value_parser = ["token_import", "oauth_browser"])]
+        method: Option<String>,
         #[arg(long, value_delimiter = ',', value_name = "SCOPE,SCOPE")]
         scopes: Vec<String>,
         #[arg(long)]
         url: Option<String>,
+        #[arg(long = "oauth-port", default_value_t = 8788)]
+        oauth_port: u16,
+        #[arg(long, default_value_t = false)]
+        no_wait: bool,
+        #[arg(long, default_value_t = 300)]
+        timeout_secs: u64,
+        #[arg(long = "client-id")]
+        client_id: Option<String>,
+        #[arg(long = "client-secret-env")]
+        client_secret_env: Option<String>,
     },
     Logout {
         name: String,
@@ -452,10 +464,21 @@ mod tests {
             "github",
             "--from-env",
             "RUSTCODE_MCP_TOKEN",
+            "--method",
+            "oauth_browser",
             "--scopes",
             "read,write",
             "--url",
             "https://example.com/mcp",
+            "--oauth-port",
+            "19001",
+            "--no-wait",
+            "--timeout-secs",
+            "45",
+            "--client-id",
+            "client-123",
+            "--client-secret-env",
+            "MCP_CLIENT_SECRET",
         ])
         .expect("cli should parse");
 
@@ -465,14 +488,26 @@ mod tests {
                     McpCommand::Login {
                         name,
                         from_env,
+                        method,
                         scopes,
                         url,
+                        oauth_port,
+                        no_wait,
+                        timeout_secs,
+                        client_id,
+                        client_secret_env,
                     },
             } => {
                 assert_eq!(name, "github");
                 assert_eq!(from_env.as_deref(), Some("RUSTCODE_MCP_TOKEN"));
+                assert_eq!(method.as_deref(), Some("oauth_browser"));
                 assert_eq!(scopes, vec!["read", "write"]);
                 assert_eq!(url.as_deref(), Some("https://example.com/mcp"));
+                assert_eq!(oauth_port, 19001);
+                assert!(no_wait);
+                assert_eq!(timeout_secs, 45);
+                assert_eq!(client_id.as_deref(), Some("client-123"));
+                assert_eq!(client_secret_env.as_deref(), Some("MCP_CLIENT_SECRET"));
             }
             _ => panic!("expected mcp login command"),
         }

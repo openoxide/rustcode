@@ -767,16 +767,40 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode-cli -- --json mcp login readonly` returns actionable validation error for `oauth=false`.
 
 40. MCP OAuth Callback + Token Exchange
-- Status: in progress
+- Status: completed
 - Deliverables:
   - Add real MCP OAuth browser callback/token exchange path beyond discovery/import hints.
   - Persist MCP OAuth tokens in auth store with explicit schema and expiry handling.
   - Add staged JSON contracts for callback-wait, token-received, persisted, and failure states.
   - Ensure cancellation and timeout behavior is explicit and test-covered.
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test -p rustcode-auth -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: tests:
+    - `rustcode-auth`:
+      - `mcp_browser_flow_requires_oauth_endpoints`
+      - `mcp_browser_flow_round_trip_with_mock_token_exchange`
+    - `rustcode-cli`:
+      - `mcp_login_oauth_browser_no_wait_json_emits_stage_sequence`
+      - `mcp_login_oauth_browser_uses_configured_client_id`
+      - `mcp_login_oauth_browser_requires_client_id_json_envelope`
+  - Pass: live CLI probes:
+    - `cargo run -q -p rustcode-cli -- --json mcp login github --method oauth_browser --url https://accounts.google.com --client-id live-client --no-wait --oauth-port 19442`
+    - `cargo run -q -p rustcode-cli -- --json mcp login github --url https://accounts.google.com`
+  - Note: full live callback completion against a third-party MCP provider still requires user-provided app credentials.
+
+41. Layered MCP Config Integration
+- Status: in progress
+- Deliverables:
+  - Move MCP server definitions from JSON sidecar fallback into layered `rustcode-config` resolution (global/user/project trust model).
+  - Keep `RUSTCODE_MCP_SERVERS_PATH` fallback for compatibility while preferring resolved config state.
+  - Add schema validation and diagnostics for MCP config fields (`url`, `oauth`, client-id/client-secret env references).
+  - Ensure MCP config loading shares precedence semantics with existing LLM/plugin config paths.
 - Validation target:
-  - `cargo test -p rustcode-auth -p rustcode-cli`
+  - `cargo test -p rustcode-config -p rustcode-cli`
   - `./scripts/ci_matrix.sh`
-  - live flow probe against a real OAuth-capable MCP endpoint (or user-provided app credentials when required)
+  - live `mcp list/login` probes with global/user/project overrides
 
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
@@ -813,11 +837,52 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 ## Next Action Queue
 1. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 2. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
-3. Implement MCP OAuth callback/token-exchange flow (beyond discovery/import) with explicit staged events and cancellation handling.
+3. Run a full live MCP OAuth callback completion against a user-provided OAuth-capable MCP app/client registration.
 4. Fold MCP server definitions into layered `rustcode-config` TOML resolution (global/user/project trust model) so MCP config is not JSON-sidecar-only.
 
 ## Update Log
 - 2026-02-17:
+  - Started Milestone 41 layered MCP config integration:
+    - next slice targets moving MCP server resolution into `rustcode-config` layered precedence.
+  - Milestone 41 start references (code + docs):
+    - `opencode/packages/opencode/src/config/config.ts`
+    - `opencode/packages/opencode/src/cli/cmd/mcp.ts`
+    - `codex/codex-rs/core/src/config/mod.rs`
+    - `codex/codex-rs/cli/src/mcp_cmd.rs`
+    - `https://opencode.ai/docs`
+    - `https://developers.openai.com/codex/`
+  - Completed Milestone 40 MCP OAuth callback + token exchange:
+    - added MCP browser OAuth start/completion primitives in `rustcode-auth`.
+    - implemented PKCE callback/token exchange path for MCP OAuth and added mock round-trip unit coverage.
+    - added MCP login method routing:
+      - `token_import` (default)
+      - `oauth_browser` (new)
+    - added MCP login browser flags:
+      - `--method oauth_browser`
+      - `--oauth-port`
+      - `--no-wait`
+      - `--timeout-secs`
+      - `--client-id`
+      - `--client-secret-env`
+    - added MCP config `oauth` object support:
+      - `enabled`
+      - `client_id`
+      - `client_secret_env`
+    - updated credentials matrix doc for MCP OAuth client credential requirements.
+  - Milestone 40 references (code + docs):
+    - `opencode/packages/opencode/src/cli/cmd/mcp.ts`
+    - `opencode/packages/opencode/src/mcp/index.ts`
+    - `codex/codex-rs/cli/src/mcp_cmd.rs`
+    - `codex/codex-rs/rmcp-client/src/auth_status.rs`
+    - `https://opencode.ai/docs`
+    - `https://developers.openai.com/codex/`
+  - Validation passed:
+    - `cargo fmt --all`
+    - `cargo test -p rustcode-auth -p rustcode-cli`
+    - `./scripts/ci_matrix.sh`
+    - live probes:
+      - `cargo run -q -p rustcode-cli -- --json mcp login github --method oauth_browser --url https://accounts.google.com --client-id live-client --no-wait --oauth-port 19442`
+      - `cargo run -q -p rustcode-cli -- --json mcp login github --url https://accounts.google.com`
   - Started Milestone 40 MCP OAuth callback + token exchange:
     - implementation target set for full MCP OAuth completion path (callback listener, token exchange, token persistence).
   - Milestone 40 start references (code + docs):

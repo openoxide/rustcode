@@ -409,6 +409,21 @@ pub struct BrowserOAuthFlowStart {
     code_verifier: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpBrowserOAuthFlowStart {
+    pub server_name: String,
+    pub server_url: String,
+    pub authorize_url: String,
+    pub redirect_uri: String,
+    pub metadata_url: Option<String>,
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
+    pub scopes: Vec<String>,
+    client_id: String,
+    state: String,
+    code_verifier: String,
+}
+
 pub async fn start_browser_oauth_flow(
     provider: &str,
     domain: Option<&str>,
@@ -436,6 +451,132 @@ pub async fn complete_browser_oauth_flow(
             "provider {other} does not support browser oauth completion"
         ))),
     }
+}
+
+pub fn start_mcp_browser_oauth_flow(
+    server_name: &str,
+    server_url: &str,
+    discovery: &McpOAuthDiscovery,
+    client_id: &str,
+    callback_port: u16,
+    scopes: &[String],
+) -> Result<McpBrowserOAuthFlowStart, AuthError> {
+    if callback_port == 0 {
+        return Err(AuthError::Validation(
+            "oauth callback port must be between 1 and 65535".to_string(),
+        ));
+    }
+    let client_id = client_id.trim();
+    if client_id.is_empty() {
+        return Err(AuthError::Validation(
+            "mcp oauth browser flow requires a non-empty client_id".to_string(),
+        ));
+    }
+    if !discovery.supported {
+        return Err(AuthError::Validation(
+            "mcp oauth discovery did not include authorization/token endpoints".to_string(),
+        ));
+    }
+    let authorization_endpoint = discovery.authorization_endpoint.clone().ok_or_else(|| {
+        AuthError::Validation("mcp oauth metadata is missing authorization_endpoint".to_string())
+    })?;
+    let token_endpoint = discovery.token_endpoint.clone().ok_or_else(|| {
+        AuthError::Validation("mcp oauth metadata is missing token_endpoint".to_string())
+    })?;
+
+    let redirect_uri = format!("http://127.0.0.1:{callback_port}{MCP_OAUTH_CALLBACK_PATH}");
+    let state = generate_oauth_state();
+    let code_verifier = generate_code_verifier();
+    let code_challenge = generate_pkce_code_challenge(&code_verifier);
+
+    let mut authorize_url = reqwest::Url::parse(&authorization_endpoint).map_err(|err| {
+        AuthError::Validation(format!("invalid mcp oauth authorize endpoint: {err}"))
+    })?;
+    {
+        let mut query = authorize_url.query_pairs_mut();
+        query.append_pair("response_type", "code");
+        query.append_pair("client_id", client_id);
+        query.append_pair("redirect_uri", &redirect_uri);
+        if !scopes.is_empty() {
+            query.append_pair("scope", &scopes.join(" "));
+        }
+        query.append_pair("state", &state);
+        query.append_pair("code_challenge", &code_challenge);
+        query.append_pair("code_challenge_method", "S256");
+    }
+
+    Ok(McpBrowserOAuthFlowStart {
+        server_name: server_name.to_string(),
+        server_url: server_url.to_string(),
+        authorize_url: authorize_url.to_string(),
+        redirect_uri,
+        metadata_url: discovery.metadata_url.clone(),
+        authorization_endpoint,
+        token_endpoint,
+        scopes: scopes.to_vec(),
+        client_id: client_id.to_string(),
+        state,
+        code_verifier,
+    })
+}
+
+pub async fn complete_mcp_browser_oauth_flow(
+    flow: &McpBrowserOAuthFlowStart,
+    timeout: Duration,
+    client_secret: Option<&str>,
+) -> Result<DeviceCodeFlowCredential, AuthError> {
+    let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
+    let code = wait_for_oauth_callback(&callback, &flow.state, timeout).await?;
+
+    let client = reqwest::Client::new();
+    let mut form_params = BTreeMap::new();
+    form_params.insert("client_id".to_string(), flow.client_id.clone());
+    form_params.insert("code".to_string(), code);
+    form_params.insert("grant_type".to_string(), "authorization_code".to_string());
+    form_params.insert("redirect_uri".to_string(), flow.redirect_uri.clone());
+    form_params.insert("code_verifier".to_string(), flow.code_verifier.clone());
+    if let Some(secret) = client_secret.filter(|value| !value.trim().is_empty()) {
+        form_params.insert("client_secret".to_string(), secret.to_string());
+    }
+
+    let response = client
+        .post(&flow.token_endpoint)
+        .header("Accept", "application/json")
+        .form(&form_params)
+        .send()
+        .await
+        .map_err(|err| AuthError::Network(err.to_string()))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| AuthError::Network(err.to_string()))?;
+    if !status.is_success() {
+        return Err(AuthError::OAuthFailed(format!(
+            "mcp token exchange failed with {status}: {body}"
+        )));
+    }
+
+    let token: McpTokenExchangeResponse =
+        serde_json::from_str(&body).map_err(|err| AuthError::Parse(err.to_string()))?;
+    if let Some(error) = token.error.as_deref() {
+        let detail = token
+            .error_description
+            .as_deref()
+            .unwrap_or("mcp oauth exchange failed");
+        return Err(AuthError::OAuthFailed(format!("{error}: {detail}")));
+    }
+    let access_token = token.access_token.ok_or_else(|| {
+        AuthError::Parse("missing access_token in mcp oauth token response".to_string())
+    })?;
+
+    Ok(DeviceCodeFlowCredential {
+        access_token,
+        refresh_token: token.refresh_token,
+        expires_in_secs: token.expires_in,
+        account_id: None,
+    })
 }
 
 pub async fn poll_device_code_flow_for_credential(
@@ -502,6 +643,15 @@ struct GitlabTokenExchangeResponse {
     error_description: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct McpTokenExchangeResponse {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    expires_in: Option<u64>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
 const OPENAI_ISSUER: &str = "https://auth.openai.com";
 const OPENAI_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const GITHUB_CLIENT_ID: &str = "Ov23li8tweQw6odWQebz";
@@ -510,6 +660,7 @@ const GITLAB_BUNDLED_CLIENT_ID: &str =
 const GITLAB_DEFAULT_SCOPES: &str = "api read_user read_repository";
 const OPENAI_BROWSER_SCOPES: &str = "openid profile email offline_access";
 const GITLAB_OAUTH_CALLBACK_PATH: &str = "/callback";
+const MCP_OAUTH_CALLBACK_PATH: &str = "/auth/callback";
 const OPENAI_OAUTH_CALLBACK_PATH: &str = "/auth/callback";
 
 async fn start_github_device_code(
@@ -1386,6 +1537,106 @@ mod tests {
     }
 
     #[test]
+    fn mcp_browser_flow_requires_oauth_endpoints() {
+        let discovery = McpOAuthDiscovery {
+            supported: true,
+            metadata_url: None,
+            authorization_endpoint: None,
+            token_endpoint: None,
+        };
+        let error = start_mcp_browser_oauth_flow(
+            "github",
+            "https://example.com/mcp",
+            &discovery,
+            "client-123",
+            1458,
+            &[],
+        )
+        .expect_err("missing endpoints should fail");
+        assert!(error.to_string().contains("authorization_endpoint"));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn mcp_browser_flow_round_trip_with_mock_token_exchange() {
+        let Some(callback_port) = allocate_port() else {
+            eprintln!("skipping test: callback port bind is not permitted in this environment");
+            return;
+        };
+        let Some(token_port) = allocate_port() else {
+            eprintln!("skipping test: token port bind is not permitted in this environment");
+            return;
+        };
+        let token_endpoint = format!("http://127.0.0.1:{token_port}/oauth/token");
+        let authorize_endpoint = format!("http://127.0.0.1:{token_port}/oauth/authorize");
+        let discovery = McpOAuthDiscovery {
+            supported: true,
+            metadata_url: Some(format!(
+                "http://127.0.0.1:{token_port}/.well-known/oauth-authorization-server"
+            )),
+            authorization_endpoint: Some(authorize_endpoint),
+            token_endpoint: Some(token_endpoint),
+        };
+        let capture = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let capture_clone = capture.clone();
+        let Some(server) = spawn_mock_mcp_token_server(token_port, capture_clone) else {
+            eprintln!("skipping test: token server bind is not permitted in this environment");
+            return;
+        };
+
+        let flow = start_mcp_browser_oauth_flow(
+            "github",
+            "http://127.0.0.1:39443/mcp",
+            &discovery,
+            "client-123",
+            callback_port,
+            &["read".to_string(), "write".to_string()],
+        )
+        .expect("mcp browser flow should start");
+        assert_eq!(flow.server_name, "github");
+        assert_eq!(
+            flow.redirect_uri,
+            format!("http://127.0.0.1:{callback_port}/auth/callback")
+        );
+        let authorize_url =
+            reqwest::Url::parse(&flow.authorize_url).expect("authorize url should parse");
+        let state = authorize_url
+            .query_pairs()
+            .find_map(|(key, value)| (key == "state").then(|| value.into_owned()))
+            .expect("state query parameter should exist");
+        let scope = authorize_url
+            .query_pairs()
+            .find_map(|(key, value)| (key == "scope").then(|| value.into_owned()))
+            .expect("scope query parameter should exist");
+        assert_eq!(scope, "read write");
+
+        let redirect_uri = flow.redirect_uri.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let callback_url = format!("{redirect_uri}?code=mcp-auth-code&state={state}");
+            let _ = reqwest::get(callback_url).await;
+        });
+
+        let credential =
+            complete_mcp_browser_oauth_flow(&flow, Duration::from_secs(5), Some("shh"))
+                .await
+                .expect("flow should complete");
+        assert_eq!(credential.access_token, "mcp-access-token");
+        assert_eq!(
+            credential.refresh_token.as_deref(),
+            Some("mcp-refresh-token")
+        );
+        assert_eq!(credential.expires_in_secs, Some(3600));
+
+        server.join().expect("mock mcp server should join");
+        let body = capture.lock().expect("capture should lock").clone();
+        assert!(body.contains("grant_type=authorization_code"));
+        assert!(body.contains("client_id=client-123"));
+        assert!(body.contains("code=mcp-auth-code"));
+        assert!(body.contains("code_verifier="));
+        assert!(body.contains("client_secret=shh"));
+    }
+
+    #[test]
     fn normalizes_domain_for_device_flow() {
         assert_eq!(
             normalize_domain("https://github.com/").expect("must normalize"),
@@ -1570,6 +1821,38 @@ mod tests {
                 .lock()
                 .expect("body capture must lock for write") = body;
             let response_body = r#"{"access_token":"gitlab-access-token","refresh_token":"gitlab-refresh-token","expires_in":1800}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("must write token response");
+        }))
+    }
+
+    fn spawn_mock_mcp_token_server(
+        port: u16,
+        body_capture: std::sync::Arc<std::sync::Mutex<String>>,
+    ) -> Option<std::thread::JoinHandle<()>> {
+        let listener = match TcpListener::bind(("127.0.0.1", port)) {
+            Ok(listener) => listener,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return None,
+            Err(err) => panic!("must bind token port: {err}"),
+        };
+        Some(thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("must accept token request");
+            let request = read_http_request(&mut stream);
+            let body = request
+                .split("\r\n\r\n")
+                .nth(1)
+                .unwrap_or_default()
+                .to_string();
+            *body_capture
+                .lock()
+                .expect("body capture must lock for write") = body;
+            let response_body = r#"{"access_token":"mcp-access-token","refresh_token":"mcp-refresh-token","expires_in":3600}"#;
             let response = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
                 response_body.len(),
