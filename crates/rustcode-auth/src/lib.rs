@@ -153,6 +153,9 @@ impl AuthStore {
         }
         let raw = fs::read_to_string(&self.path)
             .map_err(|err| AuthError::Read(format!("{}: {err}", self.path.display())))?;
+        if raw.trim().is_empty() {
+            return Ok(AuthFile::default());
+        }
         serde_json::from_str::<AuthFile>(&raw)
             .map_err(|err| AuthError::Parse(format!("{}: {err}", self.path.display())))
     }
@@ -1221,6 +1224,15 @@ mod tests {
             }
             _ => panic!("expected oauth credential"),
         }
+    }
+
+    #[test]
+    fn empty_auth_file_is_treated_as_default_store() {
+        let path = make_temp_file_path("auth-empty-file");
+        std::fs::write(&path, "").expect("must write empty file");
+        let store = AuthStore::with_path(path);
+        let providers = store.providers().expect("providers should load");
+        assert!(providers.is_empty());
     }
 
     #[test]

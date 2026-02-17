@@ -241,8 +241,18 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
             }
             let provider = provider.expect("provider is checked").to_ascii_lowercase();
             let methods = methods_for_provider(&provider);
-            let selected_method = resolve_login_method(method.as_deref(), &methods)
-                .with_context(|| format!("unsupported auth method for provider={provider}"))?;
+            let selected_method = if from_env.is_some() && method.is_none() {
+                if methods.contains(&AuthMethod::ApiKey) {
+                    AuthMethod::ApiKey
+                } else {
+                    anyhow::bail!(
+                        "provider={provider} does not support api_key login via --from-env"
+                    );
+                }
+            } else {
+                resolve_login_method(method.as_deref(), &methods)
+                    .with_context(|| format!("unsupported auth method for provider={provider}"))?
+            };
 
             if let Some(env_name) = from_env {
                 if selected_method != AuthMethod::ApiKey {

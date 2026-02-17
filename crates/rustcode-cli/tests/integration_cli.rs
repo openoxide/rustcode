@@ -228,6 +228,48 @@ fn auth_login_from_env_stores_key() {
 }
 
 #[test]
+fn auth_login_from_env_defaults_to_api_key_for_openai() {
+    let auth_path = make_temp_file_path("auth-login-openai-set-key");
+
+    let login_output = Command::new(rustcode_bin())
+        .args([
+            "auth",
+            "login",
+            "openai",
+            "--from-env",
+            "RUSTCODE_OPENAI_KEY",
+        ])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_OPENAI_KEY", "openai-integration-secret")
+        .output()
+        .expect("must run rustcode auth login from env");
+
+    assert!(
+        login_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&login_output.stdout),
+        String::from_utf8_lossy(&login_output.stderr)
+    );
+    let login_stdout = String::from_utf8(login_output.stdout).expect("stdout must be utf8");
+    assert!(login_stdout.contains("stored api key for provider=openai"));
+
+    let status_output = Command::new(rustcode_bin())
+        .args(["auth", "status", "openai"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode auth status");
+
+    assert!(
+        status_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&status_output.stdout),
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+    let status_stdout = String::from_utf8(status_output.stdout).expect("stdout must be utf8");
+    assert!(status_stdout.contains("credential=stored:api_key"));
+}
+
+#[test]
 fn auth_login_from_env_requires_provider() {
     let output = Command::new(rustcode_bin())
         .args(["auth", "login", "--from-env", "RUSTCODE_TEST_KEY"])

@@ -498,6 +498,20 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - OpenRouter raw SSE sample captured via `curl` (real `data:` frames + provider error payloads observed).
     - `rustcode --json run` now surfaces stream-path provider errors with upstream message (`provider stream error: ...`) instead of generic parser failure.
 
+27. Auth Login API-Key UX Hardening
+- Status: completed
+- Deliverables:
+  - `auth login <provider> --from-env <ENV_VAR>` now defaults to `api_key` method when `--method` is omitted, even for providers that advertise OAuth-first (`openai`, `gitlab`, `github-copilot`).
+  - Preserved validation for incompatible combinations (`--from-env` + non-`api_key` explicit method).
+  - Auth store parser now treats empty auth files as default empty state instead of hard failure.
+  - Added integration coverage for OpenAI `--from-env` default-method behavior.
+  - Added auth-store unit test for empty-file resilience.
+- Validation:
+  - Pass: `cargo test -p rustcode-auth -p rustcode-cli` (2026-02-17)
+  - Pass: live CLI probes:
+    - `rustcode auth login openai --from-env RUSTCODE_OPENAI_KEY` stores API key without requiring `--method api_key`.
+    - `rustcode auth status openai` reports `credential=stored:api_key`.
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -780,6 +794,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - engine prompt execution emits chunk-wise `OutputChunk` events when stream chunks are available.
     - added stream parser tests and engine streaming emission test.
     - validated live OpenRouter stream/error payload handling; upstream provider error text now bubbles cleanly.
+  - Completed Milestone 27 auth login API-key UX hardening:
+    - `auth login --from-env` now auto-selects `api_key` when method is omitted.
+    - added OpenAI integration coverage for default `--from-env` behavior.
+    - empty auth-store files now load as empty state instead of parse errors.
   - Completed Milestone 21 OAuth credential runtime consumption:
     - `rustcode-llm` now resolves OAuth access tokens from auth store when env/config keys are absent.
     - added unit coverage for OAuth fallback (`resolves_oauth_access_from_auth_store_when_env_missing`).
