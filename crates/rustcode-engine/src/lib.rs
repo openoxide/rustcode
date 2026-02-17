@@ -6,9 +6,10 @@ use std::{
     env,
     path::{Component, Path, PathBuf},
 };
-use std::time::Duration;
 
 use async_trait::async_trait;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tracing::debug;
 
@@ -298,11 +299,18 @@ impl Engine {
         context: &CommandContext,
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
+        let listener = TcpListener::bind(&listen)
+            .await
+            .map_err(|err| ExecutionError::Executor(format!("failed to bind {listen}: {err}")))?;
+        let bound_addr = listener.local_addr().map_err(|err| {
+            ExecutionError::Executor(format!("failed to inspect bind addr: {err}"))
+        })?;
+
         self.emit(
             publisher.clone(),
             EventScope::System,
             EventPayload::Warning {
-                message: format!("serve endpoint configured: {listen}"),
+                message: format!("serve endpoint configured: {bound_addr}"),
             },
             context,
         )
@@ -313,7 +321,18 @@ impl Engine {
                 _ = context.cancellation.cancelled() => {
                     return Err(ExecutionError::Cancelled);
                 }
-                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+                incoming = listener.accept() => {
+                    match incoming {
+                        Ok((stream, _addr)) => {
+                            tokio::spawn(async move {
+                                let _ = handle_serve_connection(stream).await;
+                            });
+                        }
+                        Err(err) => {
+                            return Err(ExecutionError::Executor(format!("accept failed: {err}")));
+                        }
+                    }
+                }
             }
         }
     }
@@ -371,6 +390,30 @@ fn lexical_normalize(path: PathBuf) -> PathBuf {
     normalized
 }
 
+async fn handle_serve_connection(mut stream: TcpStream) -> Result<(), std::io::Error> {
+    let mut buffer = [0u8; 2048];
+    let bytes = stream.read(&mut buffer).await?;
+
+    let request = String::from_utf8_lossy(&buffer[..bytes]);
+    let request_line = request.lines().next().unwrap_or_default();
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or_default();
+    let path = parts.next().unwrap_or_default();
+
+    let (status, body) = match (method, path) {
+        ("GET", "/health") => ("200 OK", "{\"ok\":true}\n"),
+        ("", "") => ("400 Bad Request", "{\"error\":\"bad request\"}\n"),
+        _ => ("404 Not Found", "{\"error\":\"not found\"}\n"),
+    };
+
+    let response = format!(
+        "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(response.as_bytes()).await?;
+    stream.shutdown().await
+}
+
 #[async_trait]
 impl CommandExecutor for Engine {
     async fn execute(
@@ -417,9 +460,7 @@ impl CommandExecutor for Engine {
                 )
                 .await
             }
-            Command::Serve { listen } => {
-                self.run_serve(listen, &context, publisher.clone()).await
-            }
+            Command::Serve { listen } => self.run_serve(listen, &context, publisher.clone()).await,
             Command::Version => {
                 self.emit(
                     publisher.clone(),
@@ -475,7 +516,7 @@ impl CommandExecutor for Engine {
 mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::Arc;
-    use std::time::SystemTime;
+    use std::time::{Duration, SystemTime};
 
     use async_trait::async_trait;
     use tokio::sync::Mutex;
@@ -722,22 +763,35 @@ mod tests {
         cancellation.cancel();
 
         let result = task.await.expect("task must join");
-        assert!(matches!(result, Err(ExecutionError::Cancelled)));
-
         let events = publisher.events.lock().await.clone();
-        assert!(events.iter().any(|event| {
-            matches!(
-                &event.payload,
-                EventPayload::Warning { message }
-                if message.contains("serve endpoint configured")
-            )
-        }));
-        assert!(events.iter().any(|event| {
-            matches!(
-                &event.payload,
-                EventPayload::Warning { message }
-                if message == "execution cancelled"
-            )
-        }));
+        match result {
+            Err(ExecutionError::Cancelled) => {
+                assert!(events.iter().any(|event| {
+                    matches!(
+                        &event.payload,
+                        EventPayload::Warning { message }
+                        if message.contains("serve endpoint configured")
+                    )
+                }));
+                assert!(events.iter().any(|event| {
+                    matches!(
+                        &event.payload,
+                        EventPayload::Warning { message }
+                        if message == "execution cancelled"
+                    )
+                }));
+            }
+            Err(ExecutionError::Executor(message)) if message.contains("failed to bind") => {
+                // Some restricted environments disallow local listener binds.
+                assert!(events.iter().any(|event| {
+                    matches!(
+                        &event.payload,
+                        EventPayload::Failure { message }
+                        if message.contains("failed to bind")
+                    )
+                }));
+            }
+            other => panic!("unexpected serve result: {other:?}"),
+        }
     }
 }

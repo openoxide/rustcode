@@ -11,7 +11,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Current Mode
 - Active mode: Slow Deep Research
-- Status: Implementation active (milestone-driven with test+commit loop)
+- Status: Feature delivery mode (baseline complete; iterative hardening active)
 
 ## Milestones
 
@@ -129,7 +129,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: CLI integration confirms TUI routing uses consumer loop and exits cleanly (2026-02-17)
 
 9. Hardening and Benchmarks
-- Status: in_progress
+- Status: completed
 - Deliverables:
   - startup benchmark
   - memory benchmark
@@ -142,6 +142,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass (partial): drift probe mode added and exercised (`drift 12 4`) with stable sampled RSS (2026-02-17)
   - Pass (partial): serve-mode long-run benchmark (`serve 8 4`) with stable sampled RSS (2026-02-17)
   - Pass (partial): benchmark JSON artifact persistence via `scripts/benchmark_record.sh` (2026-02-17)
+  - Pass: load/concurrency mode added and exercised (`load 3 2`) (2026-02-17)
+  - Pass: benchmark snapshot/rotation policy implemented (`scripts/benchmark_snapshot.sh`) (2026-02-17)
+  - Pass: benchmark trend compare + threshold assertions implemented (`benchmark_compare.sh`, `benchmark_assert.sh`) (2026-02-17)
 
 10. Documentation and Release Prep
 - Status: completed
@@ -154,6 +157,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass (partial): added `docs/QUICKSTART.md` and `docs/CHANGELOG_POLICY.md` (2026-02-17)
   - Pass (partial): quickstart command set executed and verified on local workspace (2026-02-17)
   - Pass: release notes draft created from validated plan + changelog policy (`docs/RELEASE_NOTES_DRAFT.md`, 2026-02-17)
+  - Pass: release packaging checklist added (`docs/RELEASE_PACKAGING_CHECKLIST.md`, 2026-02-17)
 
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
@@ -187,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Begin release packaging checklist (versioning, tagging, artifact naming).
-2. Add benchmark history rotation policy (`latest` + dated snapshots).
-3. Add minimal CI command matrix for `check/test/bench-assert`.
+1. Add structured serve request telemetry (method/path/status) as domain events.
+2. Add CI artifact upload for `benchmarks/latest.json`.
+3. Extend load benchmark with percentile latency capture.
 
 ## Update Log
 - 2026-02-17:
@@ -283,7 +287,30 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added benchmark artifact recorder:
     - `scripts/benchmark_record.sh benchmarks/latest.json`
     - persists startup/memory/drift outputs in JSON for historical tracking.
+  - Completed Milestone 9:
+    - Added load benchmark mode (`./scripts/benchmark.sh load <iterations> <parallel>`).
+    - Added snapshot/rotation workflow (`scripts/benchmark_snapshot.sh`, `benchmarks/history/`).
+    - Added CI matrix runner (`scripts/ci_matrix.sh`) and CI workflow (`.github/workflows/ci.yml`).
+    - Added benchmark comparison/assertion automation for trend and threshold checks.
+  - Added release packaging checklist doc (`docs/RELEASE_PACKAGING_CHECKLIST.md`).
   - Started Milestone 10:
     - Added `docs/QUICKSTART.md` with developer/operator command flows.
     - Added `docs/CHANGELOG_POLICY.md` with entry format and release gate rules.
     - Executed quickstart command matrix to verify docs align with current CLI behavior.
+  - Extended benchmark recorder to capture `load` section and regenerated `benchmarks/latest.json`.
+  - Hardened benchmark assertions:
+    - fallback RSS parsing from drift/serve samples
+    - explicit missing-metrics failure unless `ALLOW_MISSING_METRICS=1`.
+  - Verified CI matrix end-to-end via `./scripts/ci_matrix.sh` on current host.
+  - Feature pivot completed:
+    - `serve` now binds a TCP listener and returns HTTP `200` health responses.
+    - Added CLI integration coverage for `serve` response + graceful cancellation path.
+  - CI/release hardening completed:
+    - Added release packaging checklist (`docs/RELEASE_PACKAGING_CHECKLIST.md`).
+    - Added CI workflow (`.github/workflows/ci.yml`) bound to `scripts/ci_matrix.sh`.
+  - Extended `serve` endpoint behavior:
+    - route-aware HTTP responses (`GET /health` -> `200`, unknown routes -> `404`, malformed requests -> `400`).
+    - integration coverage asserts both health success and unknown-route handling.
+  - Validation pass:
+    - `cargo test --workspace`
+    - `./scripts/ci_matrix.sh`

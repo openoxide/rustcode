@@ -8,6 +8,7 @@ Usage:
   scripts/benchmark.sh memory [prompt]
   scripts/benchmark.sh drift [seconds] [interval]
   scripts/benchmark.sh serve [seconds] [interval]
+  scripts/benchmark.sh load [iterations] [parallel]
 USAGE
 }
 
@@ -36,6 +37,8 @@ run_time() {
 run_memory() {
   if /usr/bin/time -l "$@" >/dev/null 2>&1; then
     /usr/bin/time -l "$@" >/dev/null
+  elif /usr/bin/time -v "$@" >/dev/null 2>&1; then
+    /usr/bin/time -v "$@" >/dev/null
   elif /usr/bin/time -p "$@" >/dev/null 2>&1; then
     /usr/bin/time -p "$@" >/dev/null
   else
@@ -100,6 +103,30 @@ case "$mode" in
     wait "$pid" 2>/dev/null || true
     echo "---tail---"
     tail -n 20 "$output_file"
+    ;;
+  load)
+    iterations="${1:-10}"
+    parallel="${2:-4}"
+    echo "Benchmark: load (iterations=$iterations parallel=$parallel)"
+
+    run_batch() {
+      local batch="$1"
+      local pids=()
+      local i
+      for i in $(seq 1 "$parallel"); do
+        "$bin" --json run "load probe batch=$batch worker=$i" >/dev/null 2>&1 &
+        pids+=("$!")
+      done
+
+      for pid in "${pids[@]}"; do
+        wait "$pid"
+      done
+    }
+
+    for batch in $(seq 1 "$iterations"); do
+      echo "batch=$batch"
+      run_batch "$batch"
+    done
     ;;
   *)
     usage

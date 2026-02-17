@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+echo "[ci] cargo check --workspace"
+cargo check --workspace
+
+echo "[ci] cargo test --workspace"
+cargo test --workspace
+
+echo "[ci] benchmark record"
+./scripts/benchmark_record.sh benchmarks/latest.json
+
+echo "[ci] benchmark assert"
+allow_missing=0
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  # macOS sandboxed runners may not expose detailed time/ps memory metrics.
+  allow_missing=1
+fi
+ALLOW_MISSING_METRICS="$allow_missing" ./scripts/benchmark_assert.sh benchmarks/latest.json
+
+echo "[ci] PASS"

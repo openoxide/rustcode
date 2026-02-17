@@ -17,6 +17,7 @@ startup_output="$(./scripts/benchmark.sh startup 3 2>&1)"
 memory_output="$(./scripts/benchmark.sh memory "record probe" 2>&1)"
 drift_output="$(./scripts/benchmark.sh drift 8 4 2>&1)"
 serve_output="$(./scripts/benchmark.sh serve 8 4 2>&1)"
+load_output="$(./scripts/benchmark.sh load 3 2 2>&1)"
 
 mkdir -p "$(dirname "$out_file")"
 
@@ -26,7 +27,8 @@ cat > "$out_file" <<JSON
   "startup": "$(json_escape "$startup_output")",
   "memory": "$(json_escape "$memory_output")",
   "drift": "$(json_escape "$drift_output")",
-  "serve": "$(json_escape "$serve_output")"
+  "serve": "$(json_escape "$serve_output")",
+  "load": "$(json_escape "$load_output")"
 }
 JSON
 
