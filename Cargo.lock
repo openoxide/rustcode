@@ -916,6 +916,7 @@ dependencies = [
  "async-trait",
  "reqwest",
  "rustcode-core",
+ "serde",
  "serde_json",
  "thiserror",
 ]

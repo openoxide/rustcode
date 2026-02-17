@@ -173,6 +173,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `cargo fmt --all` (2026-02-17)
   - Pass: `cargo test --workspace` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: provider coverage matrix for opencode provider IDs (`./scripts/provider_matrix.sh`) with 91/91 deterministic classifications and zero unknown-init failures (2026-02-17)
   - Pass: runtime probes
     - default null path: `cargo run -q -p rustcode-cli -- run "provider smoke"`
     - network-disabled guard: provider init fails with actionable message
@@ -212,8 +213,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
-2. Add provider/model discovery command (`rustcode models`) with resolved provider diagnostics.
-3. Add fixture-based HTTP integration tests for provider adapters (mock server with protocol contracts).
+2. Add provider login/OAuth adapter boundary for non-API-key flows (Copilot/GitLab class).
+3. Add provider/model discovery command (`rustcode models`) with resolved provider diagnostics.
 
 ## Update Log
 - 2026-02-17:
@@ -289,11 +290,22 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
       - provider preset catalog and model-prefix normalization (`provider/model`).
     - Added LLM unit tests for provider resolution, endpoint normalization, and response extraction.
     - Added config unit tests for layered `[llm]` precedence and CLI override behavior.
+    - Added provider coverage audit script:
+      - `scripts/provider_matrix.sh`
+      - validates all providers found in opencode models index (`~/.cache/opencode/models.json`).
+    - Added provider coverage report:
+      - `docs/PROVIDER_COVERAGE.md`
+      - latest measured result: 91 providers classified, 0 unknown/error init paths.
+    - Added models metadata fallback in `rustcode-llm`:
+      - loads provider metadata from `RUSTCODE_MODELS_PATH` or `~/.cache/opencode/models.json`
+      - inherits provider env keys/endpoints when static preset data is missing.
     - Ran validation:
       - `cargo fmt --all`
       - `cargo test --workspace`
       - `./scripts/ci_matrix.sh`
+      - `./scripts/provider_matrix.sh`
       - runtime smoke probes for null/default, network guard, missing key guard, and remote transport error path.
+      - live OpenRouter key probe attempted; blocked by restricted network in execution environment (transport send failure), no key persisted to repository.
   - Ran benchmark harness with elevated permissions to capture system metrics:
     - startup (`5` runs): reported `0.00s` real per run on this host timer granularity.
     - memory probe: `maximum resident set size: 5,242,880`, `peak memory footprint: 2,064,696`.

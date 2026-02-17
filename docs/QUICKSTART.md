@@ -43,6 +43,7 @@ cargo run -q -p rustcode-cli -- tui
 ./scripts/benchmark.sh memory "benchmark prompt"
 ./scripts/benchmark.sh drift 20 5
 ./scripts/benchmark_record.sh benchmarks/latest.json
+./scripts/provider_matrix.sh > /tmp/provider-matrix.tsv
 ```
 
 ## Operational Notes
@@ -50,3 +51,4 @@ cargo run -q -p rustcode-cli -- tui
 - Use `--trust-project-config` only for trusted repositories.
 - JSON mode includes `schema_version` in every event envelope.
 - Provider setup details: `docs/PROVIDERS.md`.
+- Provider coverage audit details: `docs/PROVIDER_COVERAGE.md`.

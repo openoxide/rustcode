@@ -45,6 +45,8 @@ Preset defaults include:
 
 Additional IDs from opencode provider references are accepted through generic OpenAI-compatible mode when `base_url` is provided.
 
+`rustcode` also reads provider metadata from `RUSTCODE_MODELS_PATH` (or `~/.cache/opencode/models.json`) to inherit provider env-key names and advertised endpoints where available.
+
 ## Examples
 
 ```toml
@@ -74,4 +76,3 @@ provider = "ollama"
 ```bash
 rustcode run "summarize this directory"
 ```
-

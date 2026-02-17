@@ -1,8 +1,11 @@
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
 use rustcode_core::config::ResolvedConfig;
+use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::Arc;
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 
 #[derive(Debug, Clone)]
@@ -53,11 +56,11 @@ enum ProviderProtocol {
     AnthropicMessages,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct ProviderPreset {
     protocol: ProviderProtocol,
-    default_base_url: Option<&'static str>,
-    default_api_key_envs: &'static [&'static str],
+    default_base_url: Option<String>,
+    default_api_key_envs: Vec<String>,
     requires_api_key: bool,
 }
 
@@ -141,7 +144,7 @@ fn resolve_provider(config: &ResolvedConfig) -> Result<ResolvedProvider, LlmErro
     let base_url = config
         .llm_base_url
         .clone()
-        .or_else(|| preset.default_base_url.map(ToString::to_string));
+        .or_else(|| preset.default_base_url.clone());
     let api_key = resolve_api_key(config, &preset);
 
     Ok(ResolvedProvider {
@@ -160,7 +163,7 @@ fn resolve_api_key(config: &ResolvedConfig, preset: &ProviderPreset) -> Option<S
         }
     }
 
-    for env_name in preset.default_api_key_envs {
+    for env_name in &preset.default_api_key_envs {
         if let Some(value) = read_config_or_env(config, env_name) {
             return Some(value);
         }
@@ -181,95 +184,107 @@ fn read_config_or_env(config: &ResolvedConfig, name: &str) -> Option<String> {
 
 fn provider_preset(provider_id: &str) -> ProviderPreset {
     let provider = provider_id.to_ascii_lowercase();
-    match provider.as_str() {
+    let mut preset = match provider.as_str() {
         "null" => ProviderPreset {
             protocol: ProviderProtocol::Null,
             default_base_url: None,
-            default_api_key_envs: &[],
+            default_api_key_envs: vec![],
             requires_api_key: false,
         },
         "anthropic" => ProviderPreset {
             protocol: ProviderProtocol::AnthropicMessages,
-            default_base_url: Some("https://api.anthropic.com"),
-            default_api_key_envs: &["ANTHROPIC_API_KEY"],
+            default_base_url: Some("https://api.anthropic.com".to_string()),
+            default_api_key_envs: vec!["ANTHROPIC_API_KEY".to_string()],
             requires_api_key: true,
         },
         "ollama" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
-            default_base_url: Some("http://127.0.0.1:11434/v1"),
-            default_api_key_envs: &[],
+            default_base_url: Some("http://127.0.0.1:11434/v1".to_string()),
+            default_api_key_envs: vec![],
             requires_api_key: false,
         },
         "openai" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
-            default_base_url: Some("https://api.openai.com/v1"),
-            default_api_key_envs: &["OPENAI_API_KEY"],
+            default_base_url: Some("https://api.openai.com/v1".to_string()),
+            default_api_key_envs: vec!["OPENAI_API_KEY".to_string()],
             requires_api_key: true,
         },
         "openrouter" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
-            default_base_url: Some("https://openrouter.ai/api/v1"),
-            default_api_key_envs: &["OPENROUTER_API_KEY"],
+            default_base_url: Some("https://openrouter.ai/api/v1".to_string()),
+            default_api_key_envs: vec!["OPENROUTER_API_KEY".to_string()],
             requires_api_key: true,
         },
         "groq" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
-            default_base_url: Some("https://api.groq.com/openai/v1"),
-            default_api_key_envs: &["GROQ_API_KEY"],
+            default_base_url: Some("https://api.groq.com/openai/v1".to_string()),
+            default_api_key_envs: vec!["GROQ_API_KEY".to_string()],
             requires_api_key: true,
         },
         "xai" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
-            default_base_url: Some("https://api.x.ai/v1"),
-            default_api_key_envs: &["XAI_API_KEY"],
+            default_base_url: Some("https://api.x.ai/v1".to_string()),
+            default_api_key_envs: vec!["XAI_API_KEY".to_string()],
             requires_api_key: true,
         },
         "mistral" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
-            default_base_url: Some("https://api.mistral.ai/v1"),
-            default_api_key_envs: &["MISTRAL_API_KEY"],
+            default_base_url: Some("https://api.mistral.ai/v1".to_string()),
+            default_api_key_envs: vec!["MISTRAL_API_KEY".to_string()],
             requires_api_key: true,
         },
         "togetherai" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
-            default_base_url: Some("https://api.together.xyz/v1"),
-            default_api_key_envs: &["TOGETHER_API_KEY", "TOGETHERAI_API_KEY"],
+            default_base_url: Some("https://api.together.xyz/v1".to_string()),
+            default_api_key_envs: vec![
+                "TOGETHER_API_KEY".to_string(),
+                "TOGETHERAI_API_KEY".to_string(),
+            ],
             requires_api_key: true,
         },
         "perplexity" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
-            default_base_url: Some("https://api.perplexity.ai"),
-            default_api_key_envs: &["PERPLEXITY_API_KEY"],
+            default_base_url: Some("https://api.perplexity.ai".to_string()),
+            default_api_key_envs: vec!["PERPLEXITY_API_KEY".to_string()],
             requires_api_key: true,
         },
         "deepinfra" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
-            default_base_url: Some("https://api.deepinfra.com/v1/openai"),
-            default_api_key_envs: &["DEEPINFRA_API_KEY", "DEEPINFRA_API_TOKEN"],
+            default_base_url: Some("https://api.deepinfra.com/v1/openai".to_string()),
+            default_api_key_envs: vec![
+                "DEEPINFRA_API_KEY".to_string(),
+                "DEEPINFRA_API_TOKEN".to_string(),
+            ],
             requires_api_key: true,
         },
         "cerebras" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
-            default_base_url: Some("https://api.cerebras.ai/v1"),
-            default_api_key_envs: &["CEREBRAS_API_KEY"],
+            default_base_url: Some("https://api.cerebras.ai/v1".to_string()),
+            default_api_key_envs: vec!["CEREBRAS_API_KEY".to_string()],
             requires_api_key: true,
         },
         "azure" | "azure-cognitive-services" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
             default_base_url: None,
-            default_api_key_envs: &["AZURE_OPENAI_API_KEY"],
+            default_api_key_envs: vec!["AZURE_OPENAI_API_KEY".to_string()],
             requires_api_key: true,
         },
         "github-copilot" | "github-copilot-enterprise" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
             default_base_url: None,
-            default_api_key_envs: &["GITHUB_TOKEN", "GITHUB_COPILOT_TOKEN"],
+            default_api_key_envs: vec![
+                "GITHUB_TOKEN".to_string(),
+                "GITHUB_COPILOT_TOKEN".to_string(),
+            ],
             requires_api_key: true,
         },
         "cloudflare-workers-ai" | "cloudflare-ai-gateway" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
             default_base_url: None,
-            default_api_key_envs: &["CLOUDFLARE_API_TOKEN", "CF_AIG_TOKEN"],
+            default_api_key_envs: vec![
+                "CLOUDFLARE_API_TOKEN".to_string(),
+                "CF_AIG_TOKEN".to_string(),
+            ],
             requires_api_key: true,
         },
         "google-vertex"
@@ -283,16 +298,82 @@ fn provider_preset(provider_id: &str) -> ProviderPreset {
         | "fetch" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
             default_base_url: None,
-            default_api_key_envs: &[],
+            default_api_key_envs: vec![],
             requires_api_key: false,
         },
         _ => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
             default_base_url: None,
-            default_api_key_envs: &[],
+            default_api_key_envs: vec![],
             requires_api_key: false,
         },
+    };
+
+    if let Some(models_provider) = models_provider_metadata(&provider) {
+        if preset.default_base_url.is_none() {
+            preset.default_base_url = models_provider.api.clone();
+        }
+        if preset.default_api_key_envs.is_empty() {
+            preset.default_api_key_envs = models_provider.env.clone();
+        }
+        if !preset.requires_api_key && !preset.default_api_key_envs.is_empty() {
+            preset.requires_api_key = true;
+        }
+        if matches!(preset.protocol, ProviderProtocol::OpenAiCompatible)
+            && models_provider
+                .npm
+                .as_deref()
+                .is_some_and(|npm| npm.contains("anthropic"))
+        {
+            preset.protocol = ProviderProtocol::AnthropicMessages;
+        }
     }
+
+    preset
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ModelsProviderMetadata {
+    api: Option<String>,
+    npm: Option<String>,
+    #[serde(default)]
+    env: Vec<String>,
+}
+
+static MODELS_PROVIDER_INDEX: OnceLock<Option<BTreeMap<String, ModelsProviderMetadata>>> =
+    OnceLock::new();
+
+fn models_provider_metadata(provider_id: &str) -> Option<&'static ModelsProviderMetadata> {
+    let index = MODELS_PROVIDER_INDEX
+        .get_or_init(load_models_provider_index)
+        .as_ref()?;
+    index.get(provider_id)
+}
+
+fn load_models_provider_index() -> Option<BTreeMap<String, ModelsProviderMetadata>> {
+    let mut candidates = Vec::new();
+    if let Ok(path) = std::env::var("RUSTCODE_MODELS_PATH") {
+        candidates.push(PathBuf::from(path));
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        candidates.push(PathBuf::from(&home).join(".cache/opencode/models.json"));
+        candidates.push(PathBuf::from(home).join(".opencode/models.json"));
+    }
+    if let Ok(cache_home) = std::env::var("XDG_CACHE_HOME") {
+        candidates.push(PathBuf::from(cache_home).join("opencode/models.json"));
+    }
+
+    for candidate in candidates {
+        let Ok(raw) = std::fs::read_to_string(&candidate) else {
+            continue;
+        };
+        let Ok(parsed) = serde_json::from_str::<BTreeMap<String, ModelsProviderMetadata>>(&raw)
+        else {
+            continue;
+        };
+        return Some(parsed);
+    }
+    None
 }
 
 fn parse_model_prefix(model: &str) -> Option<(&str, &str)> {
