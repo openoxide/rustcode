@@ -36,6 +36,7 @@ futures-util = "0.3"
 base64 = "0.22"
 rand = "0.9"
 sha2 = "0.10"
+rpassword = "7.4"
 
 [workspace.lints.clippy]
 all = "warn"

@@ -884,9 +884,40 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: integration test:
     - `mcp_status_reports_oauth_supported_for_discoverable_server`
 
+44. Interactive Auth Login (Provider Picker + Hidden Key Input)
+- Status: completed
+- Scope:
+  - Align `rustcode auth login` UX with OpenCode:
+    - interactive provider selection when invoked without provider on a TTY.
+    - provider-specific hints for common providers (OpenCode, Anthropic, Copilot, OpenAI, Google, OpenRouter, Vercel).
+    - hide API key input (no echo) for interactive prompts.
+  - Preserve non-interactive behavior and JSON contracts.
+- Milestone 44 start references (code + docs):
+  - `opencode/packages/opencode/src/cli/cmd/auth.ts`
+  - `opencode/packages/opencode/src/provider/models-snapshot.ts` (provider metadata schema)
+  - `https://opencode.ai/docs`
+  - `https://developers.openai.com/codex/`
+- Deliverables:
+  - `rustcode auth login` (provider omitted) now prompts for provider selection on TTY:
+    - OpenCode Zen, Anthropic, GitHub Copilot, OpenAI, Google, OpenRouter, Vercel AI Gateway, Other.
+    - accepts numeric selection or direct provider id entry.
+  - API key input uses a no-echo prompt when available (`rpassword`) with a plaintext fallback for sandboxed PTYs that deny ioctl.
+  - Added provider-specific key acquisition hints:
+    - OpenCode: `https://opencode.ai/auth`
+    - Vercel AI Gateway: `https://vercel.link/ai-gateway-token`
+- Validation:
+  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass (live, isolated auth store):
+    - `RUSTCODE_AUTH_FILE=/tmp/rustcode-auth-live.json cargo run -q -p rustcode-cli -- auth login` (provider picker + api key prompt)
+    - `RUSTCODE_AUTH_FILE=/tmp/rustcode-auth-live.json cargo run -q -p rustcode-cli -- auth status opencode`
+
 
 ## Update Log
 - 2026-02-17:
+  - Completed Milestone 44 interactive `auth login` provider picker:
+    - added TTY-only provider selection for `rustcode auth login` when provider omitted.
+    - added provider hints for common providers (OpenCode, Vercel AI Gateway).
+    - switched API key prompt to no-echo when supported, with sandbox PTY plaintext fallback.
   - Completed Milestone 43 `mcp status`:
     - added `mcp status [name]` and JSON contract.
     - added OAuth discovery snapshot emission for configured OAuth-enabled servers.

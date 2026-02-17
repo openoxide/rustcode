@@ -437,16 +437,24 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
             no_wait,
             timeout_secs,
         } => {
-            if provider.is_none() {
-                if from_env.is_some() {
-                    anyhow::bail!("`--from-env` requires a provider: `rustcode auth login <provider> --from-env <ENV_VAR>`");
+            let provider = match provider {
+                Some(provider) => provider,
+                None => {
+                    if from_env.is_some() {
+                        anyhow::bail!("`--from-env` requires a provider: `rustcode auth login <provider> --from-env <ENV_VAR>`");
+                    }
+                    if method.is_some() {
+                        anyhow::bail!("`--method` requires a provider: `rustcode auth login <provider> --method <method>`");
+                    }
+
+                    if json_output || !is_interactive_terminal() {
+                        return list_auth_login_providers(json_output);
+                    }
+
+                    prompt_for_login_provider()?
                 }
-                if method.is_some() {
-                    anyhow::bail!("`--method` requires a provider: `rustcode auth login <provider> --method <method>`");
-                }
-                return list_auth_login_providers(json_output);
-            }
-            let provider = provider.expect("provider is checked").to_ascii_lowercase();
+            };
+            let provider = provider.to_ascii_lowercase();
             let methods = methods_for_provider(&provider);
             let selected_method = resolve_login_method_with_context(
                 &provider,
@@ -495,6 +503,7 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
 
             match selected_method {
                 AuthMethod::ApiKey => {
+                    print_provider_api_key_hint(&provider)?;
                     let key = prompt_for_api_key(&provider)?;
                     store.set_api_key(&provider, &key)?;
                     if json_output {
@@ -1962,15 +1971,152 @@ fn prompt_for_api_key(provider: &str) -> Result<String> {
         .flush()
         .map_err(|err| anyhow::anyhow!("stderr flush failed: {err}"))?;
 
-    let mut key = String::new();
-    std::io::stdin()
-        .read_line(&mut key)
-        .map_err(|err| anyhow::anyhow!("failed to read api key input: {err}"))?;
+    let key = match rpassword::read_password() {
+        Ok(value) => value,
+        Err(err) => {
+            // Some sandboxed PTY environments deny the ioctl used by rpassword.
+            // Fall back to a normal line read rather than failing the login flow.
+            writeln!(
+                stderr,
+                "\nWARN: could not disable terminal echo ({err}); falling back to plaintext input"
+            )
+            .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+            let mut value = String::new();
+            std::io::stdin()
+                .read_line(&mut value)
+                .map_err(|err| anyhow::anyhow!("failed to read api key input: {err}"))?;
+            value
+        }
+    };
     let key = key.trim().to_string();
     if key.is_empty() {
         anyhow::bail!("api key input must not be empty");
     }
     Ok(key)
+}
+
+fn prompt_for_login_provider() -> Result<String> {
+    if !is_interactive_terminal() {
+        anyhow::bail!("cannot prompt for provider in non-interactive mode");
+    }
+
+    // Keep this list intentionally small (OpenCode-style "top providers") and offer "other"
+    // to avoid dumping the full provider universe to the user.
+    const PROVIDERS: [(&str, &str, Option<&str>); 7] = [
+        ("opencode", "OpenCode Zen", Some("recommended")),
+        ("anthropic", "Anthropic", Some("Claude Max or API key")),
+        ("github-copilot", "GitHub Copilot", None),
+        ("openai", "OpenAI", Some("ChatGPT Plus/Pro or API key")),
+        ("google", "Google", None),
+        ("openrouter", "OpenRouter", None),
+        ("vercel", "Vercel AI Gateway", None),
+    ];
+
+    let mut stderr = std::io::stderr().lock();
+    writeln!(stderr, "add credential")
+        .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+    writeln!(stderr, "select provider:")
+        .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+    for (idx, (_id, label, hint)) in PROVIDERS.iter().enumerate() {
+        if let Some(hint) = hint {
+            writeln!(stderr, "  {}. {} ({})", idx + 1, label, hint)
+                .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+        } else {
+            writeln!(stderr, "  {}. {}", idx + 1, label)
+                .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+        }
+    }
+    writeln!(stderr, "  {}. Other", PROVIDERS.len() + 1)
+        .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+    write!(
+        stderr,
+        "select provider [1-{}] (default 1): ",
+        PROVIDERS.len() + 1
+    )
+    .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+    stderr
+        .flush()
+        .map_err(|err| anyhow::anyhow!("stderr flush failed: {err}"))?;
+
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .map_err(|err| anyhow::anyhow!("failed to read provider selection: {err}"))?;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok(PROVIDERS[0].0.to_string());
+    }
+
+    if let Ok(index) = trimmed.parse::<usize>() {
+        let zero_based = index
+            .checked_sub(1)
+            .ok_or_else(|| anyhow::anyhow!("invalid provider selection: {trimmed}"))?;
+        if zero_based < PROVIDERS.len() {
+            return Ok(PROVIDERS[zero_based].0.to_string());
+        }
+        if zero_based == PROVIDERS.len() {
+            return prompt_for_custom_provider_id();
+        }
+        anyhow::bail!("invalid provider selection: {trimmed}");
+    }
+
+    // Allow directly typing a provider id (useful for scripts in a tty).
+    validate_provider_id(trimmed)?;
+    Ok(trimmed.to_string())
+}
+
+fn prompt_for_custom_provider_id() -> Result<String> {
+    let mut stderr = std::io::stderr().lock();
+    write!(stderr, "enter provider id (a-z, 0-9, hyphens): ")
+        .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+    stderr
+        .flush()
+        .map_err(|err| anyhow::anyhow!("stderr flush failed: {err}"))?;
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .map_err(|err| anyhow::anyhow!("failed to read provider id: {err}"))?;
+    let trimmed = input.trim();
+    validate_provider_id(trimmed)?;
+    Ok(trimmed.to_string())
+}
+
+fn validate_provider_id(value: &str) -> Result<()> {
+    if value.is_empty() {
+        anyhow::bail!("provider id must not be empty");
+    }
+    if !value
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+    {
+        anyhow::bail!("provider id must match [a-z0-9-]+");
+    }
+    Ok(())
+}
+
+fn print_provider_api_key_hint(provider: &str) -> Result<()> {
+    if !is_interactive_terminal() {
+        return Ok(());
+    }
+    let mut stderr = std::io::stderr().lock();
+    match provider {
+        "opencode" => {
+            writeln!(
+                stderr,
+                "hint: create an api key at https://opencode.ai/auth"
+            )
+            .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+        }
+        "vercel" => {
+            writeln!(
+                stderr,
+                "hint: create an api key at https://vercel.link/ai-gateway-token"
+            )
+            .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn persist_oauth_or_api_key(
