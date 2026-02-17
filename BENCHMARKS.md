@@ -58,7 +58,8 @@ Examples:
 - `./scripts/benchmark_record.sh benchmarks/latest.json`:
   - persists startup/memory/drift/serve/load output in JSON artifact format.
 - `./scripts/benchmark_compare.sh <old> <new>`:
-  - reports deltas for `maximum resident set size` and `peak memory footprint`.
+  - reports deltas for `maximum resident set size`, `peak memory footprint`, and `latency_p95_s`.
+  - emits `delta=n/a` when one side is missing required metrics.
 - `./scripts/benchmark_assert.sh <artifact>`:
   - fails when extracted memory metrics exceed conservative limits.
   - configurable via `MAX_RSS_LIMIT` and `PEAK_FOOTPRINT_LIMIT`.

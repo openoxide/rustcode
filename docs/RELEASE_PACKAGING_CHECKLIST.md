@@ -29,6 +29,9 @@
 5. Release PR checklist gate:
    - workflow: `.github/workflows/release-pr-checklist.yml`
    - validator: `./scripts/check_release_pr_checklist.sh`
+6. Release PR benchmark drift comment:
+   - workflow: `.github/workflows/release-pr-benchmark-report.yml`
+   - posts baseline-vs-candidate compare output on release PRs.
 
 ## Post-Release
 1. Snapshot benchmark artifact:

@@ -191,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add CI baseline-drift report comment for release PRs.
-2. Add nightly benchmark drift job with threshold alerts.
-3. Add release-candidate artifact bundle workflow.
+1. Add nightly benchmark drift job with threshold alerts.
+2. Add release-candidate artifact bundle workflow.
+3. Add signed tag and checksum verification in release automation.
 
 ## Update Log
 - 2026-02-17:
@@ -360,6 +360,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Optional manual release gate CI mode:
     - extended `.github/workflows/ci.yml` with `workflow_dispatch` inputs.
     - supports on-demand release gate runs with optional baseline path override.
+  - Release PR benchmark drift reporting:
+    - added `.github/workflows/release-pr-benchmark-report.yml`.
+    - workflow posts/updates PR comment with baseline-vs-candidate benchmark deltas.
+    - benchmark compare output now emits `delta=n/a` for missing metric cases.
   - Added structured serve telemetry:
     - introduced `EventPayload::ServeRequest { method, path, status }`.
     - `serve` now emits route-level events for each handled request.
