@@ -28,6 +28,7 @@ Some sandboxed executions do not have working DNS/network. For any live provider
 | `opencode` | `api_key` | `--from-env OPENCODE_API_KEY` value | none | API key can be created at `https://opencode.ai/auth`. |
 | `openrouter` | `api_key` | `--from-env OPENROUTER_API_KEY` value | none | OpenRouter recommends attribution headers (`http-referer`, `x-title`) which `rustcode` sets by default. |
 | `anthropic` | `api_key` | `--from-env ANTHROPIC_API_KEY` value | none | Required for `anthropic_messages` protocol. |
+| `google` | `api_key` | `--from-env GEMINI_API_KEY` value (or `GOOGLE_GENERATIVE_AI_API_KEY`) | none | Uses Google Generative Language API (`generativelanguage.googleapis.com`). |
 | `vercel` | `api_key` | `--from-env AI_GATEWAY_API_KEY` value | none | API key can be created at `https://vercel.link/ai-gateway-token`. |
 | `v0` | `api_key` | `--from-env V0_API_KEY` value | none | Vercel v0 uses OpenAI-compatible protocol at `https://api.v0.dev/v1`. |
 | `mcp:<name>` | `oauth_browser` | one of: `--client-id`, configured `oauth.client_id`, or `RUSTCODE_MCP_OAUTH_CLIENT_ID`; OAuth-capable MCP metadata | `--client-secret-env <ENV_VAR>`, configured `oauth.client_secret_env`, `RUSTCODE_MCP_OAUTH_CLIENT_SECRET`, `--oauth-port` | Uses MCP-discovered OAuth endpoints + PKCE + localhost callback; stores OAuth token in auth store under `mcp:<name>`. |

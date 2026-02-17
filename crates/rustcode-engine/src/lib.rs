@@ -313,8 +313,7 @@ When you are done, respond with a final plain-text answer."
                     Ok(output) => (true, output),
                     Err(err) => (false, err.to_string()),
                 };
-                let result_payload =
-                    tool_payload_json(ok, output, options.max_tool_result_bytes);
+                let result_payload = tool_payload_json(ok, output, options.max_tool_result_bytes);
 
                 self.emit(
                     publisher.clone(),
@@ -526,8 +525,8 @@ When you are done, respond with a final plain-text answer."
             .map_err(|err| ExecutionError::Executor(err.to_string()))?;
         if original.contains("[rustcode:truncated]") {
             return Err(ExecutionError::Dispatch(
-                    "refusing to edit a truncated read; increase --max-read-bytes".to_string(),
-                ));
+                "refusing to edit a truncated read; increase --max-read-bytes".to_string(),
+            ));
         }
 
         let replacements = original.matches(from).count();
@@ -1053,7 +1052,6 @@ fn truncate_utf8_bytes(input: &str, max_bytes: usize) -> String {
     let prefix = &input[..end];
     format!("{prefix}\n...[truncated]...\n")
 }
-
 
 #[cfg(test)]
 mod tests {

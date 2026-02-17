@@ -1829,7 +1829,29 @@ mod tests {
             Err(err) => panic!("must bind token port: {err}"),
         };
         Some(thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("must accept token request");
+            listener
+                .set_nonblocking(true)
+                .expect("must configure listener nonblocking");
+            // If the token exchange never happens (e.g., upstream request fails), we must not hang
+            // the entire test suite waiting on accept/join.
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let mut accepted: Option<TcpStream> = None;
+            while std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        accepted = Some(stream);
+                        break;
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(err) => panic!("must accept token request: {err}"),
+                }
+            }
+            let Some(mut stream) = accepted else {
+                // Let the assertions in the test fail on empty capture instead of hanging forever.
+                return;
+            };
             let request = read_http_request(&mut stream);
             let body = request
                 .split("\r\n\r\n")
@@ -1861,7 +1883,26 @@ mod tests {
             Err(err) => panic!("must bind token port: {err}"),
         };
         Some(thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("must accept token request");
+            listener
+                .set_nonblocking(true)
+                .expect("must configure listener nonblocking");
+            let deadline = std::time::Instant::now() + Duration::from_secs(5);
+            let mut accepted: Option<TcpStream> = None;
+            while std::time::Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        accepted = Some(stream);
+                        break;
+                    }
+                    Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    Err(err) => panic!("must accept token request: {err}"),
+                }
+            }
+            let Some(mut stream) = accepted else {
+                return;
+            };
             let request = read_http_request(&mut stream);
             let body = request
                 .split("\r\n\r\n")

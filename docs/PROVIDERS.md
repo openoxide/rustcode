@@ -27,6 +27,7 @@ If `llm.provider` is `null`, `rustcode` derives provider from `model` when it is
 - OpenAI-compatible: `POST /v1/chat/completions`
 - Anthropic: `POST /v1/messages`
 - Vercel AI Gateway: `POST /language-model` (AI SDK v2 protocol headers + SSE deltas)
+- Google Gemini: `POST /v1beta/models/<model>:generateContent` and `:streamGenerateContent?alt=sse`
 
 ## Provider Presets
 
@@ -45,9 +46,10 @@ Preset defaults include:
 - Azure (`azure`, `azure-cognitive-services`)
 - GitHub Copilot (`github-copilot`, `github-copilot-enterprise`)
 - Cloudflare (`cloudflare-workers-ai`, `cloudflare-ai-gateway`)
-- Vercel AI Gateway (`vercel`)
-- Vercel v0 (`v0`)
-- OpenCode Zen (`opencode`)
+  - Vercel AI Gateway (`vercel`)
+  - Google Gemini (`google`)
+  - Vercel v0 (`v0`)
+  - OpenCode Zen (`opencode`)
 
 Additional IDs from opencode provider references are accepted through generic OpenAI-compatible mode when `base_url` is provided.
 
@@ -102,6 +104,13 @@ OpenCode Zen:
 ```bash
 OPENCODE_API_KEY=... rustcode auth set-key opencode --from-env OPENCODE_API_KEY
 rustcode run "hello via opencode zen"
+```
+
+Google Gemini:
+
+```bash
+GEMINI_API_KEY=... rustcode auth set-key google --from-env GEMINI_API_KEY
+rustcode --llm-provider google --model google/gemini-2.5-flash run "hello via gemini"
 ```
 
 Ollama local example:

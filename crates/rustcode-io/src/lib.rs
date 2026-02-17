@@ -26,11 +26,19 @@ pub struct ProcessOutput {
 #[async_trait]
 pub trait FileSystemPort: Send + Sync {
     async fn read_to_string(&self, path: &Path) -> Result<String, IoError>;
-    async fn read_to_string_limited(&self, path: &Path, max_bytes: usize) -> Result<String, IoError>;
+    async fn read_to_string_limited(
+        &self,
+        path: &Path,
+        max_bytes: usize,
+    ) -> Result<String, IoError>;
     async fn exists(&self, path: &Path) -> Result<bool, IoError>;
     async fn write_string(&self, path: &Path, contents: &str) -> Result<(), IoError>;
     async fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, IoError>;
-    async fn list_dir_limited(&self, path: &Path, max_entries: usize) -> Result<Vec<PathBuf>, IoError>;
+    async fn list_dir_limited(
+        &self,
+        path: &Path,
+        max_entries: usize,
+    ) -> Result<Vec<PathBuf>, IoError>;
 }
 
 #[async_trait]
@@ -55,7 +63,11 @@ impl FileSystemPort for LocalIo {
             .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))
     }
 
-    async fn read_to_string_limited(&self, path: &Path, max_bytes: usize) -> Result<String, IoError> {
+    async fn read_to_string_limited(
+        &self,
+        path: &Path,
+        max_bytes: usize,
+    ) -> Result<String, IoError> {
         let mut file = tokio::fs::File::open(path)
             .await
             .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))?;
@@ -116,7 +128,11 @@ impl FileSystemPort for LocalIo {
         Ok(paths)
     }
 
-    async fn list_dir_limited(&self, path: &Path, max_entries: usize) -> Result<Vec<PathBuf>, IoError> {
+    async fn list_dir_limited(
+        &self,
+        path: &Path,
+        max_entries: usize,
+    ) -> Result<Vec<PathBuf>, IoError> {
         let mut entries = tokio::fs::read_dir(path)
             .await
             .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))?;

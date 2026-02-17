@@ -2345,6 +2345,7 @@ fn render_protocol(protocol: &ProviderProtocolName) -> &'static str {
         ProviderProtocolName::Null => "null",
         ProviderProtocolName::OpenAiCompatible => "openai_compatible",
         ProviderProtocolName::AnthropicMessages => "anthropic_messages",
+        ProviderProtocolName::GoogleGenerativeAi => "google_generative_ai",
         ProviderProtocolName::VercelAiGateway => "vercel_ai_gateway",
     }
 }

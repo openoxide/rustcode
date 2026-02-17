@@ -1114,7 +1114,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `cargo test --workspace` (2026-02-17)
 
 54. Google Gemini Provider (Generative Language API)
-- Status: in_progress
+- Status: completed (code + tests); live probe pending
 - Scope:
   - Implement `google` provider parity aligned with OpenCode’s `@ai-sdk/google` usage:
     - text completion (`run`)
@@ -1148,9 +1148,14 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation (must be recorded on completion):
   - `cargo test -p rustcode-llm` (unit parsing + endpoint normalization)
   - `cargo test --workspace`
+  - `./scripts/ci_matrix.sh`
   - Live unsandboxed probe (requires user-provided key; do not commit):
     - `GEMINI_API_KEY=... rustcode-cli --llm-provider google --model google/gemini-... run "hello"`
     - `GEMINI_API_KEY=... rustcode-cli --llm-provider google --model google/gemini-... agent "list then read Cargo.toml"`
+  - Pass: `cargo test -p rustcode-llm` (2026-02-17)
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pending: live Gemini run with real key (blocked on safe secret injection; do not embed API keys in command lines or recorded CI logs).
 
 
 ## Update Log
@@ -1183,6 +1188,11 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Completed Milestone 44 interactive `auth login` provider picker:
     - added TTY-only provider selection for `rustcode auth login` when provider omitted.
     - added provider hints for common providers (OpenCode, Vercel AI Gateway).
+  - Google Gemini provider parity:
+    - added `google_generative_ai` protocol implementation in `rustcode-llm` aligned with OpenCode `@ai-sdk/google` (generateContent + streamGenerateContent SSE).
+    - docs updated: `docs/CREDENTIAL_REQUIREMENTS.md`, `docs/PROVIDERS.md`.
+    - test hardening: prevent mock OAuth token servers from hanging the suite when token exchange never occurs.
+    - CLI fix: render protocol string for `ProviderProtocolName::GoogleGenerativeAi` so `models --json` remains exhaustive.
     - switched API key prompt to no-echo when supported, with sandbox PTY plaintext fallback.
   - Completed Milestone 43 `mcp status`:
     - added `mcp status [name]` and JSON contract.

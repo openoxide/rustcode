@@ -126,6 +126,7 @@ enum ProviderProtocol {
     OpenAiCompatible,
     AnthropicMessages,
     VercelAiGateway,
+    GoogleGenerativeAi,
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +162,7 @@ pub enum ProviderProtocolName {
     OpenAiCompatible,
     AnthropicMessages,
     VercelAiGateway,
+    GoogleGenerativeAi,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -285,6 +287,29 @@ pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmEr
                 ))
             })?;
             Ok(Arc::new(VercelAiGatewayClient::new(
+                provider.provider_id,
+                base_url,
+                api_key,
+            )?))
+        }
+        ProviderProtocol::GoogleGenerativeAi => {
+            if !config.allow_network {
+                return Err(LlmError::Config(
+                    "network access is disabled; set allow_network=true to use remote LLM providers"
+                        .to_string(),
+                ));
+            }
+
+            let base_url = provider
+                .base_url
+                .unwrap_or_else(|| "https://generativelanguage.googleapis.com".to_string());
+            let api_key = provider.api_key.ok_or_else(|| {
+                LlmError::Config(missing_api_key_message(
+                    &provider.provider_id,
+                    &provider.api_key_env_candidates,
+                ))
+            })?;
+            Ok(Arc::new(GoogleGenerativeAiClient::new(
                 provider.provider_id,
                 base_url,
                 api_key,
@@ -522,6 +547,7 @@ fn protocol_name(protocol: ProviderProtocol) -> ProviderProtocolName {
         ProviderProtocol::OpenAiCompatible => ProviderProtocolName::OpenAiCompatible,
         ProviderProtocol::AnthropicMessages => ProviderProtocolName::AnthropicMessages,
         ProviderProtocol::VercelAiGateway => ProviderProtocolName::VercelAiGateway,
+        ProviderProtocol::GoogleGenerativeAi => ProviderProtocolName::GoogleGenerativeAi,
     }
 }
 
@@ -531,6 +557,7 @@ fn normalize_endpoint(protocol: ProviderProtocol, base_url: &str) -> String {
         ProviderProtocol::OpenAiCompatible => normalize_openai_chat_endpoint(base_url),
         ProviderProtocol::AnthropicMessages => normalize_anthropic_messages_endpoint(base_url),
         ProviderProtocol::VercelAiGateway => normalize_vercel_gateway_endpoint(base_url),
+        ProviderProtocol::GoogleGenerativeAi => normalize_google_generate_endpoint(base_url),
     }
 }
 
@@ -673,6 +700,15 @@ fn provider_preset(provider_id: &str) -> ProviderPreset {
             default_api_key_envs: vec!["AI_GATEWAY_API_KEY".to_string()],
             requires_api_key: true,
         },
+        "google" => ProviderPreset {
+            protocol: ProviderProtocol::GoogleGenerativeAi,
+            default_base_url: Some("https://generativelanguage.googleapis.com".to_string()),
+            default_api_key_envs: vec![
+                "GOOGLE_GENERATIVE_AI_API_KEY".to_string(),
+                "GEMINI_API_KEY".to_string(),
+            ],
+            requires_api_key: true,
+        },
         "google-vertex"
         | "google-vertex-anthropic"
         | "amazon-bedrock"
@@ -711,6 +747,18 @@ fn provider_preset(provider_id: &str) -> ProviderPreset {
                 .is_some_and(|npm| npm.contains("anthropic"))
         {
             preset.protocol = ProviderProtocol::AnthropicMessages;
+        }
+        if matches!(preset.protocol, ProviderProtocol::OpenAiCompatible)
+            && models_provider
+                .npm
+                .as_deref()
+                .is_some_and(|npm| npm == "@ai-sdk/google")
+        {
+            preset.protocol = ProviderProtocol::GoogleGenerativeAi;
+            if preset.default_base_url.is_none() {
+                preset.default_base_url =
+                    Some("https://generativelanguage.googleapis.com".to_string());
+            }
         }
     }
 
@@ -1288,6 +1336,200 @@ impl LlmClient for VercelAiGatewayClient {
     }
 }
 
+#[derive(Debug)]
+struct GoogleGenerativeAiClient {
+    provider_id: String,
+    base_url: String,
+    api_key: String,
+    http: reqwest::Client,
+}
+
+impl GoogleGenerativeAiClient {
+    fn new(provider_id: String, base_url: String, api_key: String) -> Result<Self, LlmError> {
+        Ok(Self {
+            provider_id,
+            base_url,
+            api_key,
+            http: llm_http_client()?,
+        })
+    }
+
+    fn stream_endpoint(&self, model: &str) -> String {
+        let base = normalize_google_base_url(&self.base_url);
+        format!("{base}/models/{model}:streamGenerateContent?alt=sse")
+    }
+
+    fn generate_endpoint(&self, model: &str) -> String {
+        let base = normalize_google_base_url(&self.base_url);
+        format!("{base}/models/{model}:generateContent")
+    }
+}
+
+#[async_trait]
+impl LlmClient for GoogleGenerativeAiClient {
+    async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        let model = model_for_provider(&self.provider_id, &request.model);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("x-goog-api-key"),
+            HeaderValue::from_str(&self.api_key)
+                .map_err(|err| LlmError::Config(format!("invalid google api key header: {err}")))?,
+        );
+
+        let response = self
+            .http
+            .post(self.stream_endpoint(&model))
+            .headers(headers)
+            .json(&json!({
+                "contents": [{
+                    "role": "user",
+                    "parts": [{"text": request.prompt}],
+                }],
+                "generationConfig": {
+                    "maxOutputTokens": 1024,
+                }
+            }))
+            .send();
+
+        let response = timeout(HTTP_RESPONSE_HEADER_TIMEOUT, response)
+            .await
+            .map_err(|_| {
+                LlmError::Transport("timed out waiting for provider response headers".to_string())
+            })?
+            .map_err(|err| LlmError::Transport(err.to_string()))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = timeout(HTTP_RESPONSE_BODY_TIMEOUT, response.text())
+                .await
+                .map_err(|_| {
+                    LlmError::Transport("timed out reading provider error body".to_string())
+                })?
+                .map_err(|err| LlmError::Transport(err.to_string()))?;
+            return Err(LlmError::Transport(format!(
+                "provider returned {}: {}",
+                status,
+                truncate_for_error(&body)
+            )));
+        }
+
+        match read_sse_or_body(response, HTTP_STREAM_IDLE_TIMEOUT).await? {
+            StreamedProviderBody::Body(body) => {
+                let parsed: Value = serde_json::from_str(&body).map_err(|err| {
+                    LlmError::Invalid(format!("response is not valid JSON: {err}"))
+                })?;
+                let text = extract_google_text(&parsed).ok_or_else(|| {
+                    LlmError::Invalid("google response did not include text".to_string())
+                })?;
+                Ok(LlmResponse {
+                    text,
+                    chunks: Vec::new(),
+                })
+            }
+            StreamedProviderBody::SseEvents(events) => {
+                let mut chunks = Vec::new();
+                let mut combined = String::new();
+                for event in events {
+                    let Ok(parsed) = serde_json::from_str::<Value>(&event) else {
+                        continue;
+                    };
+                    if let Some(error_message) = extract_stream_error_message(&parsed) {
+                        return Err(LlmError::Transport(format!(
+                            "provider stream error: {error_message}"
+                        )));
+                    }
+                    if let Some(delta) = extract_google_text_delta(&parsed) {
+                        if !delta.is_empty() {
+                            combined.push_str(&delta);
+                            chunks.push(delta);
+                        }
+                    }
+                }
+                if combined.is_empty() {
+                    return Err(LlmError::Invalid(
+                        "google stream did not include text deltas".to_string(),
+                    ));
+                }
+                Ok(LlmResponse {
+                    text: combined,
+                    chunks,
+                })
+            }
+        }
+    }
+
+    async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, LlmError> {
+        let model = model_for_provider(&self.provider_id, &request.model);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("x-goog-api-key"),
+            HeaderValue::from_str(&self.api_key)
+                .map_err(|err| LlmError::Config(format!("invalid google api key header: {err}")))?,
+        );
+
+        let (system, contents) = google_contents_from_chat(&request)?;
+        let tools = google_tools_from_specs(&request.tools);
+
+        let mut payload = serde_json::Map::new();
+        payload.insert("contents".to_string(), Value::Array(contents));
+        payload.insert(
+            "generationConfig".to_string(),
+            json!({
+                "maxOutputTokens": 1024,
+            }),
+        );
+        if !system.is_empty() {
+            payload.insert(
+                "systemInstruction".to_string(),
+                json!({
+                    "role": "system",
+                    "parts": [{"text": system}],
+                }),
+            );
+        }
+        if !tools.is_empty() {
+            payload.insert("tools".to_string(), Value::Array(tools));
+        }
+
+        let response = self
+            .http
+            .post(self.generate_endpoint(&model))
+            .headers(headers)
+            .json(&Value::Object(payload))
+            .send();
+        let response = timeout(HTTP_RESPONSE_HEADER_TIMEOUT, response)
+            .await
+            .map_err(|_| {
+                LlmError::Transport("timed out waiting for provider response headers".to_string())
+            })?
+            .map_err(|err| LlmError::Transport(err.to_string()))?;
+
+        let status = response.status();
+        let body = timeout(HTTP_RESPONSE_BODY_TIMEOUT, response.text())
+            .await
+            .map_err(|_| LlmError::Transport("timed out reading provider body".to_string()))?
+            .map_err(|err| LlmError::Transport(err.to_string()))?;
+        if !status.is_success() {
+            return Err(LlmError::Transport(format!(
+                "provider returned {}: {}",
+                status,
+                truncate_for_error(&body)
+            )));
+        }
+
+        let parsed: Value = serde_json::from_str(&body)
+            .map_err(|err| LlmError::Invalid(format!("response is not valid JSON: {err}")))?;
+        let tool_calls = extract_google_tool_calls(&parsed);
+        let text = extract_google_text(&parsed).unwrap_or_default();
+        if text.is_empty() && tool_calls.is_empty() {
+            return Err(LlmError::Invalid(
+                "provider response did not include content or tool calls".to_string(),
+            ));
+        }
+        Ok(ChatResponse { text, tool_calls })
+    }
+}
+
 fn model_for_provider(provider_id: &str, requested_model: &str) -> String {
     if let Some((candidate_provider, candidate_model)) = parse_model_prefix(requested_model) {
         if candidate_provider.eq_ignore_ascii_case(provider_id)
@@ -1426,6 +1668,21 @@ fn normalize_vercel_gateway_endpoint(base_url: &str) -> String {
     } else {
         format!("{trimmed}/language-model")
     }
+}
+
+fn normalize_google_base_url(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    if trimmed.ends_with("/v1beta") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/v1beta")
+    }
+}
+
+fn normalize_google_generate_endpoint(base_url: &str) -> String {
+    // Diagnostics-only endpoint: the real request path includes the model id.
+    let normalized = normalize_google_base_url(base_url);
+    format!("{normalized}/models/*:generateContent")
 }
 
 enum StreamedProviderBody {
@@ -1762,6 +2019,179 @@ fn anthropic_tool_result_from_value(value: &Value) -> (String, bool) {
     (content, is_error)
 }
 
+fn extract_google_text(value: &Value) -> Option<String> {
+    let candidates = value.get("candidates")?.as_array()?;
+    let first = candidates.first()?;
+    let content = first.get("content")?;
+    let parts = content.get("parts")?.as_array()?;
+    let mut combined = String::new();
+    for part in parts {
+        if let Some(text) = part.get("text").and_then(Value::as_str) {
+            combined.push_str(text);
+        }
+    }
+    if combined.is_empty() {
+        None
+    } else {
+        Some(combined)
+    }
+}
+
+fn extract_google_text_delta(value: &Value) -> Option<String> {
+    // Streaming responses provide partial candidate content; treat extracted text as a delta.
+    extract_google_text(value)
+}
+
+fn extract_google_tool_calls(value: &Value) -> Vec<ToolCall> {
+    let Some(candidates) = value.get("candidates").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let Some(first) = candidates.first() else {
+        return Vec::new();
+    };
+    let Some(parts) = first
+        .get("content")
+        .and_then(|content| content.get("parts"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+
+    let mut calls = Vec::new();
+    let mut idx = 1usize;
+    for part in parts {
+        let Some(call) = part.get("functionCall") else {
+            continue;
+        };
+        let Some(name) = call.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let args = call.get("args").cloned().unwrap_or(Value::Null);
+        calls.push(ToolCall {
+            id: format!("call_{idx}"),
+            name: name.to_string(),
+            arguments: args.to_string(),
+        });
+        idx += 1;
+    }
+    calls
+}
+
+fn google_tools_from_specs(tools: &[ToolSpec]) -> Vec<Value> {
+    if tools.is_empty() {
+        return Vec::new();
+    }
+    let declarations = tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
+            })
+        })
+        .collect::<Vec<_>>();
+    vec![json!({
+        "functionDeclarations": declarations
+    })]
+}
+
+fn google_contents_from_chat(request: &ChatRequest) -> Result<(String, Vec<Value>), LlmError> {
+    let mut system = String::new();
+    let mut contents: Vec<Value> = Vec::new();
+
+    for message in &request.messages {
+        match message.role {
+            ChatRole::System => {
+                if let Some(text) = message.content.as_str() {
+                    if !system.is_empty() {
+                        system.push_str("\n\n");
+                    }
+                    system.push_str(text);
+                }
+            }
+            ChatRole::User => {
+                let text = google_text_from_value(&message.content);
+                if !text.is_empty() {
+                    contents.push(json!({
+                        "role": "user",
+                        "parts": [{"text": text}],
+                    }));
+                }
+            }
+            ChatRole::Assistant => {
+                let mut parts: Vec<Value> = Vec::new();
+                let text = google_text_from_value(&message.content);
+                if !text.is_empty() && !message.tool_calls.is_empty() {
+                    // Prefer tool calls over prose to avoid mixing partial thoughts with call intents.
+                    parts.push(json!({"text": text}));
+                } else if !text.is_empty() {
+                    parts.push(json!({"text": text}));
+                }
+                for call in &message.tool_calls {
+                    let args: Value = serde_json::from_str(&call.arguments).unwrap_or(Value::Null);
+                    parts.push(json!({
+                        "functionCall": {
+                            "name": call.name,
+                            "args": args,
+                        }
+                    }));
+                }
+                if !parts.is_empty() {
+                    contents.push(json!({
+                        "role": "model",
+                        "parts": parts,
+                    }));
+                }
+            }
+            ChatRole::Tool => {
+                let Some(tool_name) = message.tool_name.as_deref() else {
+                    return Err(LlmError::Invalid(
+                        "tool result message missing tool_name for google provider".to_string(),
+                    ));
+                };
+                let response = google_tool_response_object(&message.content);
+                contents.push(json!({
+                    "role": "user",
+                    "parts": [{
+                        "functionResponse": {
+                            "name": tool_name,
+                            "response": response,
+                        }
+                    }],
+                }));
+            }
+        }
+    }
+
+    Ok((system, contents))
+}
+
+fn google_text_from_value(value: &Value) -> String {
+    if let Some(text) = value.as_str() {
+        return text.to_string();
+    }
+    if value.is_null() {
+        return String::new();
+    }
+    value.to_string()
+}
+
+fn google_tool_response_object(value: &Value) -> Value {
+    if let Some(text) = value.as_str() {
+        if let Ok(parsed) = serde_json::from_str::<Value>(text) {
+            if parsed.is_object() {
+                return parsed;
+            }
+        }
+        return json!({ "output": text });
+    }
+    if value.is_object() {
+        return value.clone();
+    }
+    json!({ "output": value })
+}
+
 fn truncate_for_error(body: &str) -> String {
     const LIMIT: usize = 320;
     if body.len() <= LIMIT {
@@ -1961,6 +2391,60 @@ mod tests {
         let calls = extract_anthropic_tool_calls(&payload);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].id, "toolu_1");
+        assert_eq!(calls[0].name, "read");
+        assert!(calls[0].arguments.contains("README.md"));
+    }
+
+    #[test]
+    fn google_endpoint_normalization_appends_v1beta() {
+        assert_eq!(
+            normalize_google_base_url("https://generativelanguage.googleapis.com"),
+            "https://generativelanguage.googleapis.com/v1beta"
+        );
+        assert_eq!(
+            normalize_google_base_url("https://generativelanguage.googleapis.com/v1beta"),
+            "https://generativelanguage.googleapis.com/v1beta"
+        );
+        assert_eq!(
+            normalize_google_generate_endpoint("https://generativelanguage.googleapis.com"),
+            "https://generativelanguage.googleapis.com/v1beta/models/*:generateContent"
+        );
+    }
+
+    #[test]
+    fn parses_google_text_content() {
+        let payload = json!({
+            "candidates": [{
+                "content": {
+                    "parts": [
+                        {"text":"hello"},
+                        {"text":" world"}
+                    ]
+                }
+            }]
+        });
+        assert_eq!(
+            extract_google_text(&payload).as_deref(),
+            Some("hello world")
+        );
+    }
+
+    #[test]
+    fn parses_google_tool_calls_from_response() {
+        let payload = json!({
+            "candidates": [{
+                "content": {
+                    "parts": [{
+                        "functionCall": {
+                            "name": "read",
+                            "args": {"path":"README.md"}
+                        }
+                    }]
+                }
+            }]
+        });
+        let calls = extract_google_tool_calls(&payload);
+        assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].name, "read");
         assert!(calls[0].arguments.contains("README.md"));
     }
