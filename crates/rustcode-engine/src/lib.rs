@@ -6,6 +6,7 @@ use std::{
     env,
     path::{Component, Path, PathBuf},
 };
+use std::time::Duration;
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -291,6 +292,32 @@ impl Engine {
         .await
     }
 
+    async fn run_serve(
+        &self,
+        listen: String,
+        context: &CommandContext,
+        publisher: Arc<dyn EventPublisher>,
+    ) -> Result<(), ExecutionError> {
+        self.emit(
+            publisher.clone(),
+            EventScope::System,
+            EventPayload::Warning {
+                message: format!("serve endpoint configured: {listen}"),
+            },
+            context,
+        )
+        .await?;
+
+        loop {
+            tokio::select! {
+                _ = context.cancellation.cancelled() => {
+                    return Err(ExecutionError::Cancelled);
+                }
+                _ = tokio::time::sleep(Duration::from_secs(1)) => {}
+            }
+        }
+    }
+
     fn resolve_workspace_path(
         &self,
         context: &CommandContext,
@@ -391,15 +418,7 @@ impl CommandExecutor for Engine {
                 .await
             }
             Command::Serve { listen } => {
-                self.emit(
-                    publisher.clone(),
-                    EventScope::System,
-                    EventPayload::Warning {
-                        message: format!("serve endpoint configured: {listen}"),
-                    },
-                    &context,
-                )
-                .await
+                self.run_serve(listen, &context, publisher.clone()).await
             }
             Command::Version => {
                 self.emit(
@@ -660,5 +679,65 @@ mod tests {
 
         let seen_count = *seen.lock().await;
         assert_eq!(seen_count, 3);
+    }
+
+    #[tokio::test]
+    async fn serve_waits_until_cancelled() {
+        let cancellation = CancellationToken::new();
+        let context = CommandContext::with_cancellation(
+            Arc::new(ResolvedConfig::default()),
+            SessionMeta {
+                session_id: "s4".to_string(),
+                request_id: "r4".to_string(),
+                started_at: SystemTime::now(),
+            },
+            cancellation.clone(),
+        );
+
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+        );
+        let publisher = Arc::new(CollectingPublisher::default());
+
+        let task = tokio::spawn({
+            let publisher = publisher.clone();
+            async move {
+                engine
+                    .execute(
+                        Command::Serve {
+                            listen: "127.0.0.1:4317".to_string(),
+                        },
+                        context,
+                        publisher,
+                    )
+                    .await
+            }
+        });
+
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        cancellation.cancel();
+
+        let result = task.await.expect("task must join");
+        assert!(matches!(result, Err(ExecutionError::Cancelled)));
+
+        let events = publisher.events.lock().await.clone();
+        assert!(events.iter().any(|event| {
+            matches!(
+                &event.payload,
+                EventPayload::Warning { message }
+                if message.contains("serve endpoint configured")
+            )
+        }));
+        assert!(events.iter().any(|event| {
+            matches!(
+                &event.payload,
+                EventPayload::Warning { message }
+                if message == "execution cancelled"
+            )
+        }));
     }
 }

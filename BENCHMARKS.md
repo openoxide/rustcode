@@ -7,12 +7,14 @@
   - `startup [runs]`
   - `memory [prompt]`
   - `drift [seconds] [interval]`
+  - `serve [seconds] [interval]`
 
 Examples:
 ```bash
 ./scripts/benchmark.sh startup 5
 ./scripts/benchmark.sh memory "benchmark memory"
 ./scripts/benchmark.sh drift 20 5
+./scripts/benchmark.sh serve 20 5
 ./scripts/benchmark_record.sh benchmarks/latest.json
 ```
 
@@ -30,5 +32,8 @@ Examples:
 - `./scripts/benchmark.sh drift 12 4`:
   - observed RSS samples: `32 KB -> 5,424 KB -> 5,424 KB`
   - process remained stable and exited cleanly on cancellation.
+- `./scripts/benchmark.sh serve 8 4`:
+  - observed RSS samples: `32 KB -> 5,184 KB`
+  - service loop remained stable and exited cleanly on cancellation.
 - `./scripts/benchmark_record.sh benchmarks/latest.json`:
   - persists startup/memory/drift command output in JSON artifact format.

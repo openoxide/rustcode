@@ -7,6 +7,7 @@ Usage:
   scripts/benchmark.sh startup [runs]
   scripts/benchmark.sh memory [prompt]
   scripts/benchmark.sh drift [seconds] [interval]
+  scripts/benchmark.sh serve [seconds] [interval]
 USAGE
 }
 
@@ -63,6 +64,28 @@ case "$mode" in
 
     output_file="$(mktemp /tmp/rustcode-drift.XXXXXX)"
     "$bin" exec sleep 120 >"$output_file" 2>&1 &
+    pid="$!"
+    echo "pid=$pid"
+
+    elapsed=0
+    while [[ "$elapsed" -lt "$seconds" ]]; do
+      ps -o pid=,rss=,%cpu=,etime= -p "$pid" || true
+      sleep "$interval"
+      elapsed=$((elapsed + interval))
+    done
+
+    kill -INT "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+    echo "---tail---"
+    tail -n 20 "$output_file"
+    ;;
+  serve)
+    seconds="${1:-20}"
+    interval="${2:-5}"
+    echo "Benchmark: serve (seconds=$seconds interval=$interval)"
+
+    output_file="$(mktemp /tmp/rustcode-serve.XXXXXX)"
+    "$bin" serve --listen 127.0.0.1:4317 >"$output_file" 2>&1 &
     pid="$!"
     echo "pid=$pid"
 

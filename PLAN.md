@@ -140,6 +140,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass (partial): benchmark harness script added (`scripts/benchmark.sh`) with startup and memory modes (2026-02-17)
   - Pass: elevated benchmark run captured timing and RSS metrics (`startup 5`, `memory "bench memory probe"`, 2026-02-17)
   - Pass (partial): drift probe mode added and exercised (`drift 12 4`) with stable sampled RSS (2026-02-17)
+  - Pass (partial): serve-mode long-run benchmark (`serve 8 4`) with stable sampled RSS (2026-02-17)
+  - Pass (partial): benchmark JSON artifact persistence via `scripts/benchmark_record.sh` (2026-02-17)
 
 10. Documentation and Release Prep
 - Status: in_progress
@@ -184,9 +186,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add `serve`-mode long-run benchmark once service path becomes persistent.
-2. Add trend-comparison utility on top of `benchmarks/latest.json`.
-3. Draft first release note from `PLAN.md` + changelog policy.
+1. Add trend-comparison utility on top of `benchmarks/latest.json`.
+2. Draft first release note from `PLAN.md` + changelog policy.
+3. Add automated benchmark assertions with conservative thresholds.
 
 ## Update Log
 - 2026-02-17:
@@ -258,6 +260,13 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - Added `UiInput` abstractions (`Domain`, `Resize`, `Shutdown`) and `UiSummary` counters.
     - Added domain-event adapter (`from_domain_receiver`) for TUI event consumption.
     - Added TUI unit tests for resize/shutdown semantics and maintained CLI TUI integration coverage.
+  - Implemented persistent `serve` execution loop (runs until cancellation) and added engine test coverage.
+  - Added `serve` benchmark mode and sample run:
+    - `./scripts/benchmark.sh serve 8 4`
+    - observed stable RSS sample (`32 -> 5184 KB`) and clean cancellation.
+  - Added benchmark JSON persistence tooling:
+    - `scripts/benchmark_record.sh benchmarks/latest.json`
+    - generated artifact snapshot under `benchmarks/latest.json` including `startup`, `memory`, `drift`, and `serve` sections.
   - Extended benchmark harness with drift mode and captured sample stability run:
     - `./scripts/benchmark.sh drift 12 4`
     - RSS samples stabilized at `~5424 KB` over sampled window.
