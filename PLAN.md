@@ -191,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add per-connection serve request timeout to avoid stalled sockets.
-2. Add serve-mode smoke probe to CI (request/response assertion during run).
-3. Add benchmark comparison gate against prior baseline on release branches.
+1. Add serve-mode smoke probe to CI (request/response assertion during run).
+2. Add benchmark comparison gate against prior baseline on release branches.
+3. Add platform-specific benchmark parser to reduce `ALLOW_MISSING_METRICS` use.
 
 ## Update Log
 - 2026-02-17:
@@ -320,6 +320,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Extended load benchmark telemetry:
     - `scripts/benchmark.sh load` now captures per-batch latency.
     - reports `latency_p50_s`, `latency_p95_s`, and `latency_max_s` summary lines.
+  - Serve connection hardening completed:
+    - added per-connection read timeout with `408 Request Timeout` response contract.
+    - connection-level read/write failures now emit warning events and keep listener alive.
+    - integration coverage validates timeout response and emitted `ServeRequest` timeout event.
   - Added structured serve telemetry:
     - introduced `EventPayload::ServeRequest { method, path, status }`.
     - `serve` now emits route-level events for each handled request.

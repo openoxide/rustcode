@@ -5,12 +5,14 @@ use std::sync::{
 use std::{
     env,
     path::{Component, Path, PathBuf},
+    time::Duration,
 };
 
 use async_trait::async_trait;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
+use tokio::time::timeout;
 use tracing::debug;
 
 use rustcode_core::command::Command;
@@ -324,9 +326,20 @@ impl Engine {
                 incoming = listener.accept() => {
                     match incoming {
                         Ok((stream, _addr)) => {
-                            self
+                            if let Err(err) = self
                                 .handle_serve_connection(stream, context, publisher.clone())
+                                .await
+                            {
+                                self.emit(
+                                    publisher.clone(),
+                                    EventScope::System,
+                                    EventPayload::Warning {
+                                        message: format!("serve connection error: {err}"),
+                                    },
+                                    context,
+                                )
                                 .await?;
+                            }
                         }
                         Err(err) => {
                             return Err(ExecutionError::Executor(format!("accept failed: {err}")));
@@ -371,10 +384,41 @@ impl Engine {
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
         let mut buffer = [0u8; 2048];
-        let bytes = stream
-            .read(&mut buffer)
-            .await
-            .map_err(|err| ExecutionError::Executor(format!("failed to read request: {err}")))?;
+        let bytes = match timeout(Duration::from_secs(2), stream.read(&mut buffer)).await {
+            Ok(Ok(bytes)) => bytes,
+            Ok(Err(err)) => {
+                return Err(ExecutionError::Executor(format!(
+                    "failed to read request: {err}"
+                )));
+            }
+            Err(_) => {
+                let body = "{\"error\":\"request timeout\"}\n";
+                let response = format!(
+                    "HTTP/1.1 408 Request Timeout\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+
+                stream.write_all(response.as_bytes()).await.map_err(|err| {
+                    ExecutionError::Executor(format!("failed to write timeout response: {err}"))
+                })?;
+                stream.shutdown().await.map_err(|err| {
+                    ExecutionError::Executor(format!("failed to shutdown stream: {err}"))
+                })?;
+
+                self.emit(
+                    publisher,
+                    EventScope::System,
+                    EventPayload::ServeRequest {
+                        method: String::new(),
+                        path: String::new(),
+                        status: 408,
+                    },
+                    context,
+                )
+                .await?;
+                return Ok(());
+            }
+        };
 
         let request = String::from_utf8_lossy(&buffer[..bytes]);
         let request_line = request.lines().next().unwrap_or_default();

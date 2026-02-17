@@ -35,8 +35,8 @@ Examples:
 - `./scripts/benchmark.sh startup 5`:
   - `real 0.00` reported across runs on host timer granularity.
 - `./scripts/benchmark.sh memory "bench memory probe"`:
-  - `maximum resident set size: 5,521,408`
-  - `peak memory footprint: 2,130,208`
+  - `maximum resident set size: 5,537,792`
+  - `peak memory footprint: 2,097,440`
 - `./scripts/benchmark.sh drift 12 4`:
   - observed RSS samples: `32 KB -> 5,392 KB`
   - process remained stable and exited cleanly on cancellation.
@@ -46,7 +46,7 @@ Examples:
 - `./scripts/benchmark.sh load 3 2`:
   - completed concurrent batch probes successfully (`3` batches x `2` workers).
   - emitted latency summary (`latency_p50_s`, `latency_p95_s`, `latency_max_s`).
-  - latest sample: `p50=0.009s`, `p95=0.204s`, `max=0.204s`.
+  - latest sample: `p50=0.010s`, `p95=0.203s`, `max=0.203s`.
 - `./scripts/benchmark_record.sh benchmarks/latest.json`:
   - persists startup/memory/drift/serve/load output in JSON artifact format.
 - `./scripts/benchmark_compare.sh <old> <new>`:

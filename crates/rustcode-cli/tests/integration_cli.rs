@@ -160,6 +160,24 @@ fn serve_exposes_health_response_and_cancels_cleanly() {
         "response: {not_found_response}"
     );
 
+    let mut timeout_stream =
+        TcpStream::connect(("127.0.0.1", port)).expect("must open timeout probe connection");
+    timeout_stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .expect("must set timeout");
+    let mut timeout_response = String::new();
+    timeout_stream
+        .read_to_string(&mut timeout_response)
+        .expect("must read timeout response");
+    assert!(
+        timeout_response.contains("408 Request Timeout"),
+        "response: {timeout_response}"
+    );
+    assert!(
+        timeout_response.contains("{\"error\":\"request timeout\"}"),
+        "response: {timeout_response}"
+    );
+
     let pid = child.id().to_string();
     let kill_status = Command::new("kill")
         .args(["-INT", &pid])
@@ -187,6 +205,10 @@ fn serve_exposes_health_response_and_cancels_cleanly() {
     );
     assert!(
         stdout.contains("ServeRequest { method: \"GET\", path: \"/does-not-exist\", status: 404 }"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("ServeRequest { method: \"\", path: \"\", status: 408 }"),
         "stdout: {stdout}"
     );
     assert!(stdout.contains("execution cancelled"), "stdout: {stdout}");
