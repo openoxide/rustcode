@@ -299,6 +299,28 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `rustcode --json models` emits parseable JSON summary.
     - `rustcode --json models openrouter` emits provider diagnostics + large model list payload.
 
+17. Backend Selection Policy Knobs
+- Status: completed
+- Deliverables:
+  - Added configurable backend-selection policy knobs to resolved config:
+    - `provider_agnostic_weight`
+    - `automation_skills_weight`
+    - `open_source_weight`
+    - `lsp_support_weight`
+    - `privacy_weight`
+    - `subscription_penalty`
+  - Added TOML schema support:
+    - `[policy.backend_selection]`
+  - Added non-negative validation for all policy weights.
+  - Added policy documentation:
+    - `docs/BACKEND_SELECTION_POLICY.md`
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: config tests:
+    - `backend_selection_policy_layers_and_validates`
+    - `backend_selection_policy_rejects_negative_weight`
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -333,7 +355,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
 2. Implement remaining real OAuth token exchange adapters (OpenAI browser/device and GitLab OAuth callback) behind `rustcode-auth`.
-3. Add provider/tool selection policy doc + config knobs using weighted scoring (model flexibility, automation depth, extensibility, privacy) to operationalize Codex vs OpenCode tradeoffs.
+3. Wire backend selection policy into runtime provider-routing decisions and expose scoring diagnostics in CLI output.
 
 ## Update Log
 - 2026-02-17:
@@ -500,6 +522,14 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
       - `cargo test --workspace`
       - `./scripts/ci_matrix.sh`
       - live `rustcode --json models` and `rustcode --json models openrouter` probes.
+  - Completed Milestone 17 backend-selection policy knobs:
+    - added `[policy.backend_selection]` config surface with weighted scoring inputs.
+    - added config validation to reject negative policy weights.
+    - added documentation in `docs/BACKEND_SELECTION_POLICY.md`.
+    - validated via:
+      - `cargo test --workspace`
+      - `./scripts/ci_matrix.sh`
+      - focused config policy tests for layering + validation.
     - enforces conservative memory thresholds with environment overrides.
   - Extended benchmark harness with drift mode and captured sample stability run:
     - `./scripts/benchmark.sh drift 12 4`
