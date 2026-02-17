@@ -176,9 +176,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add CLI integration test harness for signal and streaming scenarios.
-2. Add event schema compatibility tests for future version bumps.
-3. Start TUI integration work with event-consumer loop contracts.
+1. Add event schema compatibility tests for future version bumps.
+2. Start TUI integration work with event-consumer loop contracts.
+3. Expand plugin boundary with fixture plugin crate integration tests.
 
 ## Update Log
 - 2026-02-17:
@@ -224,3 +224,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - Added plugin lifecycle operations (`unregister`, `len`, `is_empty`).
     - Added plugin lifecycle tests in `rustcode-plugins`.
     - Added engine test validating plugin event-subscription hook execution.
+  - Added CLI integration harness (`crates/rustcode-cli/tests/integration_cli.rs`):
+    - JSON stream envelope/`Completed` event assertion.
+    - SIGINT cancellation behavior assertion for long-running command.
+  - Validation pass: `cargo test --workspace` including integration tests.
