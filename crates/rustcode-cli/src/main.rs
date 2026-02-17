@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use rustcode_auth::{
     known_oauth_providers, methods_for_provider, oauth_login_hint,
-    poll_device_code_flow_for_api_key, start_device_code_flow, AuthStore, StoredCredential,
+    poll_device_code_flow_for_credential, start_device_code_flow, AuthStore, StoredCredential,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -247,8 +247,24 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
                     return Ok(());
                 }
                 let timeout = Duration::from_secs(timeout_secs.max(1));
-                let token = poll_device_code_flow_for_api_key(&flow, timeout).await?;
-                store.set_api_key(&provider, &token)?;
+                let credential = poll_device_code_flow_for_credential(&flow, timeout).await?;
+                if credential.refresh_token.is_some() || credential.expires_in_secs.is_some() {
+                    let expires_at_unix = credential.expires_in_secs.map(|secs| {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|now| now.as_secs().saturating_add(secs) as i64)
+                            .unwrap_or(secs as i64)
+                    });
+                    store.set_oauth(
+                        &provider,
+                        &credential.access_token,
+                        credential.refresh_token.as_deref(),
+                        expires_at_unix,
+                        credential.account_id.as_deref(),
+                    )?;
+                } else {
+                    store.set_api_key(&provider, &credential.access_token)?;
+                }
                 if !write_stdout_line("status=authorized")?
                     || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
                 {

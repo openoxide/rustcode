@@ -99,6 +99,34 @@ impl AuthStore {
         self.write_file(&auth)
     }
 
+    pub fn set_oauth(
+        &self,
+        provider: &str,
+        access_token: &str,
+        refresh_token: Option<&str>,
+        expires_at_unix: Option<i64>,
+        account_id: Option<&str>,
+    ) -> Result<(), AuthError> {
+        validate_provider(provider)?;
+        if access_token.trim().is_empty() {
+            return Err(AuthError::Validation(
+                "oauth access token must not be empty".to_string(),
+            ));
+        }
+
+        let mut auth = self.read_file()?;
+        auth.providers.insert(
+            provider.to_string(),
+            StoredCredential::OAuth {
+                access_token: access_token.to_string(),
+                refresh_token: refresh_token.map(ToOwned::to_owned),
+                expires_at_unix,
+                account_id: account_id.map(ToOwned::to_owned),
+            },
+        );
+        self.write_file(&auth)
+    }
+
     pub fn remove(&self, provider: &str) -> Result<bool, AuthError> {
         validate_provider(provider)?;
         let mut auth = self.read_file()?;
@@ -241,6 +269,22 @@ pub async fn poll_device_code_flow_for_api_key(
     flow: &DeviceCodeFlowStart,
     timeout: Duration,
 ) -> Result<String, AuthError> {
+    let credential = poll_device_code_flow_for_credential(flow, timeout).await?;
+    Ok(credential.access_token)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DeviceCodeFlowCredential {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_in_secs: Option<u64>,
+    pub account_id: Option<String>,
+}
+
+pub async fn poll_device_code_flow_for_credential(
+    flow: &DeviceCodeFlowStart,
+    timeout: Duration,
+) -> Result<DeviceCodeFlowCredential, AuthError> {
     match flow.provider.as_str() {
         "openai" => poll_openai_device_code(flow, timeout).await,
         "github-copilot" | "github-copilot-enterprise" => {
@@ -287,6 +331,8 @@ struct OpenAiDeviceTokenPollResponse {
 #[derive(Debug, Deserialize)]
 struct OpenAiTokenExchangeResponse {
     access_token: String,
+    refresh_token: Option<String>,
+    expires_in: Option<u64>,
 }
 
 const OPENAI_ISSUER: &str = "https://auth.openai.com";
@@ -377,7 +423,7 @@ async fn start_openai_device_code(provider: &str) -> Result<DeviceCodeFlowStart,
 async fn poll_github_device_code(
     flow: &DeviceCodeFlowStart,
     timeout: Duration,
-) -> Result<String, AuthError> {
+) -> Result<DeviceCodeFlowCredential, AuthError> {
     let client = reqwest::Client::new();
     let token_url = format!("https://{}/login/oauth/access_token", flow.domain);
     let deadline = Instant::now() + timeout;
@@ -411,7 +457,12 @@ async fn poll_github_device_code(
         let parsed: GithubTokenResponse =
             serde_json::from_str(&body).map_err(|err| AuthError::Parse(err.to_string()))?;
         if let Some(token) = parsed.access_token {
-            return Ok(token);
+            return Ok(DeviceCodeFlowCredential {
+                access_token: token,
+                refresh_token: None,
+                expires_in_secs: None,
+                account_id: None,
+            });
         }
 
         let error = parsed
@@ -445,7 +496,7 @@ async fn poll_github_device_code(
 async fn poll_openai_device_code(
     flow: &DeviceCodeFlowStart,
     timeout: Duration,
-) -> Result<String, AuthError> {
+) -> Result<DeviceCodeFlowCredential, AuthError> {
     let client = reqwest::Client::new();
     let deadline = Instant::now() + timeout;
     let interval = flow.interval_secs.max(1);
@@ -529,7 +580,12 @@ async fn poll_openai_device_code(
         }
         let token: OpenAiTokenExchangeResponse = serde_json::from_str(&exchange_body)
             .map_err(|err| AuthError::Parse(err.to_string()))?;
-        return Ok(token.access_token);
+        return Ok(DeviceCodeFlowCredential {
+            access_token: token.access_token,
+            refresh_token: token.refresh_token,
+            expires_in_secs: token.expires_in,
+            account_id: None,
+        });
     }
 
     Err(AuthError::OAuthTimeout)
@@ -639,6 +695,37 @@ mod tests {
             .get_api_key("openrouter")
             .expect("get should succeed")
             .is_none());
+    }
+
+    #[test]
+    fn oauth_round_trip_and_remove() {
+        let path = make_temp_file_path("auth-oauth-roundtrip");
+        let store = AuthStore::with_path(path);
+
+        store
+            .set_oauth(
+                "openai",
+                "access-token",
+                Some("refresh-token"),
+                Some(1234),
+                Some("account-1"),
+            )
+            .expect("set oauth should succeed");
+        let value = store.get("openai").expect("get oauth should succeed");
+        match value {
+            Some(StoredCredential::OAuth {
+                access_token,
+                refresh_token,
+                expires_at_unix,
+                account_id,
+            }) => {
+                assert_eq!(access_token, "access-token");
+                assert_eq!(refresh_token.as_deref(), Some("refresh-token"));
+                assert_eq!(expires_at_unix, Some(1234));
+                assert_eq!(account_id.as_deref(), Some("account-1"));
+            }
+            _ => panic!("expected oauth credential"),
+        }
     }
 
     #[test]
