@@ -27,6 +27,11 @@ cargo run -q -p rustcode-cli -- edit path/to/file "from" "to"
 cargo run -q -p rustcode-cli -- exec echo hi
 ```
 
+## Provider Setup
+```bash
+cargo run -q -p rustcode-cli -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY run "hello"
+```
+
 ## TUI Path
 ```bash
 cargo run -q -p rustcode-cli -- tui
@@ -44,3 +49,4 @@ cargo run -q -p rustcode-cli -- tui
 - Project-local config (`rustcode.toml`) is trust-gated.
 - Use `--trust-project-config` only for trusted repositories.
 - JSON mode includes `schema_version` in every event envelope.
+- Provider setup details: `docs/PROVIDERS.md`.

@@ -11,7 +11,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Current Mode
 - Active mode: Slow Deep Research
-- Status: Feature delivery mode (baseline complete; iterative hardening active)
+- Status: Feature delivery mode (baseline complete; multi-provider LLM implementation active)
 
 ## Milestones
 
@@ -159,6 +159,26 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: release notes draft created from validated plan + changelog policy (`docs/RELEASE_NOTES_DRAFT.md`, 2026-02-17)
   - Pass: release packaging checklist added (`docs/RELEASE_PACKAGING_CHECKLIST.md`, 2026-02-17)
 
+11. Multi-Provider LLM Runtime
+- Status: completed
+- Deliverables:
+  - Provider-aware config fields and overrides (`[llm] provider/base_url/api_key_env`, CLI overrides, env overrides)
+  - Adapter-based LLM factory with explicit protocols:
+    - `null`
+    - OpenAI-compatible chat completions
+    - Anthropic messages API
+  - Provider preset catalog seeded from opencode-compatible provider IDs (OpenAI, OpenRouter, Groq, xAI, Mistral, Together, Perplexity, DeepInfra, Cerebras, Ollama, Azure variants, Copilot variants, Cloudflare variants, and generic fallback)
+  - Runtime network gating tied to `allow_network`
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: runtime probes
+    - default null path: `cargo run -q -p rustcode-cli -- run "provider smoke"`
+    - network-disabled guard: provider init fails with actionable message
+    - missing-key guard: provider init fails with actionable message
+    - live transport path exercised with dummy key against OpenRouter endpoint (expected network/authorization failure path captured)
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -191,9 +211,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add release cut workflow using `gh` with approval gate.
-2. Add branch protection guidance and required-check manifest.
-3. Add checksum/signature verification job for release artifacts.
+1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
+2. Add provider/model discovery command (`rustcode models`) with resolved provider diagnostics.
+3. Add fixture-based HTTP integration tests for provider adapters (mock server with protocol contracts).
 
 ## Update Log
 - 2026-02-17:
@@ -258,6 +278,22 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - validated via `cargo test -p rustcode-plugins` and `cargo test --workspace`.
   - Added TUI smoke checklist doc: `docs/TUI_SMOKE_CHECKLIST.md`.
   - Captured manual validation expectations for launch, Ctrl+C, resize, and repeat stability.
+  - Completed Milestone 11:
+    - Added provider-aware config fields in core config (`llm_provider`, `llm_base_url`, `llm_api_key_env`).
+    - Added config loader support for `[llm]` block with `snake_case` and opencode-style aliases (`baseURL`, `apiKeyEnv`).
+    - Added CLI global overrides (`--llm-provider`, `--llm-base-url`, `--llm-api-key-env`) and wired them into config resolution.
+    - Replaced hardcoded `NullLlmClient` wiring in CLI with `rustcode_llm::build_client`.
+    - Implemented adapter-based LLM clients in `rustcode-llm`:
+      - OpenAI-compatible chat completions transport
+      - Anthropic messages transport
+      - provider preset catalog and model-prefix normalization (`provider/model`).
+    - Added LLM unit tests for provider resolution, endpoint normalization, and response extraction.
+    - Added config unit tests for layered `[llm]` precedence and CLI override behavior.
+    - Ran validation:
+      - `cargo fmt --all`
+      - `cargo test --workspace`
+      - `./scripts/ci_matrix.sh`
+      - runtime smoke probes for null/default, network guard, missing key guard, and remote transport error path.
   - Ran benchmark harness with elevated permissions to capture system metrics:
     - startup (`5` runs): reported `0.00s` real per run on this host timer granularity.
     - memory probe: `maximum resident set size: 5,242,880`, `peak memory footprint: 2,064,696`.

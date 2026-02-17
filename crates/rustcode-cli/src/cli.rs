@@ -17,6 +17,15 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub model: Option<String>,
 
+    #[arg(long = "llm-provider", global = true)]
+    pub llm_provider: Option<String>,
+
+    #[arg(long = "llm-base-url", global = true)]
+    pub llm_base_url: Option<String>,
+
+    #[arg(long = "llm-api-key-env", global = true)]
+    pub llm_api_key_env: Option<String>,
+
     #[arg(long = "trust-project-config", global = true)]
     pub trust_project_config: bool,
 }
@@ -129,5 +138,28 @@ mod tests {
             }
             _ => panic!("expected edit command"),
         }
+    }
+
+    #[test]
+    fn global_llm_flags_parse() {
+        let cli = Cli::try_parse_from([
+            "rustcode",
+            "--llm-provider",
+            "openrouter",
+            "--llm-base-url",
+            "https://openrouter.ai/api/v1",
+            "--llm-api-key-env",
+            "OPENROUTER_API_KEY",
+            "run",
+            "ping",
+        ])
+        .expect("cli should parse");
+
+        assert_eq!(cli.llm_provider.as_deref(), Some("openrouter"));
+        assert_eq!(
+            cli.llm_base_url.as_deref(),
+            Some("https://openrouter.ai/api/v1")
+        );
+        assert_eq!(cli.llm_api_key_env.as_deref(), Some("OPENROUTER_API_KEY"));
     }
 }

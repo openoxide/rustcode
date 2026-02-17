@@ -13,7 +13,7 @@ use rustcode_core::error::ExecutionError;
 use rustcode_core::ports::CommandExecutor;
 use rustcode_engine::{ChannelPublisher, Engine, WorkspacePermissionPolicy};
 use rustcode_io::LocalIo;
-use rustcode_llm::NullLlmClient;
+use rustcode_llm::build_client;
 use rustcode_plugins::PluginRegistry;
 use rustcode_tui::TuiApp;
 
@@ -35,9 +35,13 @@ async fn main() -> Result<()> {
     let mut config_sources = ConfigSources::new(cwd);
     config_sources.profile_override = cli.profile.clone();
     config_sources.model_override = cli.model.clone();
+    config_sources.llm_provider_override = cli.llm_provider.clone();
+    config_sources.llm_base_url_override = cli.llm_base_url.clone();
+    config_sources.llm_api_key_env_override = cli.llm_api_key_env.clone();
     config_sources.trust_project = cli.trust_project_config;
 
     let config = ConfigLoader::load(&config_sources).context("failed to load configuration")?;
+    let llm_client = build_client(&config).context("failed to initialize llm provider")?;
 
     let cancellation = CancellationToken::new();
     let context = CommandContext::with_cancellation(
@@ -55,7 +59,7 @@ async fn main() -> Result<()> {
 
     let io = Arc::new(LocalIo);
     let engine = Engine::new(
-        Arc::new(NullLlmClient),
+        llm_client,
         io.clone(),
         io,
         Arc::new(WorkspacePermissionPolicy),

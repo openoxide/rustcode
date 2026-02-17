@@ -11,6 +11,9 @@ pub struct ConfigSources {
     pub cwd: PathBuf,
     pub profile_override: Option<String>,
     pub model_override: Option<String>,
+    pub llm_provider_override: Option<String>,
+    pub llm_base_url_override: Option<String>,
+    pub llm_api_key_env_override: Option<String>,
     pub global_config_path: Option<PathBuf>,
     pub user_config_path: Option<PathBuf>,
     pub project_config_path: Option<PathBuf>,
@@ -24,6 +27,9 @@ impl ConfigSources {
             cwd,
             profile_override: None,
             model_override: None,
+            llm_provider_override: None,
+            llm_base_url_override: None,
+            llm_api_key_env_override: None,
             global_config_path: None,
             user_config_path: None,
             project_config_path: None,
@@ -37,10 +43,20 @@ impl ConfigSources {
 struct FileConfig {
     profile: Option<String>,
     model: Option<String>,
+    llm: Option<LlmConfig>,
     allow_network: Option<bool>,
     plugins: Option<Vec<String>>,
     env: Option<BTreeMap<String, String>>,
     trust: Option<TrustConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LlmConfig {
+    provider: Option<String>,
+    #[serde(alias = "baseURL")]
+    base_url: Option<String>,
+    #[serde(alias = "apiKeyEnv")]
+    api_key_env: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -101,6 +117,15 @@ impl ConfigLoader {
             if let Ok(model) = std::env::var("RUSTCODE_MODEL") {
                 cfg.model = model;
             }
+            if let Ok(llm_provider) = std::env::var("RUSTCODE_LLM_PROVIDER") {
+                cfg.llm_provider = llm_provider;
+            }
+            if let Ok(llm_base_url) = std::env::var("RUSTCODE_LLM_BASE_URL") {
+                cfg.llm_base_url = Some(llm_base_url);
+            }
+            if let Ok(llm_api_key_env) = std::env::var("RUSTCODE_LLM_API_KEY_ENV") {
+                cfg.llm_api_key_env = Some(llm_api_key_env);
+            }
         }
 
         if let Some(profile) = &sources.profile_override {
@@ -108,6 +133,15 @@ impl ConfigLoader {
         }
         if let Some(model) = &sources.model_override {
             cfg.model = model.clone();
+        }
+        if let Some(provider) = &sources.llm_provider_override {
+            cfg.llm_provider = provider.clone();
+        }
+        if let Some(base_url) = &sources.llm_base_url_override {
+            cfg.llm_base_url = Some(base_url.clone());
+        }
+        if let Some(api_key_env) = &sources.llm_api_key_env_override {
+            cfg.llm_api_key_env = Some(api_key_env.clone());
         }
 
         validate(&cfg)?;
@@ -186,6 +220,17 @@ fn apply_file(cfg: &mut ResolvedConfig, file_cfg: &FileConfig) {
     if let Some(model) = &file_cfg.model {
         cfg.model = model.clone();
     }
+    if let Some(llm) = &file_cfg.llm {
+        if let Some(provider) = &llm.provider {
+            cfg.llm_provider = provider.clone();
+        }
+        if let Some(base_url) = &llm.base_url {
+            cfg.llm_base_url = Some(base_url.clone());
+        }
+        if let Some(api_key_env) = &llm.api_key_env {
+            cfg.llm_api_key_env = Some(api_key_env.clone());
+        }
+    }
     if let Some(allow_network) = file_cfg.allow_network {
         cfg.allow_network = allow_network;
     }
@@ -256,6 +301,18 @@ fn validate(cfg: &ResolvedConfig) -> Result<(), ConfigError> {
         return Err(ConfigError::Validation(
             "model must not be empty".to_string(),
         ));
+    }
+    if cfg.llm_provider.trim().is_empty() {
+        return Err(ConfigError::Validation(
+            "llm.provider must not be empty".to_string(),
+        ));
+    }
+    if let Some(api_key_env) = cfg.llm_api_key_env.as_ref() {
+        if api_key_env.trim().is_empty() {
+            return Err(ConfigError::Validation(
+                "llm.api_key_env must not be empty".to_string(),
+            ));
+        }
     }
     Ok(())
 }
@@ -417,6 +474,55 @@ projects = ["{}"]
         let cfg = ConfigLoader::load(&sources).expect("config should load");
         assert_eq!(cfg.profile, "cli-profile");
         assert_eq!(cfg.model, "cli-model");
+    }
+
+    #[test]
+    fn llm_config_layers_and_cli_override_apply() {
+        let temp_root = make_temp_dir("llm-config");
+        let cwd = temp_root.join("project");
+        fs::create_dir_all(&cwd).expect("must create cwd");
+
+        let user = temp_root.join("user.toml");
+        let project = cwd.join("rustcode.toml");
+
+        write_config(
+            &user,
+            &format!(
+                r#"
+[llm]
+provider = "openrouter"
+base_url = "https://openrouter.ai/api/v1"
+api_key_env = "OPENROUTER_API_KEY"
+
+[trust]
+projects = ["{}"]
+"#,
+                cwd.display()
+            ),
+        );
+        write_config(
+            &project,
+            r#"
+[llm]
+provider = "anthropic"
+baseURL = "https://api.anthropic.com"
+apiKeyEnv = "ANTHROPIC_API_KEY"
+"#,
+        );
+
+        let mut sources = ConfigSources::new(cwd);
+        sources.read_process_env = false;
+        sources.user_config_path = Some(user);
+        sources.project_config_path = Some(project);
+        sources.llm_provider_override = Some("ollama".to_string());
+
+        let cfg = ConfigLoader::load(&sources).expect("config should load");
+        assert_eq!(cfg.llm_provider, "ollama");
+        assert_eq!(
+            cfg.llm_base_url.as_deref(),
+            Some("https://api.anthropic.com")
+        );
+        assert_eq!(cfg.llm_api_key_env.as_deref(), Some("ANTHROPIC_API_KEY"));
     }
 
     fn write_config(path: &Path, contents: &str) {
