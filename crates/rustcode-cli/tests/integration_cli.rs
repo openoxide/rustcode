@@ -101,6 +101,36 @@ fn auth_set_key_and_status_round_trip() {
     assert!(status_stdout.contains("credential=stored:api_key"));
 }
 
+#[test]
+fn models_command_reads_custom_models_index() {
+    let models_path = make_temp_file_path("models-index");
+    std::fs::write(
+        &models_path,
+        r#"{
+  "alpha": { "name": "Alpha Provider", "models": { "m1": {}, "m2": {} } },
+  "beta": { "name": "Beta Provider", "models": { "x1": {} } }
+}"#,
+    )
+    .expect("must write models fixture");
+
+    let output = Command::new(rustcode_bin())
+        .args(["models", "alpha"])
+        .env("RUSTCODE_MODELS_PATH", &models_path)
+        .output()
+        .expect("must run rustcode models");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains("alpha/m1"), "stdout: {stdout}");
+    assert!(stdout.contains("alpha/m2"), "stdout: {stdout}");
+}
+
 #[cfg(unix)]
 #[test]
 fn sigint_cancels_long_running_command_gracefully() {

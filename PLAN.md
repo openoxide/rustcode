@@ -8,6 +8,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - No implementation starts before measured baseline and architecture decisions are documented.
 - Every milestone must include validation commands and pass/fail notes.
 - Update this file in every substantive commit.
+- Before implementing a feature, check both `opencode` and `codex` code/docs for behavior parity and capture references in the update log.
+- Do not consider a feature complete with tests alone; run live CLI usage paths for that feature and record observed output.
+- Ask the user immediately when external credentials, account context, or provider-specific access is required for end-to-end validation.
 
 ## Current Mode
 - Active mode: Slow Deep Research
@@ -203,6 +206,26 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: integration test for auth set/status round-trip (`crates/rustcode-cli/tests/integration_cli.rs`)
   - Pass: live unsandboxed OpenRouter execution via stored key path returns model output (`OK`) (2026-02-17)
 
+13. Provider/Model Discovery CLI
+- Status: completed
+- Deliverables:
+  - Added `models` command to inspect provider/model catalog from models index.
+  - Supports:
+    - `rustcode models` (provider summary view)
+    - `rustcode models <provider>` (fully-qualified `provider/model` list)
+  - Models index resolution:
+    - `RUSTCODE_MODELS_PATH`
+    - `XDG_CACHE_HOME/opencode/models.json`
+    - `~/.cache/opencode/models.json`
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration test `models_command_reads_custom_models_index`
+  - Pass: live usage probes:
+    - `rustcode models openrouter` returned real model entries
+    - `rustcode auth methods/login/set-key/status/remove` validated on CLI
+    - live OpenRouter prompt execution through stored key returned `AUTH_OK`
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -237,7 +260,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
 2. Implement real OAuth token exchange adapters (device/browser flows) behind `rustcode-auth`.
-3. Add provider/model discovery command (`rustcode models`) with resolved provider diagnostics.
+3. Add structured provider diagnostics (`auth source`, `endpoint`, `requires_key`, `missing_fields`) to `models` output.
 
 ## Update Log
 - 2026-02-17:
@@ -332,6 +355,13 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
       - `packages/opencode/src/plugin/codex.ts` (OpenAI OAuth + API-key dual method)
       - `packages/opencode/src/plugin/copilot.ts` (GitHub Copilot device OAuth)
       - `packages/web/src/content/docs/providers.mdx` (OpenAI, GitHub Copilot, GitLab auth flows)
+    - Added Milestone 13 provider/model discovery:
+      - `rustcode models` command with provider filter support.
+      - Integration test for custom models index fixture.
+      - Live CLI usage checks for `auth` and `models` command family.
+    - Added explicit operating rules to enforce:
+      - opencode/codex code+docs reference before feature implementation
+      - live feature usage validation in addition to automated tests.
     - Ran validation:
       - `cargo fmt --all`
       - `cargo test --workspace`

@@ -42,6 +42,9 @@ pub enum TopCommand {
     List {
         path: Option<String>,
     },
+    Models {
+        provider: Option<String>,
+    },
     Read {
         path: String,
     },
@@ -92,6 +95,9 @@ pub fn map_command(command: TopCommand) -> Command {
         TopCommand::Run { prompt } => Command::Run { prompt },
         TopCommand::Exec { command, args } => Command::Exec { command, args },
         TopCommand::List { path } => Command::List { path },
+        TopCommand::Models { .. } => {
+            panic!("models command is handled in cli main before engine dispatch")
+        }
         TopCommand::Read { path } => Command::Read { path },
         TopCommand::Write { path, contents } => Command::Write { path, contents },
         TopCommand::Edit { path, from, to } => Command::Edit { path, from, to },
@@ -211,6 +217,18 @@ mod tests {
                 assert_eq!(from_env, "OPENROUTER_API_KEY");
             }
             _ => panic!("expected auth set-key command"),
+        }
+    }
+
+    #[test]
+    fn models_optional_provider_parses() {
+        let cli =
+            Cli::try_parse_from(["rustcode", "models", "openrouter"]).expect("cli should parse");
+        match cli.command {
+            TopCommand::Models { provider } => {
+                assert_eq!(provider.as_deref(), Some("openrouter"));
+            }
+            _ => panic!("expected models command"),
         }
     }
 }

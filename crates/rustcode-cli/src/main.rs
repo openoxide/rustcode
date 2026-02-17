@@ -1,9 +1,13 @@
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use clap::Parser;
 use rustcode_auth::{methods_for_provider, oauth_login_hint, AuthStore, StoredCredential};
+use serde::Deserialize;
+use serde_json::Value;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
@@ -31,6 +35,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
     if let TopCommand::Auth { command } = &cli.command {
         return handle_auth_command(command.clone());
+    }
+    if let TopCommand::Models { provider } = &cli.command {
+        return handle_models_command(provider.as_deref());
     }
     let launch_tui = matches!(&cli.command, TopCommand::Tui);
     let cwd = std::env::current_dir().context("failed to resolve current directory")?;
@@ -169,6 +176,67 @@ fn handle_auth_command(command: AuthCommand) -> Result<()> {
         }
     }
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct ModelsProvider {
+    name: Option<String>,
+    #[serde(default)]
+    models: BTreeMap<String, Value>,
+}
+
+fn handle_models_command(provider_filter: Option<&str>) -> Result<()> {
+    let models_path = resolve_models_path()
+        .ok_or_else(|| anyhow::anyhow!("models index not found; set RUSTCODE_MODELS_PATH"))?;
+    let raw = std::fs::read_to_string(&models_path)
+        .with_context(|| format!("failed to read models index {}", models_path.display()))?;
+    let index = serde_json::from_str::<BTreeMap<String, ModelsProvider>>(&raw)
+        .with_context(|| format!("failed to parse models index {}", models_path.display()))?;
+
+    if let Some(provider) = provider_filter {
+        let Some(entry) = index.get(provider) else {
+            anyhow::bail!("provider not found in models index: {provider}");
+        };
+        let mut model_ids: Vec<String> = entry.models.keys().cloned().collect();
+        model_ids.sort();
+        for model_id in model_ids {
+            println!("{provider}/{model_id}");
+        }
+        return Ok(());
+    }
+
+    let mut providers: Vec<_> = index.into_iter().collect();
+    providers.sort_by(|a, b| a.0.cmp(&b.0));
+    for (provider_id, entry) in providers {
+        let display_name = entry.name.unwrap_or_else(|| provider_id.clone());
+        println!(
+            "{provider_id}\tmodels={}\tname={display_name}",
+            entry.models.len()
+        );
+    }
+    Ok(())
+}
+
+fn resolve_models_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("RUSTCODE_MODELS_PATH") {
+        let candidate = PathBuf::from(path);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    if let Ok(path) = std::env::var("XDG_CACHE_HOME") {
+        let candidate = PathBuf::from(path).join("opencode/models.json");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    if let Ok(path) = std::env::var("HOME") {
+        let candidate = PathBuf::from(path).join(".cache/opencode/models.json");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 fn init_tracing() -> Result<()> {

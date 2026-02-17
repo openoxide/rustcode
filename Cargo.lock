@@ -865,6 +865,7 @@ dependencies = [
  "rustcode-llm",
  "rustcode-plugins",
  "rustcode-tui",
+ "serde",
  "serde_json",
  "tokio",
  "tokio-util",

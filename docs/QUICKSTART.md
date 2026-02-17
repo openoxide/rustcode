@@ -25,6 +25,8 @@ cargo run -q -p rustcode-cli -- read path/to/file
 cargo run -q -p rustcode-cli -- write path/to/file "contents"
 cargo run -q -p rustcode-cli -- edit path/to/file "from" "to"
 cargo run -q -p rustcode-cli -- exec echo hi
+cargo run -q -p rustcode-cli -- models
+cargo run -q -p rustcode-cli -- models openrouter
 ```
 
 ## Provider Setup
