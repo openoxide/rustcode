@@ -92,8 +92,18 @@ case "$mode" in
     pid="$!"
     echo "pid=$pid"
 
+    probe_serve() {
+      if command -v curl >/dev/null 2>&1; then
+        curl -s --max-time 1 "http://127.0.0.1:4317/health" >/dev/null || true
+        curl -s --max-time 1 "http://127.0.0.1:4317/does-not-exist" >/dev/null || true
+      else
+        echo "WARN: curl unavailable; skipping serve HTTP probes"
+      fi
+    }
+
     elapsed=0
     while [[ "$elapsed" -lt "$seconds" ]]; do
+      probe_serve
       ps -o pid=,rss=,%cpu=,etime= -p "$pid" || true
       sleep "$interval"
       elapsed=$((elapsed + interval))

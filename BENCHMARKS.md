@@ -7,6 +7,7 @@
 - Assertions: `scripts/benchmark_assert.sh`
 - Release Gate: `scripts/benchmark_release_gate.sh`
 - Metrics Parser: `scripts/benchmark_metrics.sh`
+- Serve Telemetry Assert: `scripts/assert_serve_telemetry.sh`
 - Snapshot/Rotation: `scripts/benchmark_snapshot.sh`
 - Modes:
   - `startup [runs]`
@@ -25,6 +26,7 @@ Examples:
 ./scripts/benchmark_record.sh benchmarks/latest.json
 ./scripts/benchmark_compare.sh benchmarks/old.json benchmarks/latest.json
 ./scripts/benchmark_assert.sh benchmarks/latest.json
+./scripts/assert_serve_telemetry.sh benchmarks/latest.json
 ./scripts/benchmark_release_gate.sh benchmarks/release-baseline.json benchmarks/latest.json
 ./scripts/benchmark_snapshot.sh benchmarks/latest.json benchmarks/history
 ```
@@ -39,8 +41,8 @@ Examples:
 - `./scripts/benchmark.sh startup 5`:
   - `real 0.00` reported across runs on host timer granularity.
 - `./scripts/benchmark.sh memory "bench memory probe"`:
-  - `maximum resident set size: 5,537,792`
-  - `peak memory footprint: 2,113,848`
+  - `maximum resident set size: 6,029,312`
+  - `peak memory footprint: 2,605,368`
 - `./scripts/benchmark.sh drift 12 4`:
   - observed RSS samples: `32 KB -> 5,392 KB`
   - process remained stable and exited cleanly on cancellation.
@@ -67,8 +69,11 @@ Examples:
     - `PEAK_DELTA_LIMIT=524288`
     - `P95_DELTA_LIMIT=0.100`
   - release fallback escape hatch: `ALLOW_MISSING_RELEASE_METRICS=1`.
+- `./scripts/assert_serve_telemetry.sh <artifact>`:
+  - validates serve section includes configured endpoint, `200`/`404` request telemetry, and clean cancellation.
+  - optional escape hatch: `ALLOW_MISSING_SERVE_TELEMETRY=1`.
 - `./scripts/ci_matrix.sh`:
-  - runs `check`, `test`, `serve_smoke`, `benchmark_record`, and `benchmark_assert`.
+  - runs `check`, `test`, `serve_smoke`, `benchmark_record`, `assert_serve_telemetry`, and `benchmark_assert`.
   - enables `ALLOW_MISSING_METRICS=1` automatically on Darwin sandbox environments.
 - GitHub Actions CI uploads `benchmarks/latest.json` as artifact `rustcode-benchmarks-latest`.
 - GitHub Actions release branches (`release/*`) execute:

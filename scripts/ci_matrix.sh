@@ -20,6 +20,14 @@ ALLOW_SERVE_SMOKE_SKIP="$allow_serve_smoke_skip" ./scripts/serve_smoke.sh
 echo "[ci] benchmark record"
 ./scripts/benchmark_record.sh benchmarks/latest.json
 
+echo "[ci] serve telemetry assert"
+allow_serve_telemetry=0
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  # Local Darwin sandboxes may deny listener binds used by serve probes.
+  allow_serve_telemetry=1
+fi
+ALLOW_MISSING_SERVE_TELEMETRY="$allow_serve_telemetry" ./scripts/assert_serve_telemetry.sh benchmarks/latest.json
+
 echo "[ci] benchmark assert"
 allow_missing=0
 if [[ "$(uname -s)" == "Darwin" ]]; then
