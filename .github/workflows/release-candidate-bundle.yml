@@ -26,6 +26,8 @@ jobs:
         run: ./scripts/ci_matrix.sh
       - name: Refresh benchmark artifact
         run: ./scripts/benchmark_record.sh benchmarks/latest.json
+      - name: Draft release notes
+        run: ./scripts/draft_release_notes.sh "${{ github.event.inputs.version }}" "" HEAD "/tmp/rustcode-release-notes-${{ github.event.inputs.version }}.md"
       - name: Build release candidate bundle
         run: ./scripts/build_release_bundle.sh "${{ github.event.inputs.version }}" "${{ github.event.inputs.output_dir }}"
       - name: Upload release candidate artifacts
@@ -35,3 +37,4 @@ jobs:
           path: |
             ${{ github.event.inputs.output_dir }}/*.tar.gz
             ${{ github.event.inputs.output_dir }}/*.sha256
+            /tmp/rustcode-release-notes-${{ github.event.inputs.version }}.md

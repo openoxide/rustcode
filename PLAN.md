@@ -191,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add release workflow auto-draft notes from changelog entries.
-2. Add release cut workflow using `gh` with approval gate.
-3. Add branch protection guidance and required-check manifest.
+1. Add release cut workflow using `gh` with approval gate.
+2. Add branch protection guidance and required-check manifest.
+3. Add checksum/signature verification job for release artifacts.
 
 ## Update Log
 - 2026-02-17:
@@ -379,6 +379,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `release_with_gh.sh` now builds bundle artifacts and verifies checksums before release publish.
     - script defaults to signed tags (`git tag -s`) with explicit `--allow-unsigned-tag` fallback.
     - release payload now includes benchmark artifact + release bundle tarball + checksum file.
+  - Release notes auto-draft support:
+    - added `scripts/draft_release_notes.sh` to generate notes from commit history ranges.
+    - `release_with_gh.sh` now supports `--auto-notes`.
+    - release-candidate bundle workflow uploads generated release-note draft artifact.
   - Added structured serve telemetry:
     - introduced `EventPayload::ServeRequest { method, path, status }`.
     - `serve` now emits route-level events for each handled request.

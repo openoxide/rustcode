@@ -29,6 +29,7 @@
 4. Preferred automation:
    - dry-run: `./scripts/release_with_gh.sh <version> --dry-run`
    - execute: `./scripts/release_with_gh.sh <version>`
+   - auto-draft notes from commit history: `./scripts/release_with_gh.sh <version> --auto-notes`
    - signed tags are required by default; use `--allow-unsigned-tag` only when signing is unavailable.
 5. Release PR checklist gate:
    - workflow: `.github/workflows/release-pr-checklist.yml`
@@ -39,6 +40,8 @@
 7. Nightly drift monitor:
    - workflow: `.github/workflows/nightly-benchmark-drift.yml`
    - confirm no open "Nightly benchmark drift alert" issue before tag cut.
+8. Release notes drafting helper:
+   - script: `./scripts/draft_release_notes.sh <version> [from_ref] [to_ref] [output_file]`
 
 ## Post-Release
 1. Snapshot benchmark artifact:

@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<USAGE
 Usage:
-  scripts/release_with_gh.sh <version> [--dry-run] [--skip-checks] [--allow-unsigned-tag] [--notes <file>] [--benchmark <file>] [--bundle-output <dir>]
+  scripts/release_with_gh.sh <version> [--dry-run] [--skip-checks] [--allow-unsigned-tag] [--auto-notes] [--notes <file>] [--benchmark <file>] [--bundle-output <dir>]
 
 Examples:
   scripts/release_with_gh.sh 0.1.0 --dry-run
@@ -18,6 +18,7 @@ bundle_output="${BUNDLE_OUTPUT_DIR:-/tmp/rustcode-release-dist}"
 dry_run=0
 skip_checks=0
 allow_unsigned_tag=0
+auto_notes=0
 version=""
 
 while [[ $# -gt 0 ]]; do
@@ -30,6 +31,9 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-unsigned-tag)
       allow_unsigned_tag=1
+      ;;
+    --auto-notes)
+      auto_notes=1
       ;;
     --notes)
       notes_file="${2:-}"
@@ -78,6 +82,12 @@ if [[ -z "$notes_file" || -z "$benchmark_file" ]]; then
 fi
 
 cd "$(dirname "$0")/.."
+
+if (( auto_notes == 1 )); then
+  generated_notes="/tmp/rustcode-release-notes-${tag}.md"
+  ./scripts/draft_release_notes.sh "$tag" "" HEAD "$generated_notes"
+  notes_file="$generated_notes"
+fi
 
 if [[ ! -f "$notes_file" ]]; then
   echo "missing notes file: $notes_file" >&2
