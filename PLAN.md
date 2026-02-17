@@ -191,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add nightly benchmark drift job with threshold alerts.
-2. Add release-candidate artifact bundle workflow.
-3. Add signed tag and checksum verification in release automation.
+1. Add release-candidate artifact bundle workflow.
+2. Add signed tag and checksum verification in release automation.
+3. Add release workflow auto-draft notes from changelog entries.
 
 ## Update Log
 - 2026-02-17:
@@ -364,6 +364,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - added `.github/workflows/release-pr-benchmark-report.yml`.
     - workflow posts/updates PR comment with baseline-vs-candidate benchmark deltas.
     - benchmark compare output now emits `delta=n/a` for missing metric cases.
+  - Nightly benchmark drift alerting:
+    - added `scripts/nightly_benchmark_drift.sh` for scheduled drift validation.
+    - added `.github/workflows/nightly-benchmark-drift.yml` (schedule + manual dispatch).
+    - workflow opens/updates alert issue on failures and auto-closes on recovery.
   - Added structured serve telemetry:
     - introduced `EventPayload::ServeRequest { method, path, status }`.
     - `serve` now emits route-level events for each handled request.

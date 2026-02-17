@@ -9,6 +9,7 @@
 - Metrics Parser: `scripts/benchmark_metrics.sh`
 - Serve Telemetry Assert: `scripts/assert_serve_telemetry.sh`
 - Baseline Refresh: `scripts/refresh_release_baseline.sh`
+- Nightly Drift: `scripts/nightly_benchmark_drift.sh`
 - Snapshot/Rotation: `scripts/benchmark_snapshot.sh`
 - Modes:
   - `startup [runs]`
@@ -30,6 +31,7 @@ Examples:
 ./scripts/assert_serve_telemetry.sh benchmarks/latest.json
 ./scripts/benchmark_release_gate.sh benchmarks/release-baseline.json benchmarks/latest.json
 ./scripts/refresh_release_baseline.sh
+./scripts/nightly_benchmark_drift.sh
 ./scripts/benchmark_snapshot.sh benchmarks/latest.json benchmarks/history
 ```
 
@@ -43,8 +45,8 @@ Examples:
 - `./scripts/benchmark.sh startup 5`:
   - `real 0.00` reported across runs on host timer granularity.
 - `./scripts/benchmark.sh memory "bench memory probe"`:
-  - `maximum resident set size: 6,029,312`
-  - `peak memory footprint: 2,605,368`
+  - `maximum resident set size: 5,505,024`
+  - `peak memory footprint: 2,064,672`
 - `./scripts/benchmark.sh drift 12 4`:
   - observed RSS samples: `32 KB -> 5,392 KB`
   - process remained stable and exited cleanly on cancellation.
@@ -85,6 +87,9 @@ Examples:
 - GitHub Actions `ci` also supports manual `workflow_dispatch` release-gate runs:
   - `run_release_gate=true`
   - optional `baseline_path` override
+- GitHub Actions nightly drift workflow:
+  - `.github/workflows/nightly-benchmark-drift.yml`
+  - opens/updates alert issue on regression and closes it when recovered.
 - `./scripts/refresh_release_baseline.sh [--from-latest]`:
   - regenerates/validates benchmark artifact and promotes it to `benchmarks/release-baseline.json`.
 - `./scripts/benchmark_snapshot.sh <latest> <history_dir>`:

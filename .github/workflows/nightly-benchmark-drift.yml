@@ -1,0 +1,115 @@
+name: nightly-benchmark-drift
+
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.93.0
+      - name: Run nightly benchmark drift checks
+        id: drift
+        continue-on-error: true
+        run: ./scripts/nightly_benchmark_drift.sh /tmp/rustcode-nightly-candidate.json /tmp/rustcode-nightly-report.txt
+      - name: Upload nightly benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustcode-nightly-benchmark-drift
+          path: |
+            /tmp/rustcode-nightly-candidate.json
+            /tmp/rustcode-nightly-report.txt
+      - name: Upsert drift alert issue
+        if: steps.drift.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- rustcode-nightly-benchmark-alert -->';
+            const title = 'Nightly benchmark drift alert';
+            const reportPath = '/tmp/rustcode-nightly-report.txt';
+            let report = 'report unavailable (drift step failed before compare output)';
+            if (fs.existsSync(reportPath)) {
+              report = fs.readFileSync(reportPath, 'utf8').trim();
+            }
+
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = `${marker}
+            Nightly benchmark drift checks failed.
+
+            Run: ${runUrl}
+
+            \`\`\`text
+            ${report}
+            \`\`\``;
+
+            const { owner, repo } = context.repo;
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            const existing = issues.find((issue) => issue.title === title && issue.body && issue.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner,
+                repo,
+                title,
+                body,
+                labels: ['ci', 'performance'],
+              });
+            }
+      - name: Close resolved drift alert issue
+        if: steps.drift.outcome == 'success'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = '<!-- rustcode-nightly-benchmark-alert -->';
+            const title = 'Nightly benchmark drift alert';
+            const { owner, repo } = context.repo;
+
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100,
+            });
+
+            const existing = issues.find((issue) => issue.title === title && issue.body && issue.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: existing.number,
+                body: 'Nightly benchmark drift checks are passing again. Closing alert.',
+              });
+              await github.rest.issues.update({
+                owner,
+                repo,
+                issue_number: existing.number,
+                state: 'closed',
+              });
+            }
+      - name: Fail workflow if drift checks failed
+        if: steps.drift.outcome == 'failure'
+        run: exit 1

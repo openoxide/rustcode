@@ -32,6 +32,9 @@
 6. Release PR benchmark drift comment:
    - workflow: `.github/workflows/release-pr-benchmark-report.yml`
    - posts baseline-vs-candidate compare output on release PRs.
+7. Nightly drift monitor:
+   - workflow: `.github/workflows/nightly-benchmark-drift.yml`
+   - confirm no open "Nightly benchmark drift alert" issue before tag cut.
 
 ## Post-Release
 1. Snapshot benchmark artifact:
