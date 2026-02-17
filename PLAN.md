@@ -92,7 +92,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: runtime signal probes for `SIGINT` and `SIGTERM` emit cancellation warning and clean exit (`rustcode-cli exec sleep 30`, 2026-02-17)
 
 6. Tool Runtime v1
-- Status: pending
+- Status: in_progress
 - Deliverables:
   - Core tools (`list`, `read`, `write`, `edit`, `exec`)
   - Permission policy hooks
@@ -100,6 +100,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - unit + integration tests
   - invalid input and boundary tests
+  - Pass (partial): `list`, `read`, `write`, `exec` command paths wired and validated (2026-02-17)
+  - Pass (partial): workspace boundary rejection for `../` escape paths with structured failure event (2026-02-17)
 
 7. Plugin Boundary v1
 - Status: pending
@@ -171,8 +173,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Introduce event envelope versioning for future plugin/tool compatibility.
-2. Start Tool Runtime v1 command set with policy checks (`list`, `read`, `write`, `exec`).
+1. Add `edit` command semantics and explicit permission-policy hook interface.
+2. Introduce event envelope versioning for future plugin/tool compatibility.
 3. Add CLI integration test harness for signal and streaming scenarios.
 
 ## Update Log
@@ -201,3 +203,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `rustcode-io`: process cancellation and success path tests.
     - `rustcode-engine`: cancellation emits warning event and no `Completed` event.
   - Verified runtime behavior: `SIGINT`/`SIGTERM` now produce structured cancellation warning events.
+  - Started Milestone 6: implemented `list/read/write` command handlers with workspace-boundary enforcement.
+  - Added regression test for workspace escape rejection in engine command routing.
+  - Runtime probes confirmed:
+    - positive flows for `list/read/write`
+    - non-zero failure and structured `Failure` event for escaped paths.

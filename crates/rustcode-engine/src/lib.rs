@@ -2,6 +2,10 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
 };
+use std::{
+    env,
+    path::{Component, Path, PathBuf},
+};
 
 use async_trait::async_trait;
 use tokio::sync::mpsc;
@@ -12,7 +16,7 @@ use rustcode_core::context::CommandContext;
 use rustcode_core::error::{ExecutionError, PublishError};
 use rustcode_core::event::{Event, EventPayload, EventScope};
 use rustcode_core::ports::{CommandExecutor, EventPublisher};
-use rustcode_io::{IoError, ProcessOutput, ProcessPort};
+use rustcode_io::{FileSystemPort, IoError, ProcessOutput, ProcessPort};
 use rustcode_llm::{LlmClient, LlmRequest};
 use rustcode_plugins::PluginRegistry;
 
@@ -39,6 +43,7 @@ impl EventPublisher for ChannelPublisher {
 
 pub struct Engine {
     llm: Arc<dyn LlmClient>,
+    fs: Arc<dyn FileSystemPort>,
     process: Arc<dyn ProcessPort>,
     plugins: PluginRegistry,
     next_event_id: AtomicU64,
@@ -47,11 +52,13 @@ pub struct Engine {
 impl Engine {
     pub fn new(
         llm: Arc<dyn LlmClient>,
+        fs: Arc<dyn FileSystemPort>,
         process: Arc<dyn ProcessPort>,
         plugins: PluginRegistry,
     ) -> Self {
         Self {
             llm,
+            fs,
             process,
             plugins,
             next_event_id: AtomicU64::new(1),
@@ -141,6 +148,142 @@ impl Engine {
         )
         .await
     }
+
+    async fn run_list(
+        &self,
+        path: Option<String>,
+        context: &CommandContext,
+        publisher: Arc<dyn EventPublisher>,
+    ) -> Result<(), ExecutionError> {
+        let target = path.unwrap_or_else(|| ".".to_string());
+        let resolved = self.resolve_workspace_path(context, &target)?;
+        let entries = self
+            .fs
+            .list_dir(&resolved)
+            .await
+            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+        let workspace_root = absolute_normalized(&context.config.workspace_root)
+            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+
+        let mut rendered = String::new();
+        for entry in entries {
+            let relative = entry
+                .strip_prefix(&workspace_root)
+                .unwrap_or(&entry)
+                .display()
+                .to_string();
+            rendered.push_str(&relative);
+            rendered.push('\n');
+        }
+
+        self.emit(
+            publisher,
+            EventScope::Tool,
+            EventPayload::OutputChunk { text: rendered },
+            context,
+        )
+        .await
+    }
+
+    async fn run_read(
+        &self,
+        path: String,
+        context: &CommandContext,
+        publisher: Arc<dyn EventPublisher>,
+    ) -> Result<(), ExecutionError> {
+        let resolved = self.resolve_workspace_path(context, &path)?;
+        let contents = self
+            .fs
+            .read_to_string(&resolved)
+            .await
+            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+
+        self.emit(
+            publisher,
+            EventScope::Tool,
+            EventPayload::OutputChunk { text: contents },
+            context,
+        )
+        .await
+    }
+
+    async fn run_write(
+        &self,
+        path: String,
+        contents: String,
+        context: &CommandContext,
+        publisher: Arc<dyn EventPublisher>,
+    ) -> Result<(), ExecutionError> {
+        let resolved = self.resolve_workspace_path(context, &path)?;
+        self.fs
+            .write_string(&resolved, &contents)
+            .await
+            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+
+        self.emit(
+            publisher,
+            EventScope::Tool,
+            EventPayload::OutputChunk {
+                text: format!("wrote {} bytes to {}", contents.len(), resolved.display()),
+            },
+            context,
+        )
+        .await
+    }
+
+    fn resolve_workspace_path(
+        &self,
+        context: &CommandContext,
+        requested: &str,
+    ) -> Result<PathBuf, ExecutionError> {
+        let root = absolute_normalized(&context.config.workspace_root).map_err(|err| {
+            ExecutionError::Dispatch(format!(
+                "failed to resolve workspace root {}: {err}",
+                context.config.workspace_root.display()
+            ))
+        })?;
+
+        let candidate = PathBuf::from(requested);
+        let joined = if candidate.is_absolute() {
+            candidate
+        } else {
+            root.join(candidate)
+        };
+        let normalized = lexical_normalize(joined);
+
+        if !normalized.starts_with(&root) {
+            return Err(ExecutionError::Dispatch(format!(
+                "path escapes workspace root: {requested}"
+            )));
+        }
+
+        Ok(normalized)
+    }
+}
+
+fn absolute_normalized(path: &Path) -> Result<PathBuf, std::io::Error> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()?.join(path)
+    };
+    Ok(lexical_normalize(absolute))
+}
+
+fn lexical_normalize(path: PathBuf) -> PathBuf {
+    let mut normalized = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+
+    normalized
 }
 
 #[async_trait]
@@ -166,6 +309,12 @@ impl CommandExecutor for Engine {
             Command::Run { prompt } => self.run_prompt(prompt, &context, publisher.clone()).await,
             Command::Exec { command, args } => {
                 self.run_exec(command, args, &context, publisher.clone())
+                    .await
+            }
+            Command::List { path } => self.run_list(path, &context, publisher.clone()).await,
+            Command::Read { path } => self.run_read(path, &context, publisher.clone()).await,
+            Command::Write { path, contents } => {
+                self.run_write(path, contents, &context, publisher.clone())
                     .await
             }
             Command::Tui => {
@@ -243,7 +392,7 @@ impl CommandExecutor for Engine {
 
 #[cfg(test)]
 mod tests {
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
     use std::sync::Arc;
     use std::time::SystemTime;
 
@@ -256,13 +405,29 @@ mod tests {
     use rustcode_core::error::PublishError;
     use rustcode_core::event::{Event, EventPayload};
     use rustcode_core::ports::EventPublisher;
-    use rustcode_io::{IoError, ProcessOutput, ProcessPort};
+    use rustcode_io::{FileSystemPort, IoError, ProcessOutput, ProcessPort};
     use rustcode_llm::NullLlmClient;
     use rustcode_plugins::PluginRegistry;
 
     use super::*;
 
     struct CancelledProcess;
+    struct DummyFs;
+
+    #[async_trait]
+    impl FileSystemPort for DummyFs {
+        async fn read_to_string(&self, _path: &Path) -> Result<String, IoError> {
+            Err(IoError::Io("not used".to_string()))
+        }
+
+        async fn write_string(&self, _path: &Path, _contents: &str) -> Result<(), IoError> {
+            Err(IoError::Io("not used".to_string()))
+        }
+
+        async fn list_dir(&self, _path: &Path) -> Result<Vec<PathBuf>, IoError> {
+            Err(IoError::Io("not used".to_string()))
+        }
+    }
 
     #[async_trait]
     impl ProcessPort for CancelledProcess {
@@ -294,6 +459,7 @@ mod tests {
     async fn cancellation_emits_warning_and_returns_cancelled() {
         let engine = Engine::new(
             Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
             Arc::new(CancelledProcess),
             PluginRegistry::default(),
         );
@@ -338,5 +504,48 @@ mod tests {
         assert!(!events
             .iter()
             .any(|event| matches!(event.payload, EventPayload::Completed)));
+    }
+
+    #[tokio::test]
+    async fn read_rejects_workspace_escape() {
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(CancelledProcess),
+            PluginRegistry::default(),
+        );
+        let publisher = Arc::new(CollectingPublisher::default());
+        let context = CommandContext::new(
+            Arc::new(ResolvedConfig {
+                workspace_root: PathBuf::from("/tmp/rustcode-workspace"),
+                ..ResolvedConfig::default()
+            }),
+            SessionMeta {
+                session_id: "s2".to_string(),
+                request_id: "r2".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let result = engine
+            .execute(
+                Command::Read {
+                    path: "../secret.txt".to_string(),
+                },
+                context,
+                publisher.clone(),
+            )
+            .await;
+
+        assert!(matches!(result, Err(ExecutionError::Dispatch(_))));
+
+        let events = publisher.events.lock().await.clone();
+        assert!(events.iter().any(|event| {
+            matches!(
+                &event.payload,
+                EventPayload::Failure { message }
+                if message.contains("path escapes workspace root")
+            )
+        }));
     }
 }

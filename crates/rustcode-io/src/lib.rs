@@ -26,6 +26,7 @@ pub struct ProcessOutput {
 pub trait FileSystemPort: Send + Sync {
     async fn read_to_string(&self, path: &Path) -> Result<String, IoError>;
     async fn write_string(&self, path: &Path, contents: &str) -> Result<(), IoError>;
+    async fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, IoError>;
 }
 
 #[async_trait]
@@ -59,6 +60,24 @@ impl FileSystemPort for LocalIo {
         tokio::fs::write(path, contents)
             .await
             .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))
+    }
+
+    async fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, IoError> {
+        let mut entries = tokio::fs::read_dir(path)
+            .await
+            .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))?;
+        let mut paths = Vec::new();
+
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))?
+        {
+            paths.push(entry.path());
+        }
+
+        paths.sort();
+        Ok(paths)
     }
 }
 

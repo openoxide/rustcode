@@ -51,9 +51,11 @@ async fn main() -> Result<()> {
     let (event_tx, mut event_rx) = mpsc::channel(512);
     let publisher = Arc::new(ChannelPublisher::new(event_tx));
 
+    let io = Arc::new(LocalIo);
     let engine = Engine::new(
         Arc::new(NullLlmClient),
-        Arc::new(LocalIo),
+        io.clone(),
+        io,
         PluginRegistry::default(),
     );
 

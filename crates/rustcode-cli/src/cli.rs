@@ -30,6 +30,16 @@ pub enum TopCommand {
         command: String,
         args: Vec<String>,
     },
+    List {
+        path: Option<String>,
+    },
+    Read {
+        path: String,
+    },
+    Write {
+        path: String,
+        contents: String,
+    },
     Tui,
     Serve {
         #[arg(long, default_value = "127.0.0.1:4317")]
@@ -42,6 +52,9 @@ pub fn map_command(command: TopCommand) -> Command {
     match command {
         TopCommand::Run { prompt } => Command::Run { prompt },
         TopCommand::Exec { command, args } => Command::Exec { command, args },
+        TopCommand::List { path } => Command::List { path },
+        TopCommand::Read { path } => Command::Read { path },
+        TopCommand::Write { path, contents } => Command::Write { path, contents },
         TopCommand::Tui => Command::Tui,
         TopCommand::Serve { listen } => Command::Serve { listen },
         TopCommand::Version => Command::Version,
@@ -80,6 +93,20 @@ mod tests {
                 assert_eq!(args, vec!["hello"]);
             }
             _ => panic!("expected exec command"),
+        }
+    }
+
+    #[test]
+    fn write_accepts_path_and_contents() {
+        let cli = Cli::try_parse_from(["rustcode", "write", "README.md", "hello world"])
+            .expect("cli should parse");
+
+        match cli.command {
+            TopCommand::Write { path, contents } => {
+                assert_eq!(path, "README.md");
+                assert_eq!(contents, "hello world");
+            }
+            _ => panic!("expected write command"),
         }
     }
 }
