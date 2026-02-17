@@ -28,12 +28,12 @@ async fn main() -> Result<()> {
     let cwd = std::env::current_dir().context("failed to resolve current directory")?;
     let output_format = OutputFormat::from_json_flag(cli.json);
 
-    let config = ConfigLoader::load(&ConfigSources {
-        cwd,
-        profile_override: cli.profile.clone(),
-        model_override: cli.model.clone(),
-    })
-    .context("failed to load configuration")?;
+    let mut config_sources = ConfigSources::new(cwd);
+    config_sources.profile_override = cli.profile.clone();
+    config_sources.model_override = cli.model.clone();
+    config_sources.trust_project = cli.trust_project_config;
+
+    let config = ConfigLoader::load(&config_sources).context("failed to load configuration")?;
 
     let context = CommandContext::new(
         Arc::new(config),

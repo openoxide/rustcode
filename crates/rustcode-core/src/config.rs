@@ -9,6 +9,8 @@ pub struct ResolvedConfig {
     pub model: String,
     pub plugins: Vec<String>,
     pub env: BTreeMap<String, String>,
+    pub project_config_path: Option<PathBuf>,
+    pub project_config_trusted: bool,
 }
 
 impl Default for ResolvedConfig {
@@ -20,6 +22,8 @@ impl Default for ResolvedConfig {
             model: "default".to_string(),
             plugins: Vec::new(),
             env: BTreeMap::new(),
+            project_config_path: None,
+            project_config_trusted: false,
         }
     }
 }

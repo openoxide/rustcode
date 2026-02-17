@@ -55,7 +55,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: parser + router module extraction with focused tests (2026-02-17)
 
 3. Layered Config System
-- Status: in_progress
+- Status: completed
 - Deliverables:
   - Deterministic config precedence
   - Explicit trust model for project-local config
@@ -63,6 +63,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - malformed config fixtures
   - precedence tests
+  - Pass: layered merge/trust tests in `rustcode-config` (`cargo test --workspace`, 2026-02-17)
+  - Pass: runtime trust gate probe with untrusted project failure and trusted success (`rustcode-cli version`, 2026-02-17)
 
 4. Event Protocol and Renderers
 - Status: in_progress
@@ -166,9 +168,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Expand config trust model (global/user/project layers + explicit trust gate).
-2. Add renderer contract tests (human vs JSON) with stable snapshots.
-3. Implement explicit cancellation path and interrupt integration tests.
+1. Add renderer contract tests (human vs JSON) with stable snapshots.
+2. Implement explicit cancellation path and interrupt integration tests.
+3. Introduce event envelope versioning for future plugin/tool compatibility.
 
 ## Update Log
 - 2026-02-17:
@@ -185,3 +187,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Completed Milestone 2: parser/router split (`cli.rs`) with strict diagnostics tests.
   - Split event rendering concerns into `render.rs`; validated `--json` and human output paths.
   - Confirmed `.gitignore` hygiene: minimal 3-rule file, no plan/doc suppression.
+  - Completed Milestone 3: deterministic global/user/project config layering with explicit project trust gate.
+  - Added `--trust-project-config` CLI override and `[trust].projects` support in user/global config files.
+  - Added config tests for precedence, plugin/env merge semantics, trust rejection, and CLI override precedence.
+  - Verified runtime behavior: untrusted project config fails with actionable error; trusted modes succeed.

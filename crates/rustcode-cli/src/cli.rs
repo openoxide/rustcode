@@ -16,6 +16,9 @@ pub struct Cli {
 
     #[arg(long, global = true)]
     pub model: Option<String>,
+
+    #[arg(long = "trust-project-config", global = true)]
+    pub trust_project_config: bool,
 }
 
 #[derive(Debug, Subcommand)]

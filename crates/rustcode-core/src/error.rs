@@ -8,6 +8,8 @@ pub enum ConfigError {
     Parse(String),
     #[error("config validation failed: {0}")]
     Validation(String),
+    #[error("config trust check failed: {0}")]
+    Trust(String),
 }
 
 #[derive(Debug, Error)]

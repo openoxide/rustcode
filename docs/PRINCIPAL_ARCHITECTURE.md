@@ -44,6 +44,10 @@ Domain boundaries:
 - `cli` and `tui`: adapters that render and collect input.
 - `config`: produces immutable config snapshots.
 
+Config precedence baseline:
+- `defaults -> global config -> user config -> project config (trusted only) -> env -> CLI flags`
+- Project-local config is rejected unless explicitly trusted via CLI/env or trusted-project list.
+
 ## 3. Core Trait/Interface Definitions
 ```rust
 #[async_trait]
