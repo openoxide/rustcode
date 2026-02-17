@@ -9,6 +9,14 @@ cargo check --workspace
 echo "[ci] cargo test --workspace"
 cargo test --workspace
 
+echo "[ci] serve smoke"
+allow_serve_smoke_skip=0
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  # Local Darwin sandboxes may deny binding fixed loopback ports.
+  allow_serve_smoke_skip=1
+fi
+ALLOW_SERVE_SMOKE_SKIP="$allow_serve_smoke_skip" ./scripts/serve_smoke.sh
+
 echo "[ci] benchmark record"
 ./scripts/benchmark_record.sh benchmarks/latest.json
 

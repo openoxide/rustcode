@@ -191,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add serve-mode smoke probe to CI (request/response assertion during run).
-2. Add benchmark comparison gate against prior baseline on release branches.
-3. Add platform-specific benchmark parser to reduce `ALLOW_MISSING_METRICS` use.
+1. Add benchmark comparison gate against prior baseline on release branches.
+2. Add platform-specific benchmark parser to reduce `ALLOW_MISSING_METRICS` use.
+3. Add serve telemetry assertion script for CI artifacts.
 
 ## Update Log
 - 2026-02-17:
@@ -324,6 +324,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - added per-connection read timeout with `408 Request Timeout` response contract.
     - connection-level read/write failures now emit warning events and keep listener alive.
     - integration coverage validates timeout response and emitted `ServeRequest` timeout event.
+  - CI serve smoke coverage added:
+    - introduced `scripts/serve_smoke.sh` to validate live `/health` and `404` routes.
+    - wired smoke probe into `scripts/ci_matrix.sh` before benchmark recording.
+    - added `ALLOW_SERVE_SMOKE_SKIP` fallback for restricted local bind environments.
   - Added structured serve telemetry:
     - introduced `EventPayload::ServeRequest { method, path, status }`.
     - `serve` now emits route-level events for each handled request.
