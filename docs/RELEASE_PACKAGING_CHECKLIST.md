@@ -4,6 +4,7 @@
 1. Confirm target version in workspace metadata and release notes draft.
 2. Ensure changelog entries map to release scope (`feat/fix/perf/breaking`).
 3. Rebuild benchmark artifact and assertions before tagging.
+4. Release PRs should use `.github/PULL_REQUEST_TEMPLATE/release.md`.
 
 ## Validation Gate
 1. `cargo check --workspace`
@@ -25,6 +26,9 @@
 4. Preferred automation:
    - dry-run: `./scripts/release_with_gh.sh <version> --dry-run`
    - execute: `./scripts/release_with_gh.sh <version>`
+5. Release PR checklist gate:
+   - workflow: `.github/workflows/release-pr-checklist.yml`
+   - validator: `./scripts/check_release_pr_checklist.sh`
 
 ## Post-Release
 1. Snapshot benchmark artifact:

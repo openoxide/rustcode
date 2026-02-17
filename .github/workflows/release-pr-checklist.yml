@@ -1,0 +1,16 @@
+name: release-pr-checklist
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+jobs:
+  checklist:
+    if: startsWith(github.base_ref, 'release/') || startsWith(github.head_ref, 'release/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release checklist
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: ./scripts/check_release_pr_checklist.sh
