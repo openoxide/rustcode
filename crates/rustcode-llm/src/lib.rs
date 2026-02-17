@@ -73,6 +73,34 @@ struct ResolvedProvider {
     api_key: Option<String>,
     requires_api_key: bool,
     api_key_env_candidates: Vec<String>,
+    api_key_source: ApiKeySource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ApiKeySource {
+    None,
+    ConfigEnvMap { var_name: String },
+    ProcessEnv { var_name: String },
+    AuthStore,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProviderProtocolName {
+    Null,
+    OpenAiCompatible,
+    AnthropicMessages,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderDiagnostics {
+    pub provider_id: String,
+    pub protocol: ProviderProtocolName,
+    pub base_url: Option<String>,
+    pub endpoint: Option<String>,
+    pub requires_api_key: bool,
+    pub api_key_source: ApiKeySource,
+    pub api_key_env_candidates: Vec<String>,
+    pub missing: Vec<String>,
 }
 
 pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmError> {
@@ -129,6 +157,45 @@ pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmEr
     }
 }
 
+pub fn diagnose_provider(
+    config: &ResolvedConfig,
+    provider_id: Option<&str>,
+) -> Result<ProviderDiagnostics, LlmError> {
+    let mut effective = config.clone();
+    if let Some(provider) = provider_id {
+        if !provider.eq_ignore_ascii_case(&effective.llm_provider) {
+            effective.llm_base_url = None;
+            effective.llm_api_key_env = None;
+        }
+        effective.llm_provider = provider.to_string();
+        effective.model = format!("{provider}/diagnostic-model");
+    }
+
+    let resolved = resolve_provider(&effective)?;
+    let endpoint = resolved
+        .base_url
+        .as_ref()
+        .map(|base| normalize_endpoint(resolved.protocol, base));
+    let mut missing = Vec::new();
+    if resolved.base_url.is_none() && !matches!(resolved.protocol, ProviderProtocol::Null) {
+        missing.push("base_url".to_string());
+    }
+    if resolved.requires_api_key && resolved.api_key.is_none() {
+        missing.push("api_key".to_string());
+    }
+
+    Ok(ProviderDiagnostics {
+        provider_id: resolved.provider_id,
+        protocol: protocol_name(resolved.protocol),
+        base_url: resolved.base_url,
+        endpoint,
+        requires_api_key: resolved.requires_api_key,
+        api_key_source: resolved.api_key_source,
+        api_key_env_candidates: resolved.api_key_env_candidates,
+        missing,
+    })
+}
+
 fn resolve_provider(config: &ResolvedConfig) -> Result<ResolvedProvider, LlmError> {
     let (model_provider, _model_id) = parse_model_prefix(&config.model).unwrap_or(("", ""));
     let provider_id = if !config.llm_provider.trim().is_empty() && config.llm_provider != "null" {
@@ -145,7 +212,7 @@ fn resolve_provider(config: &ResolvedConfig) -> Result<ResolvedProvider, LlmErro
         .clone()
         .or_else(|| preset.default_base_url.clone());
     let api_key_env_candidates = collect_provider_api_key_envs(&provider_id, &preset);
-    let api_key = resolve_api_key(config, &api_key_env_candidates, &provider_id);
+    let (api_key, api_key_source) = resolve_api_key(config, &api_key_env_candidates, &provider_id);
     let requires_api_key = preset.requires_api_key || !api_key_env_candidates.is_empty();
 
     Ok(ResolvedProvider {
@@ -155,6 +222,7 @@ fn resolve_provider(config: &ResolvedConfig) -> Result<ResolvedProvider, LlmErro
         api_key,
         requires_api_key,
         api_key_env_candidates,
+        api_key_source,
     })
 }
 
@@ -162,21 +230,25 @@ fn resolve_api_key(
     config: &ResolvedConfig,
     env_candidates: &[String],
     provider_id: &str,
-) -> Option<String> {
+) -> (Option<String>, ApiKeySource) {
     if let Some(explicit_env) = config.llm_api_key_env.as_ref() {
-        if let Some(value) = read_config_or_env(config, explicit_env) {
-            return Some(value);
+        if let Some((value, source)) = read_config_or_env(config, explicit_env) {
+            return (Some(value), source);
         }
     }
 
     for env_name in env_candidates {
-        if let Some(value) = read_config_or_env(config, env_name) {
-            return Some(value);
+        if let Some((value, source)) = read_config_or_env(config, env_name) {
+            return (Some(value), source);
         }
     }
 
     let store = AuthStore::open_default();
-    store.get_api_key(provider_id).ok().flatten()
+    if let Some(value) = store.get_api_key(provider_id).ok().flatten() {
+        return (Some(value), ApiKeySource::AuthStore);
+    }
+
+    (None, ApiKeySource::None)
 }
 
 fn collect_provider_api_key_envs(provider_id: &str, preset: &ProviderPreset) -> Vec<String> {
@@ -208,15 +280,42 @@ fn missing_base_url_message(provider_id: &str) -> String {
     format!("provider '{provider_id}' requires an LLM base URL; set [llm].base_url")
 }
 
-fn read_config_or_env(config: &ResolvedConfig, name: &str) -> Option<String> {
+fn protocol_name(protocol: ProviderProtocol) -> ProviderProtocolName {
+    match protocol {
+        ProviderProtocol::Null => ProviderProtocolName::Null,
+        ProviderProtocol::OpenAiCompatible => ProviderProtocolName::OpenAiCompatible,
+        ProviderProtocol::AnthropicMessages => ProviderProtocolName::AnthropicMessages,
+    }
+}
+
+fn normalize_endpoint(protocol: ProviderProtocol, base_url: &str) -> String {
+    match protocol {
+        ProviderProtocol::Null => base_url.to_string(),
+        ProviderProtocol::OpenAiCompatible => normalize_openai_chat_endpoint(base_url),
+        ProviderProtocol::AnthropicMessages => normalize_anthropic_messages_endpoint(base_url),
+    }
+}
+
+fn read_config_or_env(config: &ResolvedConfig, name: &str) -> Option<(String, ApiKeySource)> {
     if let Some(value) = config.env.get(name) {
         if !value.trim().is_empty() {
-            return Some(value.clone());
+            return Some((
+                value.clone(),
+                ApiKeySource::ConfigEnvMap {
+                    var_name: name.to_string(),
+                },
+            ));
         }
     }
-    std::env::var(name)
+    let env_value = std::env::var(name)
         .ok()
-        .filter(|value| !value.trim().is_empty())
+        .filter(|value| !value.trim().is_empty())?;
+    Some((
+        env_value,
+        ApiKeySource::ProcessEnv {
+            var_name: name.to_string(),
+        },
+    ))
 }
 
 fn provider_preset(provider_id: &str) -> ProviderPreset {
@@ -666,6 +765,7 @@ mod tests {
             provider.base_url.as_deref(),
             Some("https://openrouter.ai/api/v1")
         );
+        assert_eq!(provider.api_key_source, ApiKeySource::None);
     }
 
     #[test]
@@ -755,7 +855,26 @@ mod tests {
 
         let provider = resolve_provider(&cfg).expect("provider must resolve");
         assert_eq!(provider.api_key.as_deref(), Some("stored-secret"));
+        assert_eq!(provider.api_key_source, ApiKeySource::AuthStore);
         std::env::remove_var("RUSTCODE_AUTH_FILE");
+    }
+
+    #[test]
+    fn diagnostics_include_missing_key_when_not_configured() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        std::env::remove_var("OPENROUTER_API_KEY");
+        let cfg = ResolvedConfig {
+            allow_network: true,
+            llm_provider: "openrouter".to_string(),
+            ..ResolvedConfig::default()
+        };
+
+        let diag = diagnose_provider(&cfg, Some("openrouter")).expect("diagnostic should resolve");
+        assert_eq!(diag.provider_id, "openrouter");
+        assert_eq!(diag.protocol, ProviderProtocolName::OpenAiCompatible);
+        assert!(diag.endpoint.is_some());
+        assert!(diag.requires_api_key);
+        assert!(diag.missing.iter().any(|item| item == "api_key"));
     }
 
     fn make_temp_file_path(name: &str) -> PathBuf {

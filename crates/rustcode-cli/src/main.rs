@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -13,12 +14,13 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 use rustcode_config::{ConfigLoader, ConfigSources};
+use rustcode_core::config::ResolvedConfig;
 use rustcode_core::context::{CommandContext, SessionMeta};
 use rustcode_core::error::ExecutionError;
 use rustcode_core::ports::CommandExecutor;
 use rustcode_engine::{ChannelPublisher, Engine, WorkspacePermissionPolicy};
 use rustcode_io::LocalIo;
-use rustcode_llm::build_client;
+use rustcode_llm::{build_client, diagnose_provider, ApiKeySource, ProviderProtocolName};
 use rustcode_plugins::PluginRegistry;
 use rustcode_tui::TuiApp;
 
@@ -37,21 +39,13 @@ async fn main() -> Result<()> {
         return handle_auth_command(command.clone());
     }
     if let TopCommand::Models { provider } = &cli.command {
-        return handle_models_command(provider.as_deref());
+        let config = load_effective_config(&cli)?;
+        return handle_models_command(provider.as_deref(), &config);
     }
     let launch_tui = matches!(&cli.command, TopCommand::Tui);
-    let cwd = std::env::current_dir().context("failed to resolve current directory")?;
     let output_format = OutputFormat::from_json_flag(cli.json);
 
-    let mut config_sources = ConfigSources::new(cwd);
-    config_sources.profile_override = cli.profile.clone();
-    config_sources.model_override = cli.model.clone();
-    config_sources.llm_provider_override = cli.llm_provider.clone();
-    config_sources.llm_base_url_override = cli.llm_base_url.clone();
-    config_sources.llm_api_key_env_override = cli.llm_api_key_env.clone();
-    config_sources.trust_project = cli.trust_project_config;
-
-    let config = ConfigLoader::load(&config_sources).context("failed to load configuration")?;
+    let config = load_effective_config(&cli)?;
     let llm_client = build_client(&config).context("failed to initialize llm provider")?;
 
     let cancellation = CancellationToken::new();
@@ -99,7 +93,10 @@ async fn main() -> Result<()> {
             .context("tui event loop failed")?;
     } else {
         while let Some(event) = event_rx.recv().await {
-            println!("{}", render_event(&event, output_format)?);
+            let rendered = render_event(&event, output_format)?;
+            if !write_stdout_line(&rendered)? {
+                return Ok(());
+            }
         }
     }
 
@@ -119,8 +116,11 @@ fn handle_auth_command(command: AuthCommand) -> Result<()> {
                 .map(|method| method.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
-            println!("provider={provider}");
-            println!("methods={rendered}");
+            if !write_stdout_line(&format!("provider={provider}"))?
+                || !write_stdout_line(&format!("methods={rendered}"))?
+            {
+                return Ok(());
+            }
         }
         AuthCommand::Status { provider } => {
             let methods = methods_for_provider(&provider);
@@ -134,26 +134,34 @@ fn handle_auth_command(command: AuthCommand) -> Result<()> {
                 Some(StoredCredential::OAuth { .. }) => "stored:oauth",
                 None => "none",
             };
-            println!("provider={provider}");
-            println!("methods={rendered_methods}");
-            println!("credential={credential}");
-            println!("auth_file={}", store.path().display());
+            if !write_stdout_line(&format!("provider={provider}"))?
+                || !write_stdout_line(&format!("methods={rendered_methods}"))?
+                || !write_stdout_line(&format!("credential={credential}"))?
+                || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+            {
+                return Ok(());
+            }
         }
         AuthCommand::SetKey { provider, from_env } => {
             let key = std::env::var(&from_env).with_context(|| {
                 format!("environment variable {from_env} is not set; cannot store key")
             })?;
             store.set_api_key(&provider, &key)?;
-            println!("stored api key for provider={provider}");
-            println!("auth_file={}", store.path().display());
+            if !write_stdout_line(&format!("stored api key for provider={provider}"))?
+                || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+            {
+                return Ok(());
+            }
         }
         AuthCommand::Remove { provider } => {
             let removed = store.remove(&provider)?;
-            println!(
+            if !write_stdout_line(&format!(
                 "{} credential for provider={provider}",
                 if removed { "removed" } else { "no stored" }
-            );
-            println!("auth_file={}", store.path().display());
+            ))? || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+            {
+                return Ok(());
+            }
         }
         AuthCommand::Login { provider } => {
             let methods = methods_for_provider(&provider);
@@ -170,9 +178,12 @@ fn handle_auth_command(command: AuthCommand) -> Result<()> {
                     "oauth login adapter for provider={provider} is not implemented yet"
                 )
             })?;
-            println!("provider={provider}");
-            println!("authorize_url={}", hint.authorize_url);
-            println!("instructions={}", hint.instructions);
+            if !write_stdout_line(&format!("provider={provider}"))?
+                || !write_stdout_line(&format!("authorize_url={}", hint.authorize_url))?
+                || !write_stdout_line(&format!("instructions={}", hint.instructions))?
+            {
+                return Ok(());
+            }
         }
     }
     Ok(())
@@ -185,7 +196,7 @@ struct ModelsProvider {
     models: BTreeMap<String, Value>,
 }
 
-fn handle_models_command(provider_filter: Option<&str>) -> Result<()> {
+fn handle_models_command(provider_filter: Option<&str>, config: &ResolvedConfig) -> Result<()> {
     let models_path = resolve_models_path()
         .ok_or_else(|| anyhow::anyhow!("models index not found; set RUSTCODE_MODELS_PATH"))?;
     let raw = std::fs::read_to_string(&models_path)
@@ -197,10 +208,59 @@ fn handle_models_command(provider_filter: Option<&str>) -> Result<()> {
         let Some(entry) = index.get(provider) else {
             anyhow::bail!("provider not found in models index: {provider}");
         };
+        let diagnostics = diagnose_provider(config, Some(provider))
+            .with_context(|| format!("failed to diagnose provider {provider}"))?;
+
+        if !write_stdout_line(&format!("provider={provider}"))?
+            || !write_stdout_line(&format!(
+                "protocol={}",
+                render_protocol(&diagnostics.protocol)
+            ))?
+            || !write_stdout_line(&format!(
+                "base_url={}",
+                diagnostics.base_url.as_deref().unwrap_or("<unset>")
+            ))?
+            || !write_stdout_line(&format!(
+                "endpoint={}",
+                diagnostics.endpoint.as_deref().unwrap_or("<unset>")
+            ))?
+            || !write_stdout_line(&format!(
+                "requires_api_key={}",
+                diagnostics.requires_api_key
+            ))?
+            || !write_stdout_line(&format!(
+                "api_key_source={}",
+                render_api_key_source(&diagnostics.api_key_source)
+            ))?
+            || !write_stdout_line(&format!(
+                "api_key_env_candidates={}",
+                if diagnostics.api_key_env_candidates.is_empty() {
+                    "<none>".to_string()
+                } else {
+                    diagnostics.api_key_env_candidates.join(",")
+                }
+            ))?
+            || !write_stdout_line(&format!(
+                "missing={}",
+                if diagnostics.missing.is_empty() {
+                    "<none>".to_string()
+                } else {
+                    diagnostics.missing.join(",")
+                }
+            ))?
+        {
+            return Ok(());
+        }
+
         let mut model_ids: Vec<String> = entry.models.keys().cloned().collect();
         model_ids.sort();
+        if !write_stdout_line(&format!("models={}", model_ids.len()))? {
+            return Ok(());
+        }
         for model_id in model_ids {
-            println!("{provider}/{model_id}");
+            if !write_stdout_line(&format!("{provider}/{model_id}"))? {
+                return Ok(());
+            }
         }
         return Ok(());
     }
@@ -209,12 +269,62 @@ fn handle_models_command(provider_filter: Option<&str>) -> Result<()> {
     providers.sort_by(|a, b| a.0.cmp(&b.0));
     for (provider_id, entry) in providers {
         let display_name = entry.name.unwrap_or_else(|| provider_id.clone());
-        println!(
-            "{provider_id}\tmodels={}\tname={display_name}",
-            entry.models.len()
-        );
+        let diagnostics = diagnose_provider(config, Some(&provider_id))
+            .with_context(|| format!("failed to diagnose provider {provider_id}"))?;
+        let missing = if diagnostics.missing.is_empty() {
+            "none".to_string()
+        } else {
+            diagnostics.missing.join("|")
+        };
+        if !write_stdout_line(&format!(
+            "{provider_id}\tmodels={}\tname={display_name}\tprotocol={}\tendpoint={}\tapi_key_source={}\tmissing={missing}",
+            entry.models.len(),
+            render_protocol(&diagnostics.protocol),
+            diagnostics.endpoint.as_deref().unwrap_or("<unset>"),
+            render_api_key_source(&diagnostics.api_key_source),
+        ))? {
+            return Ok(());
+        }
     }
     Ok(())
+}
+
+fn write_stdout_line(line: &str) -> Result<bool> {
+    let mut stdout = std::io::stdout().lock();
+    match writeln!(stdout, "{line}") {
+        Ok(()) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => Ok(false),
+        Err(err) => Err(anyhow::anyhow!("stdout write failed: {err}")),
+    }
+}
+
+fn render_protocol(protocol: &ProviderProtocolName) -> &'static str {
+    match protocol {
+        ProviderProtocolName::Null => "null",
+        ProviderProtocolName::OpenAiCompatible => "openai_compatible",
+        ProviderProtocolName::AnthropicMessages => "anthropic_messages",
+    }
+}
+
+fn render_api_key_source(source: &ApiKeySource) -> String {
+    match source {
+        ApiKeySource::None => "none".to_string(),
+        ApiKeySource::ConfigEnvMap { var_name } => format!("config_env:{var_name}"),
+        ApiKeySource::ProcessEnv { var_name } => format!("process_env:{var_name}"),
+        ApiKeySource::AuthStore => "auth_store".to_string(),
+    }
+}
+
+fn load_effective_config(cli: &Cli) -> Result<ResolvedConfig> {
+    let cwd = std::env::current_dir().context("failed to resolve current directory")?;
+    let mut config_sources = ConfigSources::new(cwd);
+    config_sources.profile_override = cli.profile.clone();
+    config_sources.model_override = cli.model.clone();
+    config_sources.llm_provider_override = cli.llm_provider.clone();
+    config_sources.llm_base_url_override = cli.llm_base_url.clone();
+    config_sources.llm_api_key_env_override = cli.llm_api_key_env.clone();
+    config_sources.trust_project = cli.trust_project_config;
+    ConfigLoader::load(&config_sources).context("failed to load configuration")
 }
 
 fn resolve_models_path() -> Option<PathBuf> {

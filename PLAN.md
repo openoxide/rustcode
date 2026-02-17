@@ -226,6 +226,29 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `rustcode auth methods/login/set-key/status/remove` validated on CLI
     - live OpenRouter prompt execution through stored key returned `AUTH_OK`
 
+14. Provider Diagnostics and Pipe-Safe Output
+- Status: completed
+- Deliverables:
+  - Added provider diagnostics API in `rustcode-llm` (`diagnose_provider`) exposing:
+    - protocol
+    - base URL and normalized endpoint
+    - api key source (`none`, `config_env`, `process_env`, `auth_store`)
+    - candidate env vars
+    - missing requirements (`base_url`, `api_key`)
+  - Extended `rustcode models` output with provider diagnostics in both summary and provider-filter views.
+  - Hardened CLI output against `BrokenPipe` (e.g., piping to `head`) for:
+    - event stream rendering
+    - auth command output
+    - models command output
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: live CLI diagnostics probes:
+    - `OPENROUTER_API_KEY=... rustcode models openrouter` reports `api_key_source=process_env`
+    - `rustcode auth set-key ...` + `rustcode models openrouter` reports `api_key_source=auth_store`
+    - `rustcode models | head -n 5` exits without broken-pipe panic
+  - Pass: live unsandboxed OpenRouter execution after diagnostics changes returned `DIAG_OK`.
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -260,7 +283,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
 2. Implement real OAuth token exchange adapters (device/browser flows) behind `rustcode-auth`.
-3. Add structured provider diagnostics (`auth source`, `endpoint`, `requires_key`, `missing_fields`) to `models` output.
+3. Add provider diagnostics JSON mode (`rustcode models --json`) for machine-readable health/status checks.
 
 ## Update Log
 - 2026-02-17:
@@ -359,6 +382,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
       - `rustcode models` command with provider filter support.
       - Integration test for custom models index fixture.
       - Live CLI usage checks for `auth` and `models` command family.
+    - Completed Milestone 14 provider diagnostics and pipe-safety:
+      - `rustcode-llm` now exposes provider diagnostics with auth-source and missing-field reporting.
+      - `rustcode models` now emits diagnostics columns and provider detail headers.
+      - Fixed broken-pipe panic for piped output by handling `EPIPE` gracefully in CLI writes.
     - Added explicit operating rules to enforce:
       - opencode/codex code+docs reference before feature implementation
       - live feature usage validation in addition to automated tests.

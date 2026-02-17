@@ -131,6 +131,36 @@ fn models_command_reads_custom_models_index() {
     assert!(stdout.contains("alpha/m2"), "stdout: {stdout}");
 }
 
+#[test]
+fn models_summary_includes_diagnostics_columns() {
+    let models_path = make_temp_file_path("models-summary");
+    std::fs::write(
+        &models_path,
+        r#"{
+  "openrouter": { "name": "OpenRouter", "models": { "m1": {} } }
+}"#,
+    )
+    .expect("must write models fixture");
+
+    let output = Command::new(rustcode_bin())
+        .args(["models"])
+        .env("RUSTCODE_MODELS_PATH", &models_path)
+        .output()
+        .expect("must run rustcode models");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains("protocol="), "stdout: {stdout}");
+    assert!(stdout.contains("api_key_source="), "stdout: {stdout}");
+    assert!(stdout.contains("missing="), "stdout: {stdout}");
+}
+
 #[cfg(unix)]
 #[test]
 fn sigint_cancels_long_running_command_gracefully() {
