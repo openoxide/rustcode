@@ -324,9 +324,9 @@ impl Engine {
                 incoming = listener.accept() => {
                     match incoming {
                         Ok((stream, _addr)) => {
-                            tokio::spawn(async move {
-                                let _ = handle_serve_connection(stream).await;
-                            });
+                            self
+                                .handle_serve_connection(stream, context, publisher.clone())
+                                .await?;
                         }
                         Err(err) => {
                             return Err(ExecutionError::Executor(format!("accept failed: {err}")));
@@ -363,6 +363,57 @@ impl Engine {
 
         Ok(normalized)
     }
+
+    async fn handle_serve_connection(
+        &self,
+        mut stream: TcpStream,
+        context: &CommandContext,
+        publisher: Arc<dyn EventPublisher>,
+    ) -> Result<(), ExecutionError> {
+        let mut buffer = [0u8; 2048];
+        let bytes = stream
+            .read(&mut buffer)
+            .await
+            .map_err(|err| ExecutionError::Executor(format!("failed to read request: {err}")))?;
+
+        let request = String::from_utf8_lossy(&buffer[..bytes]);
+        let request_line = request.lines().next().unwrap_or_default();
+        let mut parts = request_line.split_whitespace();
+        let method = parts.next().unwrap_or_default().to_string();
+        let path = parts.next().unwrap_or_default().to_string();
+
+        let (status_code, status_line, body) = match (method.as_str(), path.as_str()) {
+            ("GET", "/health") => (200u16, "200 OK", "{\"ok\":true}\n"),
+            ("", "") => (400u16, "400 Bad Request", "{\"error\":\"bad request\"}\n"),
+            _ => (404u16, "404 Not Found", "{\"error\":\"not found\"}\n"),
+        };
+
+        let response = format!(
+            "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+
+        stream
+            .write_all(response.as_bytes())
+            .await
+            .map_err(|err| ExecutionError::Executor(format!("failed to write response: {err}")))?;
+        stream
+            .shutdown()
+            .await
+            .map_err(|err| ExecutionError::Executor(format!("failed to shutdown stream: {err}")))?;
+
+        self.emit(
+            publisher,
+            EventScope::System,
+            EventPayload::ServeRequest {
+                method,
+                path,
+                status: status_code,
+            },
+            context,
+        )
+        .await
+    }
 }
 
 fn absolute_normalized(path: &Path) -> Result<PathBuf, std::io::Error> {
@@ -388,30 +439,6 @@ fn lexical_normalize(path: PathBuf) -> PathBuf {
     }
 
     normalized
-}
-
-async fn handle_serve_connection(mut stream: TcpStream) -> Result<(), std::io::Error> {
-    let mut buffer = [0u8; 2048];
-    let bytes = stream.read(&mut buffer).await?;
-
-    let request = String::from_utf8_lossy(&buffer[..bytes]);
-    let request_line = request.lines().next().unwrap_or_default();
-    let mut parts = request_line.split_whitespace();
-    let method = parts.next().unwrap_or_default();
-    let path = parts.next().unwrap_or_default();
-
-    let (status, body) = match (method, path) {
-        ("GET", "/health") => ("200 OK", "{\"ok\":true}\n"),
-        ("", "") => ("400 Bad Request", "{\"error\":\"bad request\"}\n"),
-        _ => ("404 Not Found", "{\"error\":\"not found\"}\n"),
-    };
-
-    let response = format!(
-        "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.len()
-    );
-    stream.write_all(response.as_bytes()).await?;
-    stream.shutdown().await
 }
 
 #[async_trait]

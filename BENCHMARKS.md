@@ -35,8 +35,8 @@ Examples:
 - `./scripts/benchmark.sh startup 5`:
   - `real 0.00` reported across runs on host timer granularity.
 - `./scripts/benchmark.sh memory "bench memory probe"`:
-  - `maximum resident set size: 5,603,328`
-  - `peak memory footprint: 2,162,976`
+  - `maximum resident set size: 5,488,640`
+  - `peak memory footprint: 2,113,848`
 - `./scripts/benchmark.sh drift 12 4`:
   - observed RSS samples: `32 KB -> 5,392 KB`
   - process remained stable and exited cleanly on cancellation.

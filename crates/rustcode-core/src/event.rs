@@ -20,10 +20,23 @@ pub enum EventScope {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "data")]
 pub enum EventPayload {
-    CommandAccepted { name: String },
-    OutputChunk { text: String },
-    Warning { message: String },
-    Failure { message: String },
+    CommandAccepted {
+        name: String,
+    },
+    OutputChunk {
+        text: String,
+    },
+    ServeRequest {
+        method: String,
+        path: String,
+        status: u16,
+    },
+    Warning {
+        message: String,
+    },
+    Failure {
+        message: String,
+    },
     Completed,
 }
 
@@ -58,6 +71,23 @@ mod tests {
     fn new_events_set_schema_version() {
         let event = Event::new(1, EventScope::System, EventPayload::Completed);
         assert_eq!(event.schema_version, EVENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn serve_request_payload_round_trips() {
+        let event = Event::new(
+            2,
+            EventScope::System,
+            EventPayload::ServeRequest {
+                method: "GET".to_string(),
+                path: "/health".to_string(),
+                status: 200,
+            },
+        );
+
+        let encoded = serde_json::to_string(&event).expect("must serialize");
+        let decoded: Event = serde_json::from_str(&encoded).expect("must deserialize");
+        assert_eq!(decoded, event);
     }
 }
 

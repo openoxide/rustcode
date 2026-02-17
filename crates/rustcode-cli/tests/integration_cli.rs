@@ -181,5 +181,13 @@ fn serve_exposes_health_response_and_cancels_cleanly() {
         stdout.contains("serve endpoint configured"),
         "stdout: {stdout}"
     );
+    assert!(
+        stdout.contains("ServeRequest { method: \"GET\", path: \"/health\", status: 200 }"),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("ServeRequest { method: \"GET\", path: \"/does-not-exist\", status: 404 }"),
+        "stdout: {stdout}"
+    );
     assert!(stdout.contains("execution cancelled"), "stdout: {stdout}");
 }

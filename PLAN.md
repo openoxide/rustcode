@@ -191,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add structured serve request telemetry (method/path/status) as domain events.
-2. Add CI artifact upload for `benchmarks/latest.json`.
-3. Extend load benchmark with percentile latency capture.
+1. Add CI artifact upload for `benchmarks/latest.json`.
+2. Extend load benchmark with percentile latency capture.
+3. Add per-connection serve request timeout to avoid stalled sockets.
 
 ## Update Log
 - 2026-02-17:
@@ -311,6 +311,13 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Extended `serve` endpoint behavior:
     - route-aware HTTP responses (`GET /health` -> `200`, unknown routes -> `404`, malformed requests -> `400`).
     - integration coverage asserts both health success and unknown-route handling.
+  - Validation pass:
+    - `cargo test --workspace`
+    - `./scripts/ci_matrix.sh`
+  - Added structured serve telemetry:
+    - introduced `EventPayload::ServeRequest { method, path, status }`.
+    - `serve` now emits route-level events for each handled request.
+    - integration coverage asserts both emitted `200` health and `404` unknown-route events.
   - Validation pass:
     - `cargo test --workspace`
     - `./scripts/ci_matrix.sh`
