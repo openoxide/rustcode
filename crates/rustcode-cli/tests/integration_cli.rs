@@ -991,6 +991,148 @@ fn auth_remove_json_response_is_parseable() {
 }
 
 #[test]
+fn mcp_login_list_logout_round_trip() {
+    let auth_path = make_temp_file_path("mcp-auth-roundtrip");
+
+    let login_output = Command::new(rustcode_bin())
+        .args(["mcp", "login", "github", "--from-env", "RUSTCODE_MCP_TOKEN"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_MCP_TOKEN", "mcp-secret")
+        .output()
+        .expect("must run rustcode mcp login");
+    assert!(
+        login_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&login_output.stdout),
+        String::from_utf8_lossy(&login_output.stderr)
+    );
+
+    let list_output = Command::new(rustcode_bin())
+        .args(["mcp", "list"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode mcp list");
+    assert!(
+        list_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&list_output.stdout),
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let list_stdout = String::from_utf8(list_output.stdout).expect("stdout must be utf8");
+    assert!(list_stdout.contains("servers=1"));
+    assert!(list_stdout.contains("name=github\tcredential=stored:api_key"));
+
+    let logout_output = Command::new(rustcode_bin())
+        .args(["mcp", "logout", "github"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode mcp logout");
+    assert!(
+        logout_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&logout_output.stdout),
+        String::from_utf8_lossy(&logout_output.stderr)
+    );
+    let logout_stdout = String::from_utf8(logout_output.stdout).expect("stdout must be utf8");
+    assert!(logout_stdout.contains("removed mcp credential for name=github"));
+}
+
+#[test]
+fn mcp_json_contracts_are_parseable() {
+    let auth_path = make_temp_file_path("mcp-auth-json");
+
+    let login_output = Command::new(rustcode_bin())
+        .args([
+            "--json",
+            "mcp",
+            "login",
+            "github",
+            "--from-env",
+            "RUSTCODE_MCP_TOKEN",
+            "--scopes",
+            "read,write",
+            "--url",
+            "https://example.com/mcp",
+        ])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_MCP_TOKEN", "mcp-secret")
+        .output()
+        .expect("must run rustcode mcp login");
+    assert!(
+        login_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&login_output.stdout),
+        String::from_utf8_lossy(&login_output.stderr)
+    );
+    let login_payload: Value = serde_json::from_str(
+        String::from_utf8(login_output.stdout)
+            .expect("stdout must be utf8")
+            .trim(),
+    )
+    .expect("must parse json");
+    assert_eq!(login_payload["schema_version"].as_u64(), Some(1));
+    assert_eq!(login_payload["command"].as_str(), Some("mcp.login"));
+    assert_eq!(login_payload["name"].as_str(), Some("github"));
+    assert_eq!(login_payload["stage"].as_str(), Some("authorized"));
+
+    let list_output = Command::new(rustcode_bin())
+        .args(["--json", "mcp", "list"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode mcp list");
+    assert!(
+        list_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&list_output.stdout),
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let list_payload: Value = serde_json::from_str(
+        String::from_utf8(list_output.stdout)
+            .expect("stdout must be utf8")
+            .trim(),
+    )
+    .expect("must parse json");
+    assert_eq!(list_payload["command"].as_str(), Some("mcp.list"));
+    assert!(list_payload["servers"]
+        .as_array()
+        .expect("servers should be array")
+        .iter()
+        .any(|row| row["name"].as_str() == Some("github")));
+
+    let logout_output = Command::new(rustcode_bin())
+        .args(["--json", "mcp", "logout", "github"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode mcp logout");
+    assert!(
+        logout_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&logout_output.stdout),
+        String::from_utf8_lossy(&logout_output.stderr)
+    );
+    let logout_payload: Value = serde_json::from_str(
+        String::from_utf8(logout_output.stdout)
+            .expect("stdout must be utf8")
+            .trim(),
+    )
+    .expect("must parse json");
+    assert_eq!(logout_payload["command"].as_str(), Some("mcp.logout"));
+    assert_eq!(logout_payload["removed"].as_bool(), Some(true));
+}
+
+#[test]
+fn mcp_login_requires_from_env_in_non_interactive_mode() {
+    let output = Command::new(rustcode_bin())
+        .args(["mcp", "login", "github"])
+        .output()
+        .expect("must run rustcode mcp login");
+
+    assert!(!output.status.success(), "command should fail");
+    let stderr = String::from_utf8(output.stderr).expect("stderr must be utf8");
+    assert!(stderr.contains("MCP login currently requires --from-env"));
+}
+
+#[test]
 fn models_command_reads_custom_models_index() {
     let models_path = make_temp_file_path("models-index");
     std::fs::write(

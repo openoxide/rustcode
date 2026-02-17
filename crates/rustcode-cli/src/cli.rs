@@ -69,6 +69,10 @@ pub enum TopCommand {
         #[command(subcommand)]
         command: AuthCommand,
     },
+    Mcp {
+        #[command(subcommand)]
+        command: McpCommand,
+    },
     Version,
 }
 
@@ -119,6 +123,24 @@ pub enum AuthCommand {
     },
 }
 
+#[derive(Debug, Clone, Subcommand)]
+pub enum McpCommand {
+    #[command(alias = "ls")]
+    List,
+    Login {
+        name: String,
+        #[arg(long = "from-env")]
+        from_env: Option<String>,
+        #[arg(long, value_delimiter = ',', value_name = "SCOPE,SCOPE")]
+        scopes: Vec<String>,
+        #[arg(long)]
+        url: Option<String>,
+    },
+    Logout {
+        name: String,
+    },
+}
+
 pub fn map_command(command: TopCommand) -> Command {
     match command {
         TopCommand::Run { prompt } => Command::Run { prompt },
@@ -134,6 +156,9 @@ pub fn map_command(command: TopCommand) -> Command {
         TopCommand::Serve { listen } => Command::Serve { listen },
         TopCommand::Auth { .. } => {
             panic!("auth command is handled in cli main before engine dispatch")
+        }
+        TopCommand::Mcp { .. } => {
+            panic!("mcp command is handled in cli main before engine dispatch")
         }
         TopCommand::Version => Command::Version,
     }
@@ -415,6 +440,52 @@ mod tests {
                 assert!(method.is_none());
             }
             _ => panic!("expected auth login command"),
+        }
+    }
+
+    #[test]
+    fn mcp_login_parses_from_env_scopes_and_url() {
+        let cli = Cli::try_parse_from([
+            "rustcode",
+            "mcp",
+            "login",
+            "github",
+            "--from-env",
+            "RUSTCODE_MCP_TOKEN",
+            "--scopes",
+            "read,write",
+            "--url",
+            "https://example.com/mcp",
+        ])
+        .expect("cli should parse");
+
+        match cli.command {
+            TopCommand::Mcp {
+                command:
+                    McpCommand::Login {
+                        name,
+                        from_env,
+                        scopes,
+                        url,
+                    },
+            } => {
+                assert_eq!(name, "github");
+                assert_eq!(from_env.as_deref(), Some("RUSTCODE_MCP_TOKEN"));
+                assert_eq!(scopes, vec!["read", "write"]);
+                assert_eq!(url.as_deref(), Some("https://example.com/mcp"));
+            }
+            _ => panic!("expected mcp login command"),
+        }
+    }
+
+    #[test]
+    fn mcp_list_alias_parses() {
+        let cli = Cli::try_parse_from(["rustcode", "mcp", "ls"]).expect("cli should parse");
+        match cli.command {
+            TopCommand::Mcp {
+                command: McpCommand::List,
+            } => {}
+            _ => panic!("expected mcp list command"),
         }
     }
 }

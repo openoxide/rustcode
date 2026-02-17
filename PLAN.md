@@ -670,6 +670,30 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: live CLI probe:
     - `cargo run -q -p rustcode-cli -- --json auth login --from-env RUSTCODE_TEST_KEY` returned JSON failure envelope and non-zero exit.
 
+36. MCP Auth Command Surface v1
+- Status: completed
+- Deliverables:
+  - Added initial MCP command family:
+    - `rustcode mcp list` (`mcp ls`)
+    - `rustcode mcp login <name> --from-env <ENV_VAR>`
+    - `rustcode mcp logout <name>`
+  - Implemented MCP credential storage lifecycle using auth store key namespace (`mcp:<name>`).
+  - Added JSON output support for all MCP v1 subcommands.
+  - Added parser coverage and integration tests for MCP command contracts.
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration tests:
+    - `mcp_login_list_logout_round_trip`
+    - `mcp_json_contracts_are_parseable`
+    - `mcp_login_requires_from_env_in_non_interactive_mode`
+  - Pass: live CLI probes:
+    - `cargo run -q -p rustcode-cli -- mcp login github --from-env ...`
+    - `cargo run -q -p rustcode-cli -- mcp list`
+    - `cargo run -q -p rustcode-cli -- --json mcp list`
+    - `cargo run -q -p rustcode-cli -- --json mcp logout github`
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -706,10 +730,29 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 1. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 2. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
 3. Add initial MCP auth/login command surface parity for remote OAuth-capable servers.
-4. Add initial `mcp` command surface (`list`, `login`, `logout`) aligned with codex/opencode auth UX and JSON output support.
+4. Extend MCP login beyond `--from-env` by adding OAuth-capability discovery and staged login flow contracts.
 
 ## Update Log
 - 2026-02-17:
+  - Completed Milestone 36 MCP auth command surface v1:
+    - added `mcp list/login/logout` command family with JSON output support.
+    - implemented MCP credential lifecycle via auth-store namespace `mcp:<name>`.
+    - added integration tests:
+      - `mcp_login_list_logout_round_trip`
+      - `mcp_json_contracts_are_parseable`
+      - `mcp_login_requires_from_env_in_non_interactive_mode`
+  - Referenced parity sources before implementation:
+    - `opencode/packages/opencode/src/cli/cmd/mcp.ts`
+    - `codex/codex-rs/cli/src/mcp_cmd.rs`
+  - Validation passed:
+    - `cargo fmt --all`
+    - `cargo test -p rustcode-cli`
+    - `./scripts/ci_matrix.sh`
+    - live probes:
+      - `cargo run -q -p rustcode-cli -- mcp login github --from-env ...`
+      - `cargo run -q -p rustcode-cli -- mcp list`
+      - `cargo run -q -p rustcode-cli -- --json mcp list`
+      - `cargo run -q -p rustcode-cli -- --json mcp logout github`
   - Completed Milestone 35 auth login JSON failure envelope:
     - added structured `stage=failed` payloads for `--json auth login` errors.
     - added `error_kind` classification (`validation`/`provider`/`network`).

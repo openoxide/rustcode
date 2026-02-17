@@ -32,7 +32,7 @@ use rustcode_tui::TuiApp;
 mod cli;
 mod render;
 
-use cli::{map_command, AuthCommand, Cli, TopCommand};
+use cli::{map_command, AuthCommand, Cli, McpCommand, TopCommand};
 use render::{render_event, OutputFormat};
 
 #[tokio::main]
@@ -66,6 +66,9 @@ async fn main() -> Result<()> {
                 Err(err)
             }
         };
+    }
+    if let TopCommand::Mcp { command } = &cli.command {
+        return handle_mcp_command(command.clone(), cli.json).await;
     }
     if let TopCommand::Models { provider } = &cli.command {
         let config = load_effective_config(&cli)?;
@@ -716,6 +719,138 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
         }
     }
     Ok(())
+}
+
+async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()> {
+    let store = AuthStore::open_default();
+    match command {
+        McpCommand::List => {
+            let mut servers = store
+                .providers()?
+                .into_iter()
+                .filter_map(|provider| provider.strip_prefix("mcp:").map(|name| name.to_string()))
+                .collect::<Vec<_>>();
+            servers.sort();
+
+            if json_output {
+                let rows = servers
+                    .iter()
+                    .map(|server| {
+                        let key = mcp_store_key(server);
+                        Ok(serde_json::json!({
+                            "name": server,
+                            "credential": render_stored_credential(store.get(&key)?),
+                        }))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "command": "mcp.list",
+                    "auth_file": store.path().display().to_string(),
+                    "servers": rows,
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize mcp list json")?,
+                )? {
+                    return Ok(());
+                }
+                return Ok(());
+            }
+
+            if !write_stdout_line(&format!("servers={}", servers.len()))?
+                || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+            {
+                return Ok(());
+            }
+            for server in servers {
+                let key = mcp_store_key(&server);
+                if !write_stdout_line(&format!(
+                    "name={server}\tcredential={}",
+                    render_stored_credential(store.get(&key)?)
+                ))? {
+                    return Ok(());
+                }
+            }
+        }
+        McpCommand::Login {
+            name,
+            from_env,
+            scopes,
+            url,
+        } => {
+            let Some(from_env) = from_env else {
+                anyhow::bail!(
+                    "MCP login currently requires --from-env <ENV_VAR>: `rustcode mcp login <name> --from-env <ENV_VAR>`"
+                );
+            };
+            let token = std::env::var(&from_env).with_context(|| {
+                format!("environment variable {from_env} is not set; cannot store MCP credential")
+            })?;
+            let key = mcp_store_key(&name);
+            store.set_api_key(&key, &token)?;
+
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "command": "mcp.login",
+                    "name": name,
+                    "stage": "authorized",
+                    "source": "env",
+                    "credential": "stored:api_key",
+                    "scopes": scopes,
+                    "url": url,
+                    "auth_file": store.path().display().to_string(),
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize mcp login json")?,
+                )? {
+                    return Ok(());
+                }
+                return Ok(());
+            }
+
+            if !write_stdout_line(&format!("stored mcp credential for name={name}"))?
+                || !write_stdout_line(&format!("source=env:{from_env}"))?
+                || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+            {
+                return Ok(());
+            }
+        }
+        McpCommand::Logout { name } => {
+            let key = mcp_store_key(&name);
+            let removed = store.remove(&key)?;
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "command": "mcp.logout",
+                    "name": name,
+                    "removed": removed,
+                    "auth_file": store.path().display().to_string(),
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize mcp logout json")?,
+                )? {
+                    return Ok(());
+                }
+                return Ok(());
+            }
+            if !write_stdout_line(&format!(
+                "{} mcp credential for name={name}",
+                if removed { "removed" } else { "no stored" }
+            ))? || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+            {
+                return Ok(());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn mcp_store_key(name: &str) -> String {
+    format!("mcp:{name}")
 }
 
 fn render_stored_credential(credential: Option<StoredCredential>) -> &'static str {
