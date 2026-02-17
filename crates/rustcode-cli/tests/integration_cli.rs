@@ -29,6 +29,30 @@ fn http_request(port: u16, path: &str) -> std::io::Result<String> {
     Ok(response)
 }
 
+fn spawn_mcp_discovery_server() -> Option<(u16, thread::JoinHandle<()>)> {
+    let listener = match TcpListener::bind("127.0.0.1:0") {
+        Ok(listener) => listener,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return None,
+        Err(_) => return None,
+    };
+    let port = listener.local_addr().ok()?.port();
+    let handle = thread::spawn(move || {
+        if let Ok((mut socket, _)) = listener.accept() {
+            let mut buf = [0_u8; 2048];
+            let _ = socket.read(&mut buf);
+            let body = r#"{"authorization_endpoint":"https://mcp.example.com/authorize","token_endpoint":"https://mcp.example.com/token"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = socket.write_all(response.as_bytes());
+            let _ = socket.flush();
+        }
+    });
+    Some((port, handle))
+}
+
 #[test]
 fn json_stream_includes_schema_version_and_completion_event() {
     let output = Command::new(rustcode_bin())
@@ -1129,7 +1153,70 @@ fn mcp_login_requires_from_env_in_non_interactive_mode() {
 
     assert!(!output.status.success(), "command should fail");
     let stderr = String::from_utf8(output.stderr).expect("stderr must be utf8");
-    assert!(stderr.contains("MCP login currently requires --from-env"));
+    assert!(stderr.contains("requires either --from-env"));
+}
+
+#[test]
+fn mcp_login_oauth_discovery_json_emits_staged_contract() {
+    let Some((port, handle)) = spawn_mcp_discovery_server() else {
+        return;
+    };
+    let url = format!("http://127.0.0.1:{port}/mcp");
+
+    let output = Command::new(rustcode_bin())
+        .args([
+            "--json",
+            "mcp",
+            "login",
+            "github",
+            "--url",
+            &url,
+            "--scopes",
+            "read,write",
+        ])
+        .output()
+        .expect("must run rustcode mcp login");
+
+    handle.join().expect("discovery server should join");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2, "stdout: {stdout}");
+
+    let discovered: Value = serde_json::from_str(lines[0]).expect("discovered line must parse");
+    assert_eq!(discovered["schema_version"].as_u64(), Some(1));
+    assert_eq!(discovered["command"].as_str(), Some("mcp.login"));
+    assert_eq!(discovered["name"].as_str(), Some("github"));
+    assert_eq!(discovered["stage"].as_str(), Some("oauth_discovered"));
+    assert_eq!(
+        discovered["authorization_endpoint"].as_str(),
+        Some("https://mcp.example.com/authorize")
+    );
+    assert_eq!(
+        discovered["token_endpoint"].as_str(),
+        Some("https://mcp.example.com/token")
+    );
+    assert_eq!(
+        discovered["scopes"]
+            .as_array()
+            .expect("scopes must be array")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["read", "write"]
+    );
+
+    let awaiting: Value = serde_json::from_str(lines[1]).expect("awaiting line must parse");
+    assert_eq!(awaiting["schema_version"].as_u64(), Some(1));
+    assert_eq!(awaiting["command"].as_str(), Some("mcp.login"));
+    assert_eq!(awaiting["name"].as_str(), Some("github"));
+    assert_eq!(awaiting["stage"].as_str(), Some("awaiting_token_import"));
 }
 
 #[test]

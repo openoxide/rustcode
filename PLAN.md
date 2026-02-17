@@ -9,6 +9,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Every milestone must include validation commands and pass/fail notes.
 - Update this file in every substantive commit.
 - Before implementing a feature, check both `opencode` and `codex` code/docs for behavior parity and capture references in the update log.
+- At milestone start and completion, record the specific `opencode` and `codex` code/doc references used for that slice.
 - Do not consider a feature complete with tests alone; run live CLI usage paths for that feature and record observed output.
 - Ask the user immediately when external credentials, account context, or provider-specific access is required for end-to-end validation.
 - Maintain `docs/CREDENTIAL_REQUIREMENTS.md` as the canonical credential/env-var matrix; update it in the same commit as any auth flow change.
@@ -694,6 +695,34 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `cargo run -q -p rustcode-cli -- --json mcp list`
     - `cargo run -q -p rustcode-cli -- --json mcp logout github`
 
+37. MCP OAuth Discovery + Staged Login Contract
+- Status: completed
+- Deliverables:
+  - Added MCP OAuth discovery primitive in `rustcode-auth`:
+    - RFC8414-style discovery path probing for streamable HTTP MCP URLs.
+    - capability result with discovered authorization/token endpoints.
+  - Extended `mcp login` behavior:
+    - accepts `--url <MCP_URL>` without `--from-env`.
+    - emits staged contract (`oauth_discovered` -> `awaiting_token_import`) when OAuth metadata is found.
+    - preserves `--from-env` path for immediate credential storage.
+  - Added integration coverage for staged JSON contract and updated MCP validation behavior.
+  - Updated plan operating rules to require codex/opencode references at milestone start and completion.
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test -p rustcode-auth -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: tests:
+    - `rustcode-auth`:
+      - `mcp_discovery_paths_include_canonical_and_path_scoped_candidates`
+      - `discover_mcp_oauth_rejects_invalid_url`
+    - `rustcode-cli`:
+      - `mcp_login_oauth_discovery_json_emits_staged_contract`
+      - updated `mcp_login_requires_from_env_in_non_interactive_mode`
+  - Pass: live CLI probes:
+    - `cargo run -q -p rustcode-cli -- --json mcp login google-oauth --url https://accounts.google.com --scopes openid,email` (successful staged discovery contract)
+    - `cargo run -q -p rustcode-cli -- --json mcp login demo --url https://example.com/mcp` (unsupported discovery path)
+    - `cargo run -q -p rustcode-cli -- --json mcp login demo --from-env ... --url https://example.com/mcp` (env credential path)
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -729,11 +758,34 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 ## Next Action Queue
 1. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 2. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
-3. Add initial MCP auth/login command surface parity for remote OAuth-capable servers.
-4. Extend MCP login beyond `--from-env` by adding OAuth-capability discovery and staged login flow contracts.
+3. Implement MCP OAuth callback/token-exchange flow (beyond discovery/import) with explicit staged events and cancellation handling.
+4. Add MCP server config source (project/user config) so `mcp list/login/logout` operate on declared servers instead of auth-store-only names.
 
 ## Update Log
 - 2026-02-17:
+  - Completed Milestone 37 MCP OAuth discovery + staged login contract:
+    - added discovery primitive (`discover_mcp_oauth`) in `rustcode-auth`.
+    - extended `mcp login --url` to emit staged contract (`oauth_discovered`, `awaiting_token_import`).
+    - kept `mcp login --from-env` storage path unchanged.
+    - added tests:
+      - `mcp_discovery_paths_include_canonical_and_path_scoped_candidates`
+      - `discover_mcp_oauth_rejects_invalid_url`
+      - `mcp_login_oauth_discovery_json_emits_staged_contract`
+  - Milestone 37 references (code + docs):
+    - `opencode/packages/opencode/src/cli/cmd/mcp.ts`
+    - `opencode/packages/opencode/src/mcp/index.ts`
+    - `codex/codex-rs/cli/src/mcp_cmd.rs`
+    - `codex/codex-rs/rmcp-client/src/auth_status.rs`
+    - `https://opencode.ai/docs`
+    - `https://developers.openai.com/codex/`
+  - Validation passed:
+    - `cargo fmt --all`
+    - `cargo test -p rustcode-auth -p rustcode-cli`
+    - `./scripts/ci_matrix.sh`
+    - live probes:
+      - `cargo run -q -p rustcode-cli -- --json mcp login google-oauth --url https://accounts.google.com --scopes openid,email`
+      - `cargo run -q -p rustcode-cli -- --json mcp login demo --url https://example.com/mcp`
+      - `cargo run -q -p rustcode-cli -- --json mcp login demo --from-env ... --url https://example.com/mcp`
   - Completed Milestone 36 MCP auth command surface v1:
     - added `mcp list/login/logout` command family with JSON output support.
     - implemented MCP credential lifecycle via auth-store namespace `mcp:<name>`.

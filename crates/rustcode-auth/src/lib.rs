@@ -13,6 +13,10 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::time::sleep;
 
+const MCP_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
+const MCP_DISCOVERY_HEADER: &str = "MCP-Protocol-Version";
+const MCP_DISCOVERY_VERSION: &str = "2024-11-05";
+
 #[derive(Debug, Error)]
 pub enum AuthError {
     #[error("failed to read auth store: {0}")]
@@ -254,6 +258,101 @@ pub fn oauth_login_hint(provider_id: &str) -> Option<OAuthLoginHint> {
 
 pub fn known_oauth_providers() -> &'static [&'static str] {
     OAUTH_PROVIDERS
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpOAuthDiscovery {
+    pub supported: bool,
+    pub metadata_url: Option<String>,
+    pub authorization_endpoint: Option<String>,
+    pub token_endpoint: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct McpOAuthDiscoveryMetadata {
+    #[serde(default)]
+    authorization_endpoint: Option<String>,
+    #[serde(default)]
+    token_endpoint: Option<String>,
+}
+
+pub async fn discover_mcp_oauth(url: &str) -> Result<McpOAuthDiscovery, AuthError> {
+    let base_url = reqwest::Url::parse(url)
+        .map_err(|err| AuthError::Validation(format!("invalid MCP URL `{url}`: {err}")))?;
+    let client = reqwest::Client::builder()
+        .timeout(MCP_DISCOVERY_TIMEOUT)
+        .no_proxy()
+        .build()
+        .map_err(|err| AuthError::Network(format!("failed to create discovery client: {err}")))?;
+
+    let mut last_error: Option<String> = None;
+    for path in mcp_discovery_paths(base_url.path()) {
+        let mut candidate = base_url.clone();
+        candidate.set_path(&path);
+
+        let response = match client
+            .get(candidate.clone())
+            .header(MCP_DISCOVERY_HEADER, MCP_DISCOVERY_VERSION)
+            .send()
+            .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                last_error = Some(err.to_string());
+                continue;
+            }
+        };
+
+        if response.status() != reqwest::StatusCode::OK {
+            continue;
+        }
+
+        let metadata = match response.json::<McpOAuthDiscoveryMetadata>().await {
+            Ok(metadata) => metadata,
+            Err(err) => {
+                last_error = Some(err.to_string());
+                continue;
+            }
+        };
+
+        if metadata.authorization_endpoint.is_some() && metadata.token_endpoint.is_some() {
+            return Ok(McpOAuthDiscovery {
+                supported: true,
+                metadata_url: Some(candidate.to_string()),
+                authorization_endpoint: metadata.authorization_endpoint,
+                token_endpoint: metadata.token_endpoint,
+            });
+        }
+    }
+
+    let _ = last_error;
+    Ok(McpOAuthDiscovery {
+        supported: false,
+        metadata_url: None,
+        authorization_endpoint: None,
+        token_endpoint: None,
+    })
+}
+
+fn mcp_discovery_paths(base_path: &str) -> Vec<String> {
+    let trimmed = base_path.trim_start_matches('/').trim_end_matches('/');
+    let canonical = "/.well-known/oauth-authorization-server".to_string();
+
+    if trimmed.is_empty() {
+        return vec![canonical];
+    }
+
+    let mut candidates = Vec::new();
+    let mut push_unique = |candidate: String| {
+        if !candidates.contains(&candidate) {
+            candidates.push(candidate);
+        }
+    };
+
+    push_unique(format!("{canonical}/{trimmed}"));
+    push_unique(format!("/{trimmed}/.well-known/oauth-authorization-server"));
+    push_unique(canonical);
+    candidates
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1260,6 +1359,30 @@ mod tests {
     fn oauth_hint_exists_for_supported_provider() {
         let hint = oauth_login_hint("gitlab").expect("hint must exist");
         assert!(hint.authorize_url.contains("gitlab"));
+    }
+
+    #[test]
+    fn mcp_discovery_paths_include_canonical_and_path_scoped_candidates() {
+        assert_eq!(
+            mcp_discovery_paths("/"),
+            vec!["/.well-known/oauth-authorization-server".to_string()]
+        );
+        assert_eq!(
+            mcp_discovery_paths("/mcp"),
+            vec![
+                "/.well-known/oauth-authorization-server/mcp".to_string(),
+                "/mcp/.well-known/oauth-authorization-server".to_string(),
+                "/.well-known/oauth-authorization-server".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn discover_mcp_oauth_rejects_invalid_url() {
+        let error = discover_mcp_oauth("not-a-url")
+            .await
+            .expect_err("invalid url should fail");
+        assert!(error.to_string().contains("invalid MCP URL"));
     }
 
     #[test]

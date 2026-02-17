@@ -7,9 +7,9 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result};
 use clap::Parser;
 use rustcode_auth::{
-    complete_browser_oauth_flow, known_oauth_providers, methods_for_provider, oauth_login_hint,
-    poll_device_code_flow_for_credential, start_browser_oauth_flow, start_device_code_flow,
-    AuthMethod, AuthStore, StoredCredential,
+    complete_browser_oauth_flow, discover_mcp_oauth, known_oauth_providers, methods_for_provider,
+    oauth_login_hint, poll_device_code_flow_for_credential, start_browser_oauth_flow,
+    start_device_code_flow, AuthMethod, AuthStore, StoredCredential,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -779,31 +779,83 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
             scopes,
             url,
         } => {
-            let Some(from_env) = from_env else {
-                anyhow::bail!(
-                    "MCP login currently requires --from-env <ENV_VAR>: `rustcode mcp login <name> --from-env <ENV_VAR>`"
-                );
+            if let Some(from_env) = from_env {
+                let token = std::env::var(&from_env).with_context(|| {
+                    format!(
+                        "environment variable {from_env} is not set; cannot store MCP credential"
+                    )
+                })?;
+                let key = mcp_store_key(&name);
+                store.set_api_key(&key, &token)?;
+
+                if json_output {
+                    let payload = serde_json::json!({
+                        "schema_version": 1,
+                        "command": "mcp.login",
+                        "name": name,
+                        "stage": "authorized",
+                        "source": "env",
+                        "credential": "stored:api_key",
+                        "scopes": scopes,
+                        "url": url,
+                        "auth_file": store.path().display().to_string(),
+                    });
+                    if !write_stdout_line(
+                        &serde_json::to_string(&payload)
+                            .context("failed to serialize mcp login json")?,
+                    )? {
+                        return Ok(());
+                    }
+                    return Ok(());
+                }
+
+                if !write_stdout_line(&format!("stored mcp credential for name={name}"))?
+                    || !write_stdout_line(&format!("source=env:{from_env}"))?
+                    || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+                {
+                    return Ok(());
+                }
+                return Ok(());
+            }
+
+            let Some(url) = url else {
+                anyhow::bail!("MCP login requires either --from-env <ENV_VAR> or --url <MCP_URL>");
             };
-            let token = std::env::var(&from_env).with_context(|| {
-                format!("environment variable {from_env} is not set; cannot store MCP credential")
-            })?;
-            let key = mcp_store_key(&name);
-            store.set_api_key(&key, &token)?;
+
+            let discovery = discover_mcp_oauth(&url).await?;
+            if !discovery.supported {
+                anyhow::bail!(
+                    "MCP server does not advertise OAuth endpoints; provide --from-env <ENV_VAR> or confirm server OAuth metadata"
+                );
+            }
 
             if json_output {
-                let payload = serde_json::json!({
+                let discovered = serde_json::json!({
                     "schema_version": 1,
                     "command": "mcp.login",
                     "name": name,
-                    "stage": "authorized",
-                    "source": "env",
-                    "credential": "stored:api_key",
-                    "scopes": scopes,
+                    "stage": "oauth_discovered",
                     "url": url,
-                    "auth_file": store.path().display().to_string(),
+                    "metadata_url": discovery.metadata_url,
+                    "authorization_endpoint": discovery.authorization_endpoint,
+                    "token_endpoint": discovery.token_endpoint,
+                    "scopes": scopes,
                 });
                 if !write_stdout_line(
-                    &serde_json::to_string(&payload)
+                    &serde_json::to_string(&discovered)
+                        .context("failed to serialize mcp login json")?,
+                )? {
+                    return Ok(());
+                }
+                let awaiting = serde_json::json!({
+                    "schema_version": 1,
+                    "command": "mcp.login",
+                    "name": name,
+                    "stage": "awaiting_token_import",
+                    "usage": "rustcode mcp login <name> --from-env <ENV_VAR>",
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&awaiting)
                         .context("failed to serialize mcp login json")?,
                 )? {
                     return Ok(());
@@ -811,9 +863,32 @@ async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()
                 return Ok(());
             }
 
-            if !write_stdout_line(&format!("stored mcp credential for name={name}"))?
-                || !write_stdout_line(&format!("source=env:{from_env}"))?
-                || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+            if !write_stdout_line(&format!("name={name}"))?
+                || !write_stdout_line("stage=oauth_discovered")?
+                || !write_stdout_line(&format!("url={url}"))?
+                || !write_stdout_line(&format!(
+                    "metadata_url={}",
+                    discovery.metadata_url.as_deref().unwrap_or("<unknown>")
+                ))?
+                || !write_stdout_line(&format!(
+                    "authorization_endpoint={}",
+                    discovery
+                        .authorization_endpoint
+                        .as_deref()
+                        .unwrap_or("<unknown>")
+                ))?
+                || !write_stdout_line(&format!(
+                    "token_endpoint={}",
+                    discovery.token_endpoint.as_deref().unwrap_or("<unknown>")
+                ))?
+            {
+                return Ok(());
+            }
+            if !scopes.is_empty() && !write_stdout_line(&format!("scopes={}", scopes.join(",")))? {
+                return Ok(());
+            }
+            if !write_stdout_line("stage=awaiting_token_import")?
+                || !write_stdout_line("usage=rustcode mcp login <name> --from-env <ENV_VAR>")?
             {
                 return Ok(());
             }
