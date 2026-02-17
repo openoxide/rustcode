@@ -950,9 +950,109 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass (live OpenRouter run, escalated/non-sandbox DNS):
     - `OPENROUTER_API_KEY=... cargo run -q -p rustcode-cli -- --event-debug --llm-provider openrouter --model openrouter/deepseek/deepseek-chat-v3-0324 run ...` (2026-02-17)
 
+46. Provider Filtering (Enabled/Disabled Parity)
+- Status: completed
+- Scope:
+  - Add OpenCode-style provider allow/deny lists to config and enforce them consistently:
+    - `enabled_providers` allow-list
+    - `disabled_providers` deny-list (wins over enabled)
+  - Ensure `models` and provider selection respect filters.
+- Milestone 46 references (code + docs):
+  - `opencode/packages/opencode/src/cli/cmd/auth.ts` (enabled/disabled provider filtering behavior)
+  - `opencode/packages/opencode/src/provider/provider.ts` (provider registry filtered by enabled/disabled)
+  - `https://opencode.ai/docs`
+- Deliverables:
+  - Layered config supports:
+    - `[llm] enabled_providers = ["..."]`
+    - `[llm] disabled_providers = ["..."]`
+  - `rustcode models` summary and provider detail filter out disabled providers.
+  - Provider selection rejects disabled providers with actionable error.
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: unit tests in `rustcode-config` validate filter schema and precedence.
+  - Pass (live CLI, minimal config):
+    - `RUSTCODE_USER_CONFIG=/tmp/... rustcode-cli models --json` reflects allow/deny behavior (2026-02-17)
+
+47. LLM Transport Hardening (Timeouts + SIGINT Cancellation)
+- Status: completed
+- Scope:
+  - Make network behavior predictable under slow/broken providers:
+    - connect timeout
+    - response header timeout
+    - stream idle timeout
+  - Ensure `SIGINT` cancels in-flight LLM request cleanly.
+- Milestone 47 references (code + docs):
+  - `https://developers.openai.com/codex/` (tooling expectations: predictable cancellation/interrupt semantics)
+  - `opencode` runtime behavior probes recorded in baseline audit (`ARCHITECTURE_AUDIT.md`)
+- Deliverables:
+  - `rustcode-llm` enforces bounded timeouts and surfaces provider error context.
+  - Engine drops the in-flight request future on cancellation and emits structured warning + completion.
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration test `sigint_cancels_hanging_llm_request_gracefully` (2026-02-17)
+
+48. LLM Chat Surface + Tool-Call Parsing (OpenAI-Compatible)
+- Status: completed
+- Scope:
+  - Add an explicit `chat()` surface in `rustcode-llm` to support:
+    - multi-message chat
+    - OpenAI-compatible `tools` / `tool_calls`
+  - Keep streaming and completions path intact; chat is an additive capability.
+- Milestone 48 references (code + docs):
+  - `https://developers.openai.com/codex/` (tool calling + agent style)
+  - `opencode` provider usage patterns recorded in baseline audit (`ARCHITECTURE_AUDIT.md`)
+- Deliverables:
+  - `rustcode-llm` defines typed chat messages, tool specs, tool calls, and parses OpenAI-compatible tool call responses.
+  - OpenAI-compatible client implements `chat()`; other protocols return a clear "unsupported" error for now.
+- Validation:
+  - Pass: `cargo test -p rustcode-llm` (2026-02-17)
+  - Pass: unit test `parses_openai_tool_calls_from_response` (2026-02-17)
+
+49. Agent Command v0 (Bounded Tool Loop)
+- Status: completed
+- Scope:
+  - Implement an agent loop that feels real to use:
+    - bounded steps
+    - structured tool-call + tool-result events
+    - no command directly prints; renderer consumes events
+  - Initial tool set: `list`, `read`, `write`, `edit`.
+  - Safety posture: no `exec` tool exposed to the agent (explicitly out of scope for v0).
+- Milestone 49 references (code + docs):
+  - `https://developers.openai.com/codex/` (agent + tool calling expectations)
+  - `opencode/packages/opencode/src/cli/cmd/auth.ts` (interactive UX parity constraints)
+  - `https://opencode.ai/docs`
+- Deliverables:
+  - CLI: `rustcode-cli agent "<prompt>"`
+  - Events:
+    - `ToolCall { id, name, arguments }`
+    - `ToolResult { id, name, ok, output }`
+  - Docs:
+    - `docs/QUICKSTART.md` includes `agent` examples and tool-calling provider constraint.
+- Validation:
+  - Pass: `cargo test -p rustcode-engine` (2026-02-17)
+  - Pass: unit test `agent_executes_tool_calls_and_emits_tool_events` (2026-02-17)
+  - Pass (live CLI routing):
+    - `rustcode-cli agent "list files"` reaches engine and emits events (2026-02-17)
+  - Note:
+    - Live end-to-end agent execution requires an OpenAI-compatible provider that supports `tools`.
+
+50. Dev Hygiene: Generated Benchmark Artifact
+- Status: completed
+- Scope:
+  - Keep worktree clean after CI runs by ensuring generated benchmark artifacts are not tracked.
+- Deliverables:
+  - `/benchmarks/latest.json` ignored.
+  - Bench artifact still produced by CI record step and can be uploaded as an artifact.
+- Validation:
+  - Pass: `./scripts/ci_matrix.sh` writes `benchmarks/latest.json` and `git status` remains clean (2026-02-17)
+
 
 ## Update Log
 - 2026-02-17:
+  - Docs:
+    - updated `docs/QUICKSTART.md` with the new `agent` command and the OpenAI-compatible/tool-calling provider requirement.
   - Agent loop v0 (tool calling):
     - added `agent` command wired through CLI -> core -> engine.
     - implemented a bounded tool loop using OpenAI-compatible tool-calling (`list`, `read`, `write`, `edit`) with structured `ToolCall`/`ToolResult` events.

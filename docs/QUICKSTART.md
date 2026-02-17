@@ -15,6 +15,7 @@ cargo test --workspace
 ```bash
 cargo run -q -p rustcode-cli -- --help
 cargo run -q -p rustcode-cli -- run "hello"
+cargo run -q -p rustcode-cli -- agent "scan the repo and summarize key modules"
 cargo run -q -p rustcode-cli -- --json run "hello"
 ```
 
@@ -32,6 +33,12 @@ cargo run -q -p rustcode-cli -- models openrouter
 ## Provider Setup
 ```bash
 cargo run -q -p rustcode-cli -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY run "hello"
+```
+
+Tool-calling agent runs require an OpenAI-compatible provider that supports `tools`:
+
+```bash
+cargo run -q -p rustcode-cli -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY agent "list files then read Cargo.toml"
 ```
 
 ## Auth Commands
