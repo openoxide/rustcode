@@ -4,6 +4,7 @@
 - Script: `scripts/benchmark.sh`
 - Recorder: `scripts/benchmark_record.sh`
 - Comparator: `scripts/benchmark_compare.sh`
+- Assertions: `scripts/benchmark_assert.sh`
 - Modes:
   - `startup [runs]`
   - `memory [prompt]`
@@ -18,6 +19,7 @@ Examples:
 ./scripts/benchmark.sh serve 20 5
 ./scripts/benchmark_record.sh benchmarks/latest.json
 ./scripts/benchmark_compare.sh benchmarks/old.json benchmarks/latest.json
+./scripts/benchmark_assert.sh benchmarks/latest.json
 ```
 
 ## Notes
@@ -41,3 +43,6 @@ Examples:
   - persists startup/memory/drift command output in JSON artifact format.
 - `./scripts/benchmark_compare.sh <old> <new>`:
   - reports deltas for `maximum resident set size` and `peak memory footprint`.
+- `./scripts/benchmark_assert.sh <artifact>`:
+  - fails when extracted memory metrics exceed conservative limits.
+  - configurable via `MAX_RSS_LIMIT` and `PEAK_FOOTPRINT_LIMIT`.

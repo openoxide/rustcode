@@ -187,9 +187,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add automated benchmark assertions with conservative thresholds.
-2. Begin release packaging checklist (versioning, tagging, artifact naming).
-3. Add benchmark history rotation policy (`latest` + dated snapshots).
+1. Begin release packaging checklist (versioning, tagging, artifact naming).
+2. Add benchmark history rotation policy (`latest` + dated snapshots).
+3. Add minimal CI command matrix for `check/test/bench-assert`.
 
 ## Update Log
 - 2026-02-17:
@@ -274,6 +274,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added benchmark comparator utility:
     - `scripts/benchmark_compare.sh <old.json> <new.json>`
     - reports RSS and peak-footprint deltas for trend checks.
+  - Added benchmark assertion utility:
+    - `scripts/benchmark_assert.sh <artifact>`
+    - enforces conservative memory thresholds with environment overrides.
   - Extended benchmark harness with drift mode and captured sample stability run:
     - `./scripts/benchmark.sh drift 12 4`
     - RSS samples stabilized at `~5424 KB` over sampled window.
