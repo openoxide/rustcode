@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
-use rustcode_auth::AuthStore;
+use rustcode_auth::{AuthStore, StoredCredential};
 use rustcode_core::config::ResolvedConfig;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -244,8 +244,19 @@ fn resolve_api_key(
     }
 
     let store = AuthStore::open_default();
-    if let Some(value) = store.get_api_key(provider_id).ok().flatten() {
-        return (Some(value), ApiKeySource::AuthStore);
+    if let Some(credential) = store.get(provider_id).ok().flatten() {
+        match credential {
+            StoredCredential::ApiKey { key } => {
+                if !key.trim().is_empty() {
+                    return (Some(key), ApiKeySource::AuthStore);
+                }
+            }
+            StoredCredential::OAuth { access_token, .. } => {
+                if !access_token.trim().is_empty() {
+                    return (Some(access_token), ApiKeySource::AuthStore);
+                }
+            }
+        }
     }
 
     (None, ApiKeySource::None)
@@ -855,6 +866,36 @@ mod tests {
 
         let provider = resolve_provider(&cfg).expect("provider must resolve");
         assert_eq!(provider.api_key.as_deref(), Some("stored-secret"));
+        assert_eq!(provider.api_key_source, ApiKeySource::AuthStore);
+        std::env::remove_var("RUSTCODE_AUTH_FILE");
+    }
+
+    #[test]
+    fn resolves_oauth_access_from_auth_store_when_env_missing() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        let auth_path = make_temp_file_path("llm-auth-store-oauth");
+        let store = AuthStore::with_path(auth_path.clone());
+        store
+            .set_oauth(
+                "openai",
+                "oauth-access-token",
+                Some("oauth-refresh-token"),
+                Some(1234567890),
+                Some("acct_123"),
+            )
+            .expect("must write oauth credential");
+
+        std::env::set_var("RUSTCODE_AUTH_FILE", &auth_path);
+        std::env::remove_var("OPENAI_API_KEY");
+
+        let cfg = ResolvedConfig {
+            allow_network: true,
+            llm_provider: "openai".to_string(),
+            ..ResolvedConfig::default()
+        };
+
+        let provider = resolve_provider(&cfg).expect("provider must resolve");
+        assert_eq!(provider.api_key.as_deref(), Some("oauth-access-token"));
         assert_eq!(provider.api_key_source, ApiKeySource::AuthStore);
         std::env::remove_var("RUSTCODE_AUTH_FILE");
     }

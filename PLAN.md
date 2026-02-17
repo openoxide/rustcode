@@ -371,6 +371,23 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `rustcode auth status openai` reports `credential=stored:oauth`.
     - auth file snapshot confirms persisted `type=o_auth` with access/refresh/expiry/account metadata.
 
+21. OAuth Credential Runtime Consumption
+- Status: completed
+- Deliverables:
+  - Updated `rustcode-llm` auth-store fallback to consume both credential shapes:
+    - `StoredCredential::ApiKey { key }`
+    - `StoredCredential::OAuth { access_token, .. }`
+  - Kept config/env precedence unchanged; auth store remains fallback only.
+  - Added unit test coverage for OAuth fallback in provider resolution:
+    - `resolves_oauth_access_from_auth_store_when_env_missing`
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: live CLI probes:
+    - `rustcode auth set-oauth openai --access-env RC_OAUTH_ACCESS`
+    - `rustcode models openai` reports `api_key_source=auth_store`
+    - `rustcode --json models openai` reports `"api_key_source":"auth_store"`
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -404,7 +421,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
-2. Implement remaining OAuth adapters for GitLab/browser flows and wire OAuth credential consumption into runtime provider clients where applicable.
+2. Implement remaining OAuth adapters for GitLab/browser flows and complete browser-assisted login UX.
 3. Wire backend selection policy into runtime provider-routing decisions and expose scoring diagnostics in CLI output.
 
 ## Update Log
@@ -639,6 +656,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Validation pass:
     - `cargo test --workspace`
     - `./scripts/ci_matrix.sh`
+  - Completed Milestone 21 OAuth credential runtime consumption:
+    - `rustcode-llm` now resolves OAuth access tokens from auth store when env/config keys are absent.
+    - added unit coverage for OAuth fallback (`resolves_oauth_access_from_auth_store_when_env_missing`).
+    - live CLI probe confirmed `api_key_source=auth_store` for OpenAI after `auth set-oauth`.
   - CI benchmark artifact publication enabled:
     - workflow now uploads `benchmarks/latest.json` via `actions/upload-artifact@v4`.
     - artifact name: `rustcode-benchmarks-latest`.
