@@ -157,14 +157,18 @@ impl Engine {
         context: &CommandContext,
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
-        let response = self
-            .llm
-            .complete(LlmRequest {
+        let response = tokio::select! {
+            _ = context.cancellation.cancelled() => {
+                return Err(ExecutionError::Cancelled);
+            }
+            result = self.llm.complete(LlmRequest {
                 model: context.config.model.clone(),
                 prompt,
-            })
-            .await
-            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+            }) => {
+                result
+            }
+        }
+        .map_err(|err| ExecutionError::Executor(err.to_string()))?;
 
         if response.chunks.is_empty() {
             self.emit(

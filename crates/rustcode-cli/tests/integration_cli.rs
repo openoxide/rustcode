@@ -53,6 +53,31 @@ fn spawn_mcp_discovery_server() -> Option<(u16, thread::JoinHandle<()>)> {
     Some((port, handle))
 }
 
+fn spawn_hanging_http_server() -> Option<(u16, thread::JoinHandle<()>)> {
+    let listener = match TcpListener::bind("127.0.0.1:0") {
+        Ok(listener) => listener,
+        Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return None,
+        Err(_) => return None,
+    };
+    let port = listener.local_addr().ok()?.port();
+    let handle = thread::spawn(move || {
+        if let Ok((mut socket, _)) = listener.accept() {
+            // Read the request so the client has completed the write, then hang until the socket
+            // closes (SIGINT path should drop the request future and close the connection).
+            let mut buf = [0_u8; 8192];
+            let _ = socket.read(&mut buf);
+            loop {
+                match socket.read(&mut buf) {
+                    Ok(0) => break,
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
+        }
+    });
+    Some((port, handle))
+}
+
 #[test]
 fn json_stream_includes_schema_version_and_completion_event() {
     let output = Command::new(rustcode_bin())
@@ -1894,6 +1919,80 @@ fn sigint_cancels_long_running_command_gracefully() {
 
     let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
     assert!(stdout.contains("execution cancelled"));
+}
+
+#[cfg(unix)]
+#[test]
+fn sigint_cancels_hanging_llm_request_gracefully() {
+    let Some((port, handle)) = spawn_hanging_http_server() else {
+        return;
+    };
+
+    let config_path = make_temp_file_path("sigint-hanging-llm");
+    std::fs::write(
+        &config_path,
+        format!(
+            r#"
+allow_network = true
+model = "openai/gpt-5"
+
+[llm]
+provider = "openai"
+base_url = "http://127.0.0.1:{port}"
+api_key_env = "RUSTCODE_TEST_KEY"
+"#
+        ),
+    )
+    .expect("must write config fixture");
+
+    let mut child = Command::new(rustcode_bin())
+        .args(["run", "hang"])
+        .env("RUSTCODE_USER_CONFIG", &config_path)
+        .env("RUSTCODE_TRUST_PROJECT", "0")
+        .env("RUSTCODE_TEST_KEY", "integration-secret")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("must spawn rustcode process");
+
+    // Avoid signal race by ensuring process remains alive briefly before SIGINT.
+    let mut saw_running = false;
+    for _ in 0..20 {
+        match child.try_wait().expect("must query child state") {
+            None => {
+                saw_running = true;
+                break;
+            }
+            Some(status) => {
+                panic!("child exited before signal with status: {status}");
+            }
+        }
+    }
+    assert!(saw_running, "child never reached running state");
+    thread::sleep(Duration::from_millis(500));
+
+    let pid = child.id().to_string();
+    let kill_status = Command::new("kill")
+        .args(["-INT", &pid])
+        .status()
+        .expect("must invoke kill");
+    assert!(kill_status.success(), "failed to send SIGINT");
+
+    let output = child
+        .wait_with_output()
+        .expect("must collect rustcode output");
+    handle.join().expect("server should join");
+
+    assert!(
+        output.status.success(),
+        "status: {:?}\nstdout: {}\nstderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains("execution cancelled"), "stdout: {stdout}");
 }
 
 #[test]

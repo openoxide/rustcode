@@ -953,6 +953,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Update Log
 - 2026-02-17:
+  - LLM cancellation + timeout hardening:
+    - `run` now respects cancellation while awaiting the LLM request (drops in-flight request future on `SIGINT`).
+    - added baseline HTTP connect + response-header + body/stream idle timeouts in `rustcode-llm` to avoid indefinite hangs.
+    - added CLI integration coverage for cancelling a hanging LLM request via `SIGINT`.
   - Repo hygiene:
     - stopped tracking generated `benchmarks/latest.json` and added it to `.gitignore` to keep `git status` clean after running `./scripts/ci_matrix.sh`.
   - Provider filter parity (OpenCode-style):

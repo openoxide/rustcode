@@ -8,7 +8,9 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 use thiserror::Error;
+use tokio::time::timeout;
 
 #[derive(Debug, Clone)]
 pub struct LlmRequest {
@@ -35,6 +37,18 @@ pub enum LlmError {
 #[async_trait]
 pub trait LlmClient: Send + Sync {
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError>;
+}
+
+const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const HTTP_RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(30);
+const HTTP_RESPONSE_BODY_TIMEOUT: Duration = Duration::from_secs(30);
+const HTTP_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn llm_http_client() -> Result<reqwest::Client, LlmError> {
+    reqwest::Client::builder()
+        .connect_timeout(HTTP_CONNECT_TIMEOUT)
+        .build()
+        .map_err(|err| LlmError::Transport(format!("failed to build http client: {err}")))
 }
 
 #[derive(Debug, Default)]
@@ -175,7 +189,7 @@ pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmEr
                 provider.provider_id,
                 base_url,
                 provider.api_key,
-            )))
+            )?))
         }
         ProviderProtocol::AnthropicMessages => {
             if !config.allow_network {
@@ -198,7 +212,7 @@ pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmEr
                 provider.provider_id,
                 base_url,
                 api_key,
-            )))
+            )?))
         }
         ProviderProtocol::VercelAiGateway => {
             if !config.allow_network {
@@ -221,7 +235,7 @@ pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmEr
                 provider.provider_id,
                 base_url,
                 api_key,
-            )))
+            )?))
         }
     }
 }
@@ -711,13 +725,17 @@ struct OpenAiCompatibleClient {
 }
 
 impl OpenAiCompatibleClient {
-    fn new(provider_id: String, base_url: String, api_key: Option<String>) -> Self {
-        Self {
+    fn new(
+        provider_id: String,
+        base_url: String,
+        api_key: Option<String>,
+    ) -> Result<Self, LlmError> {
+        Ok(Self {
             provider_id,
             endpoint: normalize_openai_chat_endpoint(&base_url),
             api_key,
-            http: reqwest::Client::new(),
-        }
+            http: llm_http_client()?,
+        })
     }
 }
 
@@ -744,15 +762,21 @@ impl LlmClient for OpenAiCompatibleClient {
                 "messages": [{"role":"user", "content": request.prompt}],
                 "stream": true,
             }))
-            .send()
+            .send();
+        let response = timeout(HTTP_RESPONSE_HEADER_TIMEOUT, response)
             .await
+            .map_err(|_| {
+                LlmError::Transport("timed out waiting for provider response headers".to_string())
+            })?
             .map_err(|err| LlmError::Transport(err.to_string()))?;
 
         let status = response.status();
         if !status.is_success() {
-            let body = response
-                .text()
+            let body = timeout(HTTP_RESPONSE_BODY_TIMEOUT, response.text())
                 .await
+                .map_err(|_| {
+                    LlmError::Transport("timed out reading provider error body".to_string())
+                })?
                 .map_err(|err| LlmError::Transport(err.to_string()))?;
             return Err(LlmError::Transport(format!(
                 "provider returned {}: {}",
@@ -761,7 +785,7 @@ impl LlmClient for OpenAiCompatibleClient {
             )));
         }
 
-        match read_sse_or_body(response).await? {
+        match read_sse_or_body(response, HTTP_STREAM_IDLE_TIMEOUT).await? {
             StreamedProviderBody::Body(body) => {
                 let parsed: Value = serde_json::from_str(&body).map_err(|err| {
                     LlmError::Invalid(format!("response is not valid JSON: {err}"))
@@ -821,13 +845,13 @@ struct AnthropicClient {
 }
 
 impl AnthropicClient {
-    fn new(provider_id: String, base_url: String, api_key: String) -> Self {
-        Self {
+    fn new(provider_id: String, base_url: String, api_key: String) -> Result<Self, LlmError> {
+        Ok(Self {
             provider_id,
             endpoint: normalize_anthropic_messages_endpoint(&base_url),
             api_key,
-            http: reqwest::Client::new(),
-        }
+            http: llm_http_client()?,
+        })
     }
 }
 
@@ -863,15 +887,21 @@ impl LlmClient for AnthropicClient {
                 "messages": [{"role": "user", "content": request.prompt}],
                 "stream": true,
             }))
-            .send()
+            .send();
+        let response = timeout(HTTP_RESPONSE_HEADER_TIMEOUT, response)
             .await
+            .map_err(|_| {
+                LlmError::Transport("timed out waiting for provider response headers".to_string())
+            })?
             .map_err(|err| LlmError::Transport(err.to_string()))?;
 
         let status = response.status();
         if !status.is_success() {
-            let body = response
-                .text()
+            let body = timeout(HTTP_RESPONSE_BODY_TIMEOUT, response.text())
                 .await
+                .map_err(|_| {
+                    LlmError::Transport("timed out reading provider error body".to_string())
+                })?
                 .map_err(|err| LlmError::Transport(err.to_string()))?;
             return Err(LlmError::Transport(format!(
                 "provider returned {}: {}",
@@ -880,7 +910,7 @@ impl LlmClient for AnthropicClient {
             )));
         }
 
-        match read_sse_or_body(response).await? {
+        match read_sse_or_body(response, HTTP_STREAM_IDLE_TIMEOUT).await? {
             StreamedProviderBody::Body(body) => {
                 let parsed: Value = serde_json::from_str(&body).map_err(|err| {
                     LlmError::Invalid(format!("response is not valid JSON: {err}"))
@@ -935,13 +965,13 @@ struct VercelAiGatewayClient {
 }
 
 impl VercelAiGatewayClient {
-    fn new(provider_id: String, base_url: String, api_key: String) -> Self {
-        Self {
+    fn new(provider_id: String, base_url: String, api_key: String) -> Result<Self, LlmError> {
+        Ok(Self {
             provider_id,
             endpoint: normalize_vercel_gateway_endpoint(&base_url),
             api_key,
-            http: reqwest::Client::new(),
-        }
+            http: llm_http_client()?,
+        })
     }
 }
 
@@ -989,15 +1019,21 @@ impl LlmClient for VercelAiGatewayClient {
                     "content": [{"type": "text", "text": request.prompt}],
                 }],
             }))
-            .send()
+            .send();
+        let response = timeout(HTTP_RESPONSE_HEADER_TIMEOUT, response)
             .await
+            .map_err(|_| {
+                LlmError::Transport("timed out waiting for provider response headers".to_string())
+            })?
             .map_err(|err| LlmError::Transport(err.to_string()))?;
 
         let status = response.status();
         if !status.is_success() {
-            let body = response
-                .text()
+            let body = timeout(HTTP_RESPONSE_BODY_TIMEOUT, response.text())
                 .await
+                .map_err(|_| {
+                    LlmError::Transport("timed out reading provider error body".to_string())
+                })?
                 .map_err(|err| LlmError::Transport(err.to_string()))?;
             return Err(LlmError::Transport(format!(
                 "provider returned {}: {}",
@@ -1006,7 +1042,7 @@ impl LlmClient for VercelAiGatewayClient {
             )));
         }
 
-        match read_sse_or_body(response).await? {
+        match read_sse_or_body(response, HTTP_STREAM_IDLE_TIMEOUT).await? {
             StreamedProviderBody::Body(body) => {
                 let parsed: Value = serde_json::from_str(&body).map_err(|err| {
                     LlmError::Invalid(format!("response is not valid JSON: {err}"))
@@ -1131,13 +1167,22 @@ enum StreamedProviderBody {
     SseEvents(Vec<String>),
 }
 
-async fn read_sse_or_body(response: reqwest::Response) -> Result<StreamedProviderBody, LlmError> {
+async fn read_sse_or_body(
+    response: reqwest::Response,
+    idle_timeout: Duration,
+) -> Result<StreamedProviderBody, LlmError> {
     let mut stream = response.bytes_stream();
     let mut raw_body = String::new();
     let mut parse_buffer = String::new();
     let mut events = Vec::new();
 
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let chunk = timeout(idle_timeout, stream.next()).await.map_err(|_| {
+            LlmError::Transport("timed out waiting for provider response chunk".to_string())
+        })?;
+        let Some(chunk) = chunk else {
+            break;
+        };
         let chunk = chunk.map_err(|err| LlmError::Transport(err.to_string()))?;
         let text = String::from_utf8_lossy(&chunk);
         raw_body.push_str(&text);
