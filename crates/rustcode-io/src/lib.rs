@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use async_trait::async_trait;
 use thiserror::Error;
 use tokio::process::Command;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Error)]
 pub enum IoError {
@@ -10,6 +11,8 @@ pub enum IoError {
     Io(String),
     #[error("process exited with code {code}: {stderr}")]
     Exit { code: i32, stderr: String },
+    #[error("operation cancelled")]
+    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +35,7 @@ pub trait ProcessPort: Send + Sync {
         program: &str,
         args: &[String],
         cwd: &Path,
+        cancellation: CancellationToken,
     ) -> Result<ProcessOutput, IoError>;
 }
 
@@ -65,14 +69,21 @@ impl ProcessPort for LocalIo {
         program: &str,
         args: &[String],
         cwd: &Path,
+        cancellation: CancellationToken,
     ) -> Result<ProcessOutput, IoError> {
         let mut command = Command::new(program);
         command.args(args);
         command.current_dir(cwd);
-        let output = command
-            .output()
-            .await
-            .map_err(|err| IoError::Io(format!("{program}: {err}")))?;
+        command.kill_on_drop(true);
+
+        let output = tokio::select! {
+            result = command.output() => {
+                result.map_err(|err| IoError::Io(format!("{program}: {err}")))?
+            }
+            _ = cancellation.cancelled() => {
+                return Err(IoError::Cancelled);
+            }
+        };
 
         let code = output.status.code().unwrap_or(-1);
         let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -95,5 +106,52 @@ pub fn normalize_path(root: &Path, candidate: &Path) -> PathBuf {
         candidate.to_path_buf()
     } else {
         root.join(candidate)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn process_run_can_be_cancelled() {
+        let io = LocalIo;
+        let token = CancellationToken::new();
+        let token_for_task = token.clone();
+
+        let task = tokio::spawn(async move {
+            io.run(
+                "sleep",
+                &["30".to_string()],
+                Path::new("/tmp"),
+                token_for_task,
+            )
+            .await
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        token.cancel();
+
+        let result = task.await.expect("task must join");
+        assert!(matches!(result, Err(IoError::Cancelled)));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn process_run_returns_stdout_on_success() {
+        let io = LocalIo;
+        let output = io
+            .run(
+                "echo",
+                &["hello".to_string()],
+                Path::new("/tmp"),
+                CancellationToken::new(),
+            )
+            .await
+            .expect("must succeed");
+
+        assert_eq!(output.code, 0);
+        assert_eq!(output.stdout, "hello\n");
     }
 }

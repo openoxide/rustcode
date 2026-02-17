@@ -4,10 +4,12 @@ use std::time::SystemTime;
 use anyhow::{Context, Result};
 use clap::Parser;
 use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 use rustcode_config::{ConfigLoader, ConfigSources};
 use rustcode_core::context::{CommandContext, SessionMeta};
+use rustcode_core::error::ExecutionError;
 use rustcode_core::ports::CommandExecutor;
 use rustcode_engine::{ChannelPublisher, Engine};
 use rustcode_io::LocalIo;
@@ -35,13 +37,15 @@ async fn main() -> Result<()> {
 
     let config = ConfigLoader::load(&config_sources).context("failed to load configuration")?;
 
-    let context = CommandContext::new(
+    let cancellation = CancellationToken::new();
+    let context = CommandContext::with_cancellation(
         Arc::new(config),
         SessionMeta {
             session_id: "session-1".to_string(),
             request_id: "request-1".to_string(),
             started_at: SystemTime::now(),
         },
+        cancellation.clone(),
     );
 
     let (event_tx, mut event_rx) = mpsc::channel(512);
@@ -54,17 +58,28 @@ async fn main() -> Result<()> {
     );
 
     let command = map_command(cli.command);
-    engine
-        .execute(command, context, publisher.clone())
-        .await
-        .context("command execution failed")?;
+    let execution = engine.execute(command, context, publisher.clone());
+    tokio::pin!(execution);
+
+    let execution_result = tokio::select! {
+        result = &mut execution => result,
+        result = wait_for_shutdown_signal() => {
+            result.context("failed to receive shutdown signal")?;
+            cancellation.cancel();
+            execution.await
+        }
+    };
+
     drop(publisher);
 
     while let Some(event) = event_rx.recv().await {
         println!("{}", render_event(&event, output_format)?);
     }
 
-    Ok(())
+    match execution_result {
+        Ok(()) | Err(ExecutionError::Cancelled) => Ok(()),
+        Err(err) => Err(anyhow::anyhow!("command execution failed: {err}")),
+    }
 }
 
 fn init_tracing() -> Result<()> {
@@ -74,4 +89,24 @@ fn init_tracing() -> Result<()> {
         .with_target(false)
         .try_init()
         .map_err(|err| anyhow::anyhow!("failed to initialize tracing: {err}"))
+}
+
+#[cfg(unix)]
+async fn wait_for_shutdown_signal() -> Result<()> {
+    use tokio::signal::unix::{signal, SignalKind};
+
+    let mut terminate = signal(SignalKind::terminate())
+        .map_err(|err| anyhow::anyhow!("failed to listen for SIGTERM: {err}"))?;
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+async fn wait_for_shutdown_signal() -> Result<()> {
+    tokio::signal::ctrl_c()
+        .await
+        .map_err(|err| anyhow::anyhow!("failed to listen for Ctrl+C: {err}"))
 }

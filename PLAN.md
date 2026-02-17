@@ -80,7 +80,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: runtime probe confirmed human + JSON rendering paths (`cargo run -q -p rustcode-cli -- run "hi"` and `--json run "hi"`, 2026-02-17)
 
 5. Engine Skeleton
-- Status: in_progress
+- Status: completed
 - Deliverables:
   - Async execution loop
   - Cancellation propagation
@@ -88,7 +88,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - interrupt integration tests
   - no-panic policy in expected failure paths
-  - Note: signal handling requires explicit graceful shutdown path (`SIGTERM` currently exits hard with code 143)
+  - Pass: cancellation propagation tests in `rustcode-io` and `rustcode-engine` (`cargo test --workspace`, 2026-02-17)
+  - Pass: runtime signal probes for `SIGINT` and `SIGTERM` emit cancellation warning and clean exit (`rustcode-cli exec sleep 30`, 2026-02-17)
 
 6. Tool Runtime v1
 - Status: pending
@@ -156,8 +157,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Invalid run flag: clap rejection with `--` escape tip.
 - Large prompt (`200k` chars): completes in `0.20s`, JSON output file `400495` bytes.
 - Interrupt behavior:
-  - `SIGTERM` against running command currently exits `143` (hard stop).
-  - `SIGINT` probe did not yet show a clean cancellation event path; needs dedicated interrupt test harness.
+  - `SIGINT` and `SIGTERM` now trigger cancellation propagation and emit `Warning { message: "execution cancelled" }`.
+  - Cancellation path exits cleanly (exit code `0`) after draining events.
 
 ## Risks and Mitigations
 - Over-engineering:
@@ -170,9 +171,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Implement explicit cancellation path and interrupt integration tests.
-2. Introduce event envelope versioning for future plugin/tool compatibility.
-3. Start Tool Runtime v1 command set with policy checks (`list`, `read`, `write`, `exec`).
+1. Introduce event envelope versioning for future plugin/tool compatibility.
+2. Start Tool Runtime v1 command set with policy checks (`list`, `read`, `write`, `exec`).
+3. Add CLI integration test harness for signal and streaming scenarios.
 
 ## Update Log
 - 2026-02-17:
@@ -195,3 +196,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Verified runtime behavior: untrusted project config fails with actionable error; trusted modes succeed.
   - Completed Milestone 4: renderer contract tests added for deterministic human and JSON outputs.
   - Confirmed renderer outputs via runtime probes for both human and machine-readable paths.
+  - Completed Milestone 5: cancellation token propagation from CLI signal handling into engine/IO.
+  - Added cancellation tests:
+    - `rustcode-io`: process cancellation and success path tests.
+    - `rustcode-engine`: cancellation emits warning event and no `Completed` event.
+  - Verified runtime behavior: `SIGINT`/`SIGTERM` now produce structured cancellation warning events.

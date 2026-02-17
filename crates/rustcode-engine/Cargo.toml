@@ -12,6 +12,7 @@ rustcode-llm = { path = "../rustcode-llm" }
 rustcode-plugins = { path = "../rustcode-plugins" }
 async-trait.workspace = true
 tokio.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 
 [lints]

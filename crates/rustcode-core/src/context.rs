@@ -1,6 +1,8 @@
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use tokio_util::sync::CancellationToken;
+
 use crate::config::ResolvedConfig;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -14,10 +16,27 @@ pub struct SessionMeta {
 pub struct CommandContext {
     pub config: Arc<ResolvedConfig>,
     pub session: SessionMeta,
+    pub cancellation: CancellationToken,
 }
 
 impl CommandContext {
     pub fn new(config: Arc<ResolvedConfig>, session: SessionMeta) -> Self {
-        Self { config, session }
+        Self {
+            config,
+            session,
+            cancellation: CancellationToken::new(),
+        }
+    }
+
+    pub fn with_cancellation(
+        config: Arc<ResolvedConfig>,
+        session: SessionMeta,
+        cancellation: CancellationToken,
+    ) -> Self {
+        Self {
+            config,
+            session,
+            cancellation,
+        }
     }
 }
