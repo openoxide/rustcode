@@ -166,15 +166,30 @@ impl Engine {
             .await
             .map_err(|err| ExecutionError::Executor(err.to_string()))?;
 
-        self.emit(
-            publisher,
-            EventScope::Command,
-            EventPayload::OutputChunk {
-                text: response.text,
-            },
-            context,
-        )
-        .await
+        if response.chunks.is_empty() {
+            self.emit(
+                publisher,
+                EventScope::Command,
+                EventPayload::OutputChunk {
+                    text: response.text,
+                },
+                context,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        for chunk in response.chunks {
+            self.emit(
+                publisher.clone(),
+                EventScope::Command,
+                EventPayload::OutputChunk { text: chunk },
+                context,
+            )
+            .await?;
+        }
+
+        Ok(())
     }
 
     async fn run_list(
@@ -599,13 +614,14 @@ mod tests {
     use rustcode_core::event::{Event, EventPayload};
     use rustcode_core::ports::EventPublisher;
     use rustcode_io::{FileSystemPort, IoError, ProcessOutput, ProcessPort};
-    use rustcode_llm::NullLlmClient;
+    use rustcode_llm::{LlmClient, LlmRequest, LlmResponse, NullLlmClient};
     use rustcode_plugins::{Plugin, PluginError, PluginRegistry};
 
     use super::*;
 
     struct CancelledProcess;
     struct DummyFs;
+    struct StreamingLlmClient;
 
     #[async_trait]
     impl FileSystemPort for DummyFs {
@@ -632,6 +648,19 @@ mod tests {
             _cancellation: CancellationToken,
         ) -> Result<ProcessOutput, IoError> {
             Err(IoError::Cancelled)
+        }
+    }
+
+    #[async_trait]
+    impl LlmClient for StreamingLlmClient {
+        async fn complete(
+            &self,
+            _request: LlmRequest,
+        ) -> Result<LlmResponse, rustcode_llm::LlmError> {
+            Ok(LlmResponse {
+                text: "hello world".to_string(),
+                chunks: vec!["hello".to_string(), " world".to_string()],
+            })
         }
     }
 
@@ -791,6 +820,47 @@ mod tests {
 
         let seen_count = *seen.lock().await;
         assert_eq!(seen_count, 3);
+    }
+
+    #[tokio::test]
+    async fn run_prompt_emits_streaming_chunks_when_available() {
+        let engine = Engine::new(
+            Arc::new(StreamingLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+        );
+        let publisher = Arc::new(CollectingPublisher::default());
+        let context = CommandContext::new(
+            Arc::new(ResolvedConfig::default()),
+            SessionMeta {
+                session_id: "s-stream".to_string(),
+                request_id: "r-stream".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let result = engine
+            .execute(
+                Command::Run {
+                    prompt: "stream".to_string(),
+                },
+                context,
+                publisher.clone(),
+            )
+            .await;
+        assert!(result.is_ok());
+
+        let events = publisher.events.lock().await.clone();
+        let chunks: Vec<String> = events
+            .iter()
+            .filter_map(|event| match &event.payload {
+                EventPayload::OutputChunk { text } => Some(text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(chunks, vec!["hello".to_string(), " world".to_string()]);
     }
 
     #[tokio::test]

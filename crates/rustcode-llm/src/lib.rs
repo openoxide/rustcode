@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use futures_util::StreamExt;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
 use rustcode_auth::{AuthStore, StoredCredential};
 use rustcode_core::config::ResolvedConfig;
@@ -18,6 +19,7 @@ pub struct LlmRequest {
 #[derive(Debug, Clone)]
 pub struct LlmResponse {
     pub text: String,
+    pub chunks: Vec<String>,
 }
 
 #[derive(Debug, Error)]
@@ -46,6 +48,7 @@ impl LlmClient for NullLlmClient {
                 "null-llm response (model={}): {}",
                 request.model, request.prompt
             ),
+            chunks: Vec::new(),
         })
     }
 }
@@ -689,17 +692,18 @@ impl LlmClient for OpenAiCompatibleClient {
             .json(&json!({
                 "model": model,
                 "messages": [{"role":"user", "content": request.prompt}],
+                "stream": true,
             }))
             .send()
             .await
             .map_err(|err| LlmError::Transport(err.to_string()))?;
 
         let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|err| LlmError::Transport(err.to_string()))?;
         if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .map_err(|err| LlmError::Transport(err.to_string()))?;
             return Err(LlmError::Transport(format!(
                 "provider returned {}: {}",
                 status,
@@ -707,14 +711,54 @@ impl LlmClient for OpenAiCompatibleClient {
             )));
         }
 
-        let parsed: Value = serde_json::from_str(&body)
-            .map_err(|err| LlmError::Invalid(format!("response is not valid JSON: {err}")))?;
-        let text = extract_openai_text(&parsed).ok_or_else(|| {
-            LlmError::Invalid(
-                "choices[0].message.content missing from provider response".to_string(),
-            )
-        })?;
-        Ok(LlmResponse { text })
+        match read_sse_or_body(response).await? {
+            StreamedProviderBody::Body(body) => {
+                let parsed: Value = serde_json::from_str(&body).map_err(|err| {
+                    LlmError::Invalid(format!("response is not valid JSON: {err}"))
+                })?;
+                let text = extract_openai_text(&parsed).ok_or_else(|| {
+                    LlmError::Invalid(
+                        "choices[0].message.content missing from provider response".to_string(),
+                    )
+                })?;
+                Ok(LlmResponse {
+                    text,
+                    chunks: Vec::new(),
+                })
+            }
+            StreamedProviderBody::SseEvents(events) => {
+                let mut chunks = Vec::new();
+                let mut combined = String::new();
+                for event in events {
+                    if event == "[DONE]" {
+                        break;
+                    }
+                    let Ok(parsed) = serde_json::from_str::<Value>(&event) else {
+                        continue;
+                    };
+                    if let Some(error_message) = extract_stream_error_message(&parsed) {
+                        return Err(LlmError::Transport(format!(
+                            "provider stream error: {error_message}"
+                        )));
+                    }
+                    if let Some(delta) = extract_openai_stream_delta(&parsed) {
+                        if !delta.is_empty() {
+                            combined.push_str(&delta);
+                            chunks.push(delta);
+                        }
+                    }
+                }
+                if combined.is_empty() {
+                    return Err(LlmError::Invalid(
+                        "openai-compatible stream did not include text deltas".to_string(),
+                    ));
+                }
+                Ok(LlmResponse {
+                    text: combined,
+                    chunks,
+                })
+            }
+        }
     }
 }
 
@@ -760,17 +804,18 @@ impl LlmClient for AnthropicClient {
                 "model": model,
                 "max_tokens": 1024,
                 "messages": [{"role": "user", "content": request.prompt}],
+                "stream": true,
             }))
             .send()
             .await
             .map_err(|err| LlmError::Transport(err.to_string()))?;
 
         let status = response.status();
-        let body = response
-            .text()
-            .await
-            .map_err(|err| LlmError::Transport(err.to_string()))?;
         if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .map_err(|err| LlmError::Transport(err.to_string()))?;
             return Err(LlmError::Transport(format!(
                 "provider returned {}: {}",
                 status,
@@ -778,12 +823,49 @@ impl LlmClient for AnthropicClient {
             )));
         }
 
-        let parsed: Value = serde_json::from_str(&body)
-            .map_err(|err| LlmError::Invalid(format!("response is not valid JSON: {err}")))?;
-        let text = extract_anthropic_text(&parsed).ok_or_else(|| {
-            LlmError::Invalid("content[0].text missing from anthropic response".to_string())
-        })?;
-        Ok(LlmResponse { text })
+        match read_sse_or_body(response).await? {
+            StreamedProviderBody::Body(body) => {
+                let parsed: Value = serde_json::from_str(&body).map_err(|err| {
+                    LlmError::Invalid(format!("response is not valid JSON: {err}"))
+                })?;
+                let text = extract_anthropic_text(&parsed).ok_or_else(|| {
+                    LlmError::Invalid("content[0].text missing from anthropic response".to_string())
+                })?;
+                Ok(LlmResponse {
+                    text,
+                    chunks: Vec::new(),
+                })
+            }
+            StreamedProviderBody::SseEvents(events) => {
+                let mut chunks = Vec::new();
+                let mut combined = String::new();
+                for event in events {
+                    let Ok(parsed) = serde_json::from_str::<Value>(&event) else {
+                        continue;
+                    };
+                    if let Some(error_message) = extract_stream_error_message(&parsed) {
+                        return Err(LlmError::Transport(format!(
+                            "provider stream error: {error_message}"
+                        )));
+                    }
+                    if let Some(delta) = extract_anthropic_stream_delta(&parsed) {
+                        if !delta.is_empty() {
+                            combined.push_str(&delta);
+                            chunks.push(delta);
+                        }
+                    }
+                }
+                if combined.is_empty() {
+                    return Err(LlmError::Invalid(
+                        "anthropic stream did not include text deltas".to_string(),
+                    ));
+                }
+                Ok(LlmResponse {
+                    text: combined,
+                    chunks,
+                })
+            }
+        }
     }
 }
 
@@ -820,6 +902,90 @@ fn normalize_anthropic_messages_endpoint(base_url: &str) -> String {
     }
 }
 
+enum StreamedProviderBody {
+    Body(String),
+    SseEvents(Vec<String>),
+}
+
+async fn read_sse_or_body(response: reqwest::Response) -> Result<StreamedProviderBody, LlmError> {
+    let mut stream = response.bytes_stream();
+    let mut raw_body = String::new();
+    let mut parse_buffer = String::new();
+    let mut events = Vec::new();
+
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|err| LlmError::Transport(err.to_string()))?;
+        let text = String::from_utf8_lossy(&chunk);
+        raw_body.push_str(&text);
+        parse_buffer.push_str(&text);
+
+        while let Some(block) = take_next_sse_block(&mut parse_buffer) {
+            if let Some(data) = parse_sse_data_block(&block) {
+                events.push(data);
+            }
+        }
+    }
+
+    if events.is_empty() {
+        return Ok(StreamedProviderBody::Body(raw_body));
+    }
+
+    if let Some(trailing) = parse_sse_data_block(parse_buffer.trim()) {
+        events.push(trailing);
+    }
+    Ok(StreamedProviderBody::SseEvents(events))
+}
+
+fn take_next_sse_block(buffer: &mut String) -> Option<String> {
+    let mut separator: Option<(usize, usize)> = None;
+
+    if let Some(index) = buffer.find("\n\n") {
+        separator = Some((index, 2));
+    }
+    if let Some(index) = buffer.find("\r\n\r\n") {
+        match separator {
+            Some((current, _)) if current <= index => {}
+            _ => separator = Some((index, 4)),
+        }
+    }
+
+    let (index, length) = separator?;
+    let block = buffer[..index].to_string();
+    buffer.drain(..index + length);
+    Some(block)
+}
+
+fn parse_sse_data_block(block: &str) -> Option<String> {
+    if block.is_empty() {
+        return None;
+    }
+
+    let mut data_lines = Vec::new();
+    for line in block.lines() {
+        let line = line.trim_end_matches('\r');
+        if let Some(value) = line.strip_prefix("data:") {
+            data_lines.push(value.trim_start().to_string());
+        }
+    }
+
+    if data_lines.is_empty() {
+        None
+    } else {
+        Some(data_lines.join("\n"))
+    }
+}
+
+fn extract_stream_error_message(value: &Value) -> Option<String> {
+    let error = value.get("error")?;
+    if let Some(message) = error.get("message").and_then(Value::as_str) {
+        return Some(message.to_string());
+    }
+    if let Some(message) = error.as_str() {
+        return Some(message.to_string());
+    }
+    Some(error.to_string())
+}
+
 fn extract_openai_text(value: &Value) -> Option<String> {
     let message = value.get("choices")?.get(0)?;
     if let Some(text) = message.get("text").and_then(Value::as_str) {
@@ -844,6 +1010,32 @@ fn extract_openai_text(value: &Value) -> Option<String> {
     }
 }
 
+fn extract_openai_stream_delta(value: &Value) -> Option<String> {
+    let choice = value.get("choices")?.get(0)?;
+    if let Some(text) = choice.get("text").and_then(Value::as_str) {
+        return Some(text.to_string());
+    }
+
+    let delta = choice.get("delta")?;
+    if let Some(text) = delta.get("content").and_then(Value::as_str) {
+        return Some(text.to_string());
+    }
+
+    if let Some(parts) = delta.get("content").and_then(Value::as_array) {
+        let mut combined = String::new();
+        for part in parts {
+            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                combined.push_str(text);
+            }
+        }
+        if !combined.is_empty() {
+            return Some(combined);
+        }
+    }
+
+    None
+}
+
 fn extract_anthropic_text(value: &Value) -> Option<String> {
     let content = value.get("content")?.as_array()?;
     let mut combined = String::new();
@@ -858,6 +1050,23 @@ fn extract_anthropic_text(value: &Value) -> Option<String> {
         None
     } else {
         Some(combined)
+    }
+}
+
+fn extract_anthropic_stream_delta(value: &Value) -> Option<String> {
+    let event_type = value.get("type").and_then(Value::as_str)?;
+    match event_type {
+        "content_block_delta" => value
+            .get("delta")
+            .and_then(|delta| delta.get("text"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        "content_block_start" => value
+            .get("content_block")
+            .and_then(|block| block.get("text"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        _ => None,
     }
 }
 
@@ -965,6 +1174,72 @@ mod tests {
         assert_eq!(
             extract_anthropic_text(&payload).as_deref(),
             Some("hello world")
+        );
+    }
+
+    #[test]
+    fn parses_openai_stream_deltas() {
+        let string_delta = json!({
+            "choices": [{"delta": {"content": "hello"}}]
+        });
+        assert_eq!(
+            extract_openai_stream_delta(&string_delta).as_deref(),
+            Some("hello")
+        );
+
+        let array_delta = json!({
+            "choices": [{"delta": {"content": [{"type":"text","text":"he"},{"type":"text","text":"llo"}]}}]
+        });
+        assert_eq!(
+            extract_openai_stream_delta(&array_delta).as_deref(),
+            Some("hello")
+        );
+    }
+
+    #[test]
+    fn parses_anthropic_stream_deltas() {
+        let start = json!({
+            "type": "content_block_start",
+            "content_block": {"type": "text", "text": "hello"}
+        });
+        assert_eq!(
+            extract_anthropic_stream_delta(&start).as_deref(),
+            Some("hello")
+        );
+
+        let delta = json!({
+            "type": "content_block_delta",
+            "delta": {"type":"text_delta","text":" world"}
+        });
+        assert_eq!(
+            extract_anthropic_stream_delta(&delta).as_deref(),
+            Some(" world")
+        );
+    }
+
+    #[test]
+    fn parses_sse_blocks_with_lf_and_crlf() {
+        let mut lf = "data: one\n\ndata: two\n\n".to_string();
+        let first = take_next_sse_block(&mut lf).expect("first block");
+        let second = take_next_sse_block(&mut lf).expect("second block");
+        assert_eq!(parse_sse_data_block(&first).as_deref(), Some("one"));
+        assert_eq!(parse_sse_data_block(&second).as_deref(), Some("two"));
+
+        let mut crlf = "data: a\r\n\r\ndata: b\r\n\r\n".to_string();
+        let first = take_next_sse_block(&mut crlf).expect("first block");
+        let second = take_next_sse_block(&mut crlf).expect("second block");
+        assert_eq!(parse_sse_data_block(&first).as_deref(), Some("a"));
+        assert_eq!(parse_sse_data_block(&second).as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn extracts_stream_error_message_from_object_payload() {
+        let payload = json!({
+            "error": {"message": "insufficient_quota"}
+        });
+        assert_eq!(
+            extract_stream_error_message(&payload).as_deref(),
+            Some("insufficient_quota")
         );
     }
 

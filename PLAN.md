@@ -481,6 +481,23 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `rustcode auth login gitlab --method oauth_browser --domain gitlab.example.com --no-wait` (fails with missing `GITLAB_OAUTH_CLIENT_ID`)
     - `GITLAB_OAUTH_CLIENT_ID=test-app-id rustcode auth login gitlab --method oauth_browser --domain gitlab.example.com --no-wait` (self-hosted path succeeds)
 
+26. Streaming Output Path (OpenAI-compatible + Anthropic)
+- Status: completed
+- Deliverables:
+  - Added streaming transport parsing in `rustcode-llm`:
+    - OpenAI-compatible SSE stream ingestion with fallback to non-stream JSON responses.
+    - Anthropic SSE stream ingestion with fallback to non-stream JSON responses.
+    - stream error extraction (`error.message`) with provider-context failure propagation.
+  - Extended `LlmResponse` to carry `chunks` alongside final `text`.
+  - Updated engine prompt execution to emit one `OutputChunk` event per streamed chunk when available.
+  - Added SSE parser/unit coverage and engine chunk-emission coverage.
+- Validation:
+  - Pass: `cargo test -p rustcode-llm -p rustcode-engine -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: live provider probes:
+    - OpenRouter raw SSE sample captured via `curl` (real `data:` frames + provider error payloads observed).
+    - `rustcode --json run` now surfaces stream-path provider errors with upstream message (`provider stream error: ...`) instead of generic parser failure.
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -514,9 +531,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
-2. Add explicit provider-auth source selection UX for `auth login` (OAuth vs API key) with parity-oriented prompts.
-3. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
+1. Add explicit provider-auth source selection UX for `auth login` (OAuth vs API key) with parity-oriented prompts.
+2. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
+3. Add renderer mode improvements for streamed chunks (coalesced human output vs event-debug output).
 
 ## Update Log
 - 2026-02-17:
@@ -758,6 +775,11 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `gitlab.com` browser OAuth now uses bundled OpenCode-compatible client ID by default.
     - self-hosted GitLab domains explicitly require `GITLAB_OAUTH_CLIENT_ID`.
     - updated credential/provider docs and added integration + unit coverage for both branches.
+  - Completed Milestone 26 streaming output path:
+    - `rustcode-llm` now parses OpenAI-compatible and Anthropic SSE streams with JSON fallback.
+    - engine prompt execution emits chunk-wise `OutputChunk` events when stream chunks are available.
+    - added stream parser tests and engine streaming emission test.
+    - validated live OpenRouter stream/error payload handling; upstream provider error text now bubbles cleanly.
   - Completed Milestone 21 OAuth credential runtime consumption:
     - `rustcode-llm` now resolves OAuth access tokens from auth store when env/config keys are absent.
     - added unit coverage for OAuth fallback (`resolves_oauth_access_from_auth_store_when_env_missing`).
