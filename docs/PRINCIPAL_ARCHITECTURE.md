@@ -141,6 +141,7 @@ Shutdown policy:
 ## 7. Extensibility Approach
 Extension axis is ports/adapters, not core rewrites:
 - Plugin interface for event hooks and future command/tool registration.
+- Registry lifecycle includes explicit registration, duplicate protection, and unregister support.
 - Static plugins first for safety and ABI stability.
 - WASM/dynamic plugin loading deferred until trait boundary stabilizes.
 

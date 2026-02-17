@@ -105,13 +105,15 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: permission policy hook introduced and enforced in engine path resolution (2026-02-17)
 
 7. Plugin Boundary v1
-- Status: pending
+- Status: completed
 - Deliverables:
   - Trait-based plugin API
   - Registration lifecycle
   - Event subscription hooks
 - Validation:
   - fixture plugin crate tests
+  - Pass: plugin registry lifecycle tests (`register` duplicate rejection + `unregister`) in `rustcode-plugins` (2026-02-17)
+  - Pass: engine test verifies plugin `on_event` hook receives emitted events (2026-02-17)
 
 8. TUI Integration
 - Status: pending
@@ -175,8 +177,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Add CLI integration test harness for signal and streaming scenarios.
-2. Begin Plugin Boundary v1 with registration lifecycle tests.
-3. Add event schema compatibility tests for future version bumps.
+2. Add event schema compatibility tests for future version bumps.
+3. Start TUI integration work with event-consumer loop contracts.
 
 ## Update Log
 - 2026-02-17:
@@ -218,3 +220,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - escaped `edit` path rejected with structured failure and non-zero exit.
   - Added event envelope versioning (`schema_version = 1`) to all emitted events.
   - Updated renderer contract tests and runtime JSON probes to validate versioned event envelopes.
+  - Completed Milestone 7:
+    - Added plugin lifecycle operations (`unregister`, `len`, `is_empty`).
+    - Added plugin lifecycle tests in `rustcode-plugins`.
+    - Added engine test validating plugin event-subscription hook execution.

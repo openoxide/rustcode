@@ -469,7 +469,7 @@ mod tests {
     use rustcode_core::ports::EventPublisher;
     use rustcode_io::{FileSystemPort, IoError, ProcessOutput, ProcessPort};
     use rustcode_llm::NullLlmClient;
-    use rustcode_plugins::PluginRegistry;
+    use rustcode_plugins::{Plugin, PluginError, PluginRegistry};
 
     use super::*;
 
@@ -507,6 +507,23 @@ mod tests {
     #[derive(Default)]
     struct CollectingPublisher {
         events: Mutex<Vec<Event>>,
+    }
+
+    struct CountingPlugin {
+        seen: Arc<Mutex<usize>>,
+    }
+
+    #[async_trait]
+    impl Plugin for CountingPlugin {
+        fn name(&self) -> &'static str {
+            "counting"
+        }
+
+        async fn on_event(&self, _event: &Event, _ctx: &CommandContext) -> Result<(), PluginError> {
+            let mut seen = self.seen.lock().await;
+            *seen += 1;
+            Ok(())
+        }
     }
 
     #[async_trait]
@@ -611,5 +628,37 @@ mod tests {
                 if message.contains("path escapes workspace root")
             )
         }));
+    }
+
+    #[tokio::test]
+    async fn plugins_receive_emitted_events() {
+        let seen = Arc::new(Mutex::new(0usize));
+        let mut registry = PluginRegistry::default();
+        registry
+            .register(Arc::new(CountingPlugin { seen: seen.clone() }))
+            .expect("plugin registration must succeed");
+
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
+            registry,
+        );
+        let publisher = Arc::new(CollectingPublisher::default());
+        let context = CommandContext::new(
+            Arc::new(ResolvedConfig::default()),
+            SessionMeta {
+                session_id: "s3".to_string(),
+                request_id: "r3".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let result = engine.execute(Command::Version, context, publisher).await;
+        assert!(result.is_ok());
+
+        let seen_count = *seen.lock().await;
+        assert_eq!(seen_count, 3);
     }
 }
