@@ -276,6 +276,29 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `rustcode auth login github-copilot --no-wait --timeout-secs 5` exercises network error path with structured failure in this environment.
     - models-missing fallback probe (`HOME/XDG_CACHE_HOME` isolated + missing `RUSTCODE_MODELS_PATH`) shows warning + known OAuth providers.
 
+16. Models JSON Diagnostics Surface
+- Status: completed
+- Deliverables:
+  - Added machine-readable models diagnostics output using existing global `--json` switch:
+    - `rustcode --json models`
+    - `rustcode --json models <provider>`
+  - JSON summary mode now emits:
+    - `schema_version`
+    - provider rows with `id`, `name`, `models`, `protocol`, `endpoint`, `api_key_source`, `missing`.
+  - JSON provider-detail mode now emits:
+    - provider diagnostics (`protocol`, `base_url`, `endpoint`, `requires_api_key`, `api_key_source`, `api_key_env_candidates`, `missing`)
+    - fully-qualified `models` array.
+  - Preserved existing non-JSON text output behavior for compatibility.
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration tests:
+    - `models_json_summary_is_parseable`
+    - `models_json_provider_detail_includes_models_array`
+  - Pass: live CLI probes:
+    - `rustcode --json models` emits parseable JSON summary.
+    - `rustcode --json models openrouter` emits provider diagnostics + large model list payload.
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -310,8 +333,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
 2. Implement remaining real OAuth token exchange adapters (OpenAI browser/device and GitLab OAuth callback) behind `rustcode-auth`.
-3. Add provider diagnostics JSON mode (`rustcode models --json`) for machine-readable health/status checks.
-4. Add provider/tool selection policy doc + config knobs using weighted scoring (model flexibility, automation depth, extensibility, privacy) to operationalize Codex vs OpenCode tradeoffs.
+3. Add provider/tool selection policy doc + config knobs using weighted scoring (model flexibility, automation depth, extensibility, privacy) to operationalize Codex vs OpenCode tradeoffs.
 
 ## Update Log
 - 2026-02-17:
@@ -469,6 +491,15 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
       - `cargo check --workspace`
       - `cargo test --workspace`
       - live CLI probes for provider listing, key storage/status, OAuth hint path, device-flow network-failure path, and missing-models fallback.
+  - Completed Milestone 16 models JSON diagnostics surface:
+    - added machine-readable output for `rustcode --json models` summary and provider-detail views.
+    - summary JSON includes provider diagnostics fields needed for health tooling.
+    - provider JSON includes full diagnostics + fully-qualified model list.
+    - added integration tests for JSON parseability and provider-detail contract.
+    - validated via:
+      - `cargo test --workspace`
+      - `./scripts/ci_matrix.sh`
+      - live `rustcode --json models` and `rustcode --json models openrouter` probes.
     - enforces conservative memory thresholds with environment overrides.
   - Extended benchmark harness with drift mode and captured sample stability run:
     - `./scripts/benchmark.sh drift 12 4`

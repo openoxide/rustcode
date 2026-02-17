@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
     }
     if let TopCommand::Models { provider } = &cli.command {
         let config = load_effective_config(&cli)?;
-        return handle_models_command(provider.as_deref(), &config);
+        return handle_models_command(provider.as_deref(), &config, cli.json);
     }
     let launch_tui = matches!(&cli.command, TopCommand::Tui);
     let output_format = OutputFormat::from_json_flag(cli.json);
@@ -276,7 +276,11 @@ struct ModelsProvider {
     models: BTreeMap<String, Value>,
 }
 
-fn handle_models_command(provider_filter: Option<&str>, config: &ResolvedConfig) -> Result<()> {
+fn handle_models_command(
+    provider_filter: Option<&str>,
+    config: &ResolvedConfig,
+    json_output: bool,
+) -> Result<()> {
     let index = load_models_index()?;
 
     if let Some(provider) = provider_filter {
@@ -285,6 +289,37 @@ fn handle_models_command(provider_filter: Option<&str>, config: &ResolvedConfig)
         };
         let diagnostics = diagnose_provider(config, Some(provider))
             .with_context(|| format!("failed to diagnose provider {provider}"))?;
+
+        let mut model_ids: Vec<String> = entry
+            .models
+            .keys()
+            .map(|id| format!("{provider}/{id}"))
+            .collect();
+        model_ids.sort();
+
+        if json_output {
+            let payload = serde_json::json!({
+                "schema_version": 1,
+                "provider": {
+                    "id": provider,
+                    "name": entry.name.clone().unwrap_or_else(|| provider.to_string()),
+                    "protocol": render_protocol(&diagnostics.protocol),
+                    "base_url": diagnostics.base_url,
+                    "endpoint": diagnostics.endpoint,
+                    "requires_api_key": diagnostics.requires_api_key,
+                    "api_key_source": render_api_key_source(&diagnostics.api_key_source),
+                    "api_key_env_candidates": diagnostics.api_key_env_candidates,
+                    "missing": diagnostics.missing,
+                    "models": model_ids,
+                }
+            });
+            if !write_stdout_line(
+                &serde_json::to_string(&payload).context("failed to serialize models json")?,
+            )? {
+                return Ok(());
+            }
+            return Ok(());
+        }
 
         if !write_stdout_line(&format!("provider={provider}"))?
             || !write_stdout_line(&format!(
@@ -327,13 +362,11 @@ fn handle_models_command(provider_filter: Option<&str>, config: &ResolvedConfig)
             return Ok(());
         }
 
-        let mut model_ids: Vec<String> = entry.models.keys().cloned().collect();
-        model_ids.sort();
         if !write_stdout_line(&format!("models={}", model_ids.len()))? {
             return Ok(());
         }
         for model_id in model_ids {
-            if !write_stdout_line(&format!("{provider}/{model_id}"))? {
+            if !write_stdout_line(&model_id)? {
                 return Ok(());
             }
         }
@@ -342,6 +375,35 @@ fn handle_models_command(provider_filter: Option<&str>, config: &ResolvedConfig)
 
     let mut providers: Vec<_> = index.into_iter().collect();
     providers.sort_by(|a, b| a.0.cmp(&b.0));
+
+    if json_output {
+        let mut rows = Vec::with_capacity(providers.len());
+        for (provider_id, entry) in providers {
+            let display_name = entry.name.unwrap_or_else(|| provider_id.clone());
+            let diagnostics = diagnose_provider(config, Some(&provider_id))
+                .with_context(|| format!("failed to diagnose provider {provider_id}"))?;
+            rows.push(serde_json::json!({
+                "id": provider_id,
+                "name": display_name,
+                "models": entry.models.len(),
+                "protocol": render_protocol(&diagnostics.protocol),
+                "endpoint": diagnostics.endpoint,
+                "api_key_source": render_api_key_source(&diagnostics.api_key_source),
+                "missing": diagnostics.missing,
+            }));
+        }
+        let payload = serde_json::json!({
+            "schema_version": 1,
+            "providers": rows,
+        });
+        if !write_stdout_line(
+            &serde_json::to_string(&payload).context("failed to serialize models json")?,
+        )? {
+            return Ok(());
+        }
+        return Ok(());
+    }
+
     for (provider_id, entry) in providers {
         let display_name = entry.name.unwrap_or_else(|| provider_id.clone());
         let diagnostics = diagnose_provider(config, Some(&provider_id))

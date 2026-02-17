@@ -301,6 +301,76 @@ fn models_summary_includes_diagnostics_columns() {
     assert!(stdout.contains("missing="), "stdout: {stdout}");
 }
 
+#[test]
+fn models_json_summary_is_parseable() {
+    let models_path = make_temp_file_path("models-json-summary");
+    std::fs::write(
+        &models_path,
+        r#"{
+  "openrouter": { "name": "OpenRouter", "models": { "m1": {} } },
+  "openai": { "name": "OpenAI", "models": { "gpt-5": {} } }
+}"#,
+    )
+    .expect("must write models fixture");
+
+    let output = Command::new(rustcode_bin())
+        .args(["--json", "models"])
+        .env("RUSTCODE_MODELS_PATH", &models_path)
+        .output()
+        .expect("must run rustcode models --json");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let parsed: Value = serde_json::from_str(stdout.trim()).expect("stdout must be valid json");
+    assert_eq!(parsed["schema_version"].as_u64(), Some(1));
+    assert_eq!(parsed["providers"].as_array().map(Vec::len), Some(2));
+}
+
+#[test]
+fn models_json_provider_detail_includes_models_array() {
+    let models_path = make_temp_file_path("models-json-provider");
+    std::fs::write(
+        &models_path,
+        r#"{
+  "alpha": { "name": "Alpha Provider", "models": { "m1": {}, "m2": {} } }
+}"#,
+    )
+    .expect("must write models fixture");
+
+    let output = Command::new(rustcode_bin())
+        .args(["--json", "models", "alpha"])
+        .env("RUSTCODE_MODELS_PATH", &models_path)
+        .output()
+        .expect("must run rustcode models alpha --json");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let parsed: Value = serde_json::from_str(stdout.trim()).expect("stdout must be valid json");
+    assert_eq!(parsed["schema_version"].as_u64(), Some(1));
+    assert_eq!(parsed["provider"]["id"].as_str(), Some("alpha"));
+    assert_eq!(
+        parsed["provider"]["models"].as_array().map(Vec::len),
+        Some(2)
+    );
+    assert!(parsed["provider"]["models"]
+        .as_array()
+        .expect("models must be array")
+        .iter()
+        .any(|item| item.as_str() == Some("alpha/m1")));
+}
+
 #[cfg(unix)]
 #[test]
 fn sigint_cancels_long_running_command_gracefully() {
