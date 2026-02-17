@@ -191,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add release-candidate artifact bundle workflow.
-2. Add signed tag and checksum verification in release automation.
-3. Add release workflow auto-draft notes from changelog entries.
+1. Add signed tag and checksum verification in release automation.
+2. Add release workflow auto-draft notes from changelog entries.
+3. Add release cut workflow using `gh` with approval gate.
 
 ## Update Log
 - 2026-02-17:
@@ -368,6 +368,13 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - added `scripts/nightly_benchmark_drift.sh` for scheduled drift validation.
     - added `.github/workflows/nightly-benchmark-drift.yml` (schedule + manual dispatch).
     - workflow opens/updates alert issue on failures and auto-closes on recovery.
+  - Release candidate bundle workflow:
+    - added `scripts/build_release_bundle.sh` (build + bundle + checksum generation).
+    - added `.github/workflows/release-candidate-bundle.yml` (`workflow_dispatch`).
+    - workflow uploads tarball and checksum artifacts for candidate review.
+  - Linux CI threshold correction:
+    - adjusted `benchmark_assert.sh` default `PEAK_FOOTPRINT_LIMIT` to match `MAX_RSS_LIMIT`.
+    - resolves false-positive peak-footprint failures when peak falls back to normalized RSS bytes.
   - Added structured serve telemetry:
     - introduced `EventPayload::ServeRequest { method, path, status }`.
     - `serve` now emits route-level events for each handled request.

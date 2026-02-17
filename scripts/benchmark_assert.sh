@@ -3,7 +3,7 @@ set -euo pipefail
 
 file="${1:-benchmarks/latest.json}"
 max_rss_limit="${MAX_RSS_LIMIT:-8000000}"
-peak_limit="${PEAK_FOOTPRINT_LIMIT:-4000000}"
+peak_limit="${PEAK_FOOTPRINT_LIMIT:-$max_rss_limit}"
 allow_missing="${ALLOW_MISSING_METRICS:-0}"
 source "$(dirname "$0")/benchmark_metrics.sh"
 

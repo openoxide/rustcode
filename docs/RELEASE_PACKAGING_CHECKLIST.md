@@ -18,6 +18,9 @@
 - Suggested release bundle naming:
   - `rustcode-v<version>-<target>.tar.gz`
   - `rustcode-v<version>-<target>.sha256`
+- Bundle automation:
+  - script: `./scripts/build_release_bundle.sh <version> [output_dir]`
+  - workflow: `.github/workflows/release-candidate-bundle.yml` (`workflow_dispatch`)
 
 ## Tagging and Notes
 1. Finalize `docs/RELEASE_NOTES_DRAFT.md` into release notes.

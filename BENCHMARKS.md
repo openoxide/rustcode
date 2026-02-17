@@ -45,8 +45,8 @@ Examples:
 - `./scripts/benchmark.sh startup 5`:
   - `real 0.00` reported across runs on host timer granularity.
 - `./scripts/benchmark.sh memory "bench memory probe"`:
-  - `maximum resident set size: 5,505,024`
-  - `peak memory footprint: 2,064,672`
+  - `maximum resident set size: 5,603,328`
+  - `peak memory footprint: 2,179,384`
 - `./scripts/benchmark.sh drift 12 4`:
   - observed RSS samples: `32 KB -> 5,392 KB`
   - process remained stable and exited cleanly on cancellation.
@@ -56,7 +56,7 @@ Examples:
 - `./scripts/benchmark.sh load 20 2 2`:
   - completed concurrent batch probes successfully (`20` measured batches x `2` workers, `2` warmup batches).
   - emitted latency summary (`latency_p50_s`, `latency_p95_s`, `latency_max_s`).
-  - latest sample: `p50=0.005s`, `p95=0.007s`, `max=0.007s`.
+  - latest sample: `p50=0.005s`, `p95=0.006s`, `max=0.007s`.
 - `./scripts/benchmark_record.sh benchmarks/latest.json`:
   - persists startup/memory/drift/serve/load output in JSON artifact format.
 - `./scripts/benchmark_compare.sh <old> <new>`:
@@ -65,6 +65,7 @@ Examples:
 - `./scripts/benchmark_assert.sh <artifact>`:
   - fails when extracted memory metrics exceed conservative limits.
   - configurable via `MAX_RSS_LIMIT` and `PEAK_FOOTPRINT_LIMIT`.
+  - default peak limit equals `MAX_RSS_LIMIT` unless `PEAK_FOOTPRINT_LIMIT` is explicitly set.
   - falls back to sampled RSS from drift/serve sections when direct memory fields are absent.
   - optional escape hatch: `ALLOW_MISSING_METRICS=1`.
 - `./scripts/benchmark_release_gate.sh <baseline> <candidate>`:
