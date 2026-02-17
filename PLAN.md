@@ -67,7 +67,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: runtime trust gate probe with untrusted project failure and trusted success (`rustcode-cli version`, 2026-02-17)
 
 4. Event Protocol and Renderers
-- Status: in_progress
+- Status: completed
 - Deliverables:
   - Domain event types (turn/item/tool/error)
   - Human renderer
@@ -76,6 +76,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - snapshot tests for both output modes
   - `jq`-valid JSONL stream checks
   - Pass: `cargo run -q -p rustcode-cli -- --json run "hello"` emits structured JSON events (2026-02-17)
+  - Pass: renderer contract tests for human and JSON output stability (`cargo test -p rustcode-cli`, 2026-02-17)
+  - Pass: runtime probe confirmed human + JSON rendering paths (`cargo run -q -p rustcode-cli -- run "hi"` and `--json run "hi"`, 2026-02-17)
 
 5. Engine Skeleton
 - Status: in_progress
@@ -168,9 +170,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add renderer contract tests (human vs JSON) with stable snapshots.
-2. Implement explicit cancellation path and interrupt integration tests.
-3. Introduce event envelope versioning for future plugin/tool compatibility.
+1. Implement explicit cancellation path and interrupt integration tests.
+2. Introduce event envelope versioning for future plugin/tool compatibility.
+3. Start Tool Runtime v1 command set with policy checks (`list`, `read`, `write`, `exec`).
 
 ## Update Log
 - 2026-02-17:
@@ -191,3 +193,5 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added `--trust-project-config` CLI override and `[trust].projects` support in user/global config files.
   - Added config tests for precedence, plugin/env merge semantics, trust rejection, and CLI override precedence.
   - Verified runtime behavior: untrusted project config fails with actionable error; trusted modes succeed.
+  - Completed Milestone 4: renderer contract tests added for deterministic human and JSON outputs.
+  - Confirmed renderer outputs via runtime probes for both human and machine-readable paths.
