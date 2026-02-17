@@ -842,6 +842,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Update Log
 - 2026-02-17:
+  - CI hang investigation (workflows):
+    - root cause: OAuth round-trip tests used proxy-aware reqwest defaults without timeouts, which can stall in CI.
+    - fix: added an internal auth HTTP client builder with explicit timeouts + `no_proxy()`; callback test requests use short no-proxy timeouts.
   - Started Milestone 41 layered MCP config integration:
     - next slice targets moving MCP server resolution into `rustcode-config` layered precedence.
   - Milestone 41 start references (code + docs):

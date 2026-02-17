@@ -14,6 +14,7 @@ use tokio::net::TcpListener;
 use tokio::time::sleep;
 
 const MCP_DISCOVERY_TIMEOUT: Duration = Duration::from_secs(5);
+const AUTH_HTTP_TIMEOUT: Duration = Duration::from_secs(15);
 const MCP_DISCOVERY_HEADER: &str = "MCP-Protocol-Version";
 const MCP_DISCOVERY_VERSION: &str = "2024-11-05";
 
@@ -33,6 +34,14 @@ pub enum AuthError {
     OAuthTimeout,
     #[error("oauth authorization failed: {0}")]
     OAuthFailed(String),
+}
+
+fn auth_http_client() -> Result<reqwest::Client, AuthError> {
+    reqwest::Client::builder()
+        .timeout(AUTH_HTTP_TIMEOUT)
+        .no_proxy()
+        .build()
+        .map_err(|err| AuthError::Network(format!("failed to build http client: {err}")))
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -528,7 +537,7 @@ pub async fn complete_mcp_browser_oauth_flow(
     let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
     let code = wait_for_oauth_callback(&callback, &flow.state, timeout).await?;
 
-    let client = reqwest::Client::new();
+    let client = auth_http_client()?;
     let mut form_params = BTreeMap::new();
     form_params.insert("client_id".to_string(), flow.client_id.clone());
     form_params.insert("code".to_string(), code);
@@ -668,7 +677,7 @@ async fn start_github_device_code(
     domain: &str,
 ) -> Result<DeviceCodeFlowStart, AuthError> {
     let url = format!("https://{domain}/login/device/code");
-    let client = reqwest::Client::new();
+    let client = auth_http_client()?;
     let response = client
         .post(url)
         .header("Accept", "application/json")
@@ -707,7 +716,7 @@ async fn start_github_device_code(
 }
 
 async fn start_openai_device_code(provider: &str) -> Result<DeviceCodeFlowStart, AuthError> {
-    let client = reqwest::Client::new();
+    let client = auth_http_client()?;
     let response = client
         .post(format!("{OPENAI_ISSUER}/api/accounts/deviceauth/usercode"))
         .header("Accept", "application/json")
@@ -748,7 +757,7 @@ async fn poll_github_device_code(
     flow: &DeviceCodeFlowStart,
     timeout: Duration,
 ) -> Result<DeviceCodeFlowCredential, AuthError> {
-    let client = reqwest::Client::new();
+    let client = auth_http_client()?;
     let token_url = format!("https://{}/login/oauth/access_token", flow.domain);
     let deadline = Instant::now() + timeout;
     let mut interval = flow.interval_secs.max(1);
@@ -821,7 +830,7 @@ async fn poll_openai_device_code(
     flow: &DeviceCodeFlowStart,
     timeout: Duration,
 ) -> Result<DeviceCodeFlowCredential, AuthError> {
-    let client = reqwest::Client::new();
+    let client = auth_http_client()?;
     let deadline = Instant::now() + timeout;
     let interval = flow.interval_secs.max(1);
 
@@ -1026,7 +1035,7 @@ async fn complete_gitlab_browser_oauth_flow(
     let code = wait_for_oauth_callback(&callback, &flow.state, timeout).await?;
 
     let token_url = format!("https://{}/oauth/token", flow.domain);
-    let client = reqwest::Client::new();
+    let client = auth_http_client()?;
     let mut form_params = BTreeMap::new();
     form_params.insert("client_id".to_string(), flow.client_id.clone());
     form_params.insert("code".to_string(), code);
@@ -1085,7 +1094,7 @@ async fn complete_openai_browser_oauth_flow(
     let code = wait_for_oauth_callback(&callback, &flow.state, timeout).await?;
 
     let token_url = format!("https://{}/oauth/token", flow.domain);
-    let client = reqwest::Client::new();
+    let client = auth_http_client()?;
     let response = client
         .post(token_url)
         .header("Accept", "application/json")
@@ -1613,7 +1622,12 @@ mod tests {
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(150)).await;
             let callback_url = format!("{redirect_uri}?code=mcp-auth-code&state={state}");
-            let _ = reqwest::get(callback_url).await;
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(2))
+                .no_proxy()
+                .build()
+                .expect("callback client should build");
+            let _ = client.get(callback_url).send().await;
         });
 
         let credential =
@@ -1759,7 +1773,12 @@ mod tests {
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(150)).await;
             let callback_url = format!("{redirect_uri}?code=auth-code-1&state={state}");
-            let _ = reqwest::get(callback_url).await;
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(2))
+                .no_proxy()
+                .build()
+                .expect("callback client should build");
+            let _ = client.get(callback_url).send().await;
         });
 
         let credential = complete_browser_oauth_flow(&flow, Duration::from_secs(5), None)
