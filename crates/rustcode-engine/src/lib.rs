@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::{
     atomic::{AtomicU64, Ordering},
     Arc,
@@ -16,7 +17,7 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tracing::debug;
 
-use rustcode_core::command::Command;
+use rustcode_core::command::{AgentOptions, Command};
 use rustcode_core::context::CommandContext;
 use rustcode_core::error::{ExecutionError, PublishError};
 use rustcode_core::event::{Event, EventPayload, EventScope};
@@ -74,6 +75,11 @@ pub struct Engine {
     permission_policy: Arc<dyn PermissionPolicy>,
     plugins: PluginRegistry,
     next_event_id: AtomicU64,
+}
+
+#[derive(Debug, Default)]
+struct AgentState {
+    read_paths: HashSet<PathBuf>,
 }
 
 impl Engine {
@@ -200,13 +206,12 @@ impl Engine {
     async fn run_agent(
         &self,
         prompt: String,
+        options: AgentOptions,
         context: &CommandContext,
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
-        const MAX_STEPS: usize = 8;
-        const MAX_TOOL_CALLS_PER_STEP: usize = 8;
-
         let tools = agent_tool_specs();
+        let mut state = AgentState::default();
         let mut messages = vec![
             ChatMessage {
                 role: ChatRole::System,
@@ -229,7 +234,7 @@ When you are done, respond with a final plain-text answer."
             },
         ];
 
-        for _step in 0..MAX_STEPS {
+        for _step in 0..options.max_steps {
             let request = ChatRequest {
                 model: context.config.model.clone(),
                 messages: messages.clone(),
@@ -274,7 +279,11 @@ When you are done, respond with a final plain-text answer."
                 return Ok(());
             }
 
-            for call in response.tool_calls.iter().take(MAX_TOOL_CALLS_PER_STEP) {
+            for call in response
+                .tool_calls
+                .iter()
+                .take(options.max_tool_calls_per_step)
+            {
                 self.emit(
                     publisher.clone(),
                     EventScope::Tool,
@@ -288,18 +297,21 @@ When you are done, respond with a final plain-text answer."
                 .await?;
 
                 let tool_result = self
-                    .execute_agent_tool_call(call.name.as_str(), call.arguments.as_str(), context)
+                    .execute_agent_tool_call(
+                        call.name.as_str(),
+                        call.arguments.as_str(),
+                        context,
+                        &options,
+                        &mut state,
+                    )
                     .await;
 
                 let (ok, output) = match tool_result {
                     Ok(output) => (true, output),
                     Err(err) => (false, err.to_string()),
                 };
-                let result_payload = json!({
-                    "ok": ok,
-                    "output": output,
-                })
-                .to_string();
+                let result_payload =
+                    tool_payload_json(ok, output, options.max_tool_result_bytes);
 
                 self.emit(
                     publisher.clone(),
@@ -333,7 +345,12 @@ When you are done, respond with a final plain-text answer."
         name: &str,
         arguments: &str,
         context: &CommandContext,
+        options: &AgentOptions,
+        state: &mut AgentState,
     ) -> Result<String, ExecutionError> {
+        if context.cancellation.is_cancelled() {
+            return Err(ExecutionError::Cancelled);
+        }
         let args: Value = serde_json::from_str(arguments).map_err(|err| {
             ExecutionError::Dispatch(format!("tool arguments are not valid JSON: {err}"))
         })?;
@@ -344,15 +361,20 @@ When you are done, respond with a final plain-text answer."
                     .get("path")
                     .and_then(Value::as_str)
                     .map(|s| s.to_string());
-                self.agent_tool_list(path, context).await
+                self.agent_tool_list(path, context, options).await
             }
             "read" => {
                 let path = args.get("path").and_then(Value::as_str).ok_or_else(|| {
                     ExecutionError::Dispatch("read tool requires path".to_string())
                 })?;
-                self.agent_tool_read(path, context).await
+                self.agent_tool_read(path, context, options, state).await
             }
             "write" => {
+                if !options.allow_write && !options.allow_edit {
+                    return Err(ExecutionError::Dispatch(
+                        "agent write is disabled; rerun with --allow-write".to_string(),
+                    ));
+                }
                 let path = args.get("path").and_then(Value::as_str).ok_or_else(|| {
                     ExecutionError::Dispatch("write tool requires path".to_string())
                 })?;
@@ -362,20 +384,32 @@ When you are done, respond with a final plain-text answer."
                     .ok_or_else(|| {
                         ExecutionError::Dispatch("write tool requires contents".to_string())
                     })?;
-                self.agent_tool_write(path, contents, context).await
+                self.agent_tool_write(path, contents, context, options, state)
+                    .await
             }
             "edit" => {
+                if !options.allow_edit {
+                    return Err(ExecutionError::Dispatch(
+                        "agent edit is disabled; rerun with --allow-edit".to_string(),
+                    ));
+                }
                 let path = args.get("path").and_then(Value::as_str).ok_or_else(|| {
                     ExecutionError::Dispatch("edit tool requires path".to_string())
                 })?;
                 let from = args.get("from").and_then(Value::as_str).ok_or_else(|| {
                     ExecutionError::Dispatch("edit tool requires from".to_string())
                 })?;
+                if from.is_empty() {
+                    return Err(ExecutionError::Dispatch(
+                        "edit tool requires non-empty from".to_string(),
+                    ));
+                }
                 let to = args
                     .get("to")
                     .and_then(Value::as_str)
                     .ok_or_else(|| ExecutionError::Dispatch("edit tool requires to".to_string()))?;
-                self.agent_tool_edit(path, from, to, context).await
+                self.agent_tool_edit(path, from, to, context, options, state)
+                    .await
             }
             _ => Err(ExecutionError::Dispatch(format!(
                 "unknown tool call: {name}"
@@ -387,12 +421,13 @@ When you are done, respond with a final plain-text answer."
         &self,
         path: Option<String>,
         context: &CommandContext,
+        options: &AgentOptions,
     ) -> Result<String, ExecutionError> {
         let target = path.unwrap_or_else(|| ".".to_string());
         let resolved = self.resolve_workspace_path(context, &target, PathOperation::List)?;
         let entries = self
             .fs
-            .list_dir(&resolved)
+            .list_dir_limited(&resolved, options.max_list_entries)
             .await
             .map_err(|err| ExecutionError::Executor(err.to_string()))?;
         let workspace_root = absolute_normalized(&context.config.workspace_root)
@@ -415,10 +450,13 @@ When you are done, respond with a final plain-text answer."
         &self,
         path: &str,
         context: &CommandContext,
+        options: &AgentOptions,
+        state: &mut AgentState,
     ) -> Result<String, ExecutionError> {
         let resolved = self.resolve_workspace_path(context, path, PathOperation::Read)?;
+        state.read_paths.insert(resolved.clone());
         self.fs
-            .read_to_string(&resolved)
+            .read_to_string_limited(&resolved, options.max_read_bytes)
             .await
             .map_err(|err| ExecutionError::Executor(err.to_string()))
     }
@@ -428,8 +466,29 @@ When you are done, respond with a final plain-text answer."
         path: &str,
         contents: &str,
         context: &CommandContext,
+        options: &AgentOptions,
+        state: &mut AgentState,
     ) -> Result<String, ExecutionError> {
         let resolved = self.resolve_workspace_path(context, path, PathOperation::Write)?;
+        if !state.read_paths.contains(&resolved)
+            && self
+                .fs
+                .exists(&resolved)
+                .await
+                .map_err(|err| ExecutionError::Executor(err.to_string()))?
+        {
+            return Err(ExecutionError::Dispatch(
+                "write requires reading the target file first (refusing to overwrite unread file)"
+                    .to_string(),
+            ));
+        }
+        if contents.len() > options.max_write_bytes {
+            return Err(ExecutionError::Dispatch(format!(
+                "write contents exceeds max-write-bytes limit ({} > {})",
+                contents.len(),
+                options.max_write_bytes
+            )));
+        }
         self.fs
             .write_string(&resolved, contents)
             .await
@@ -447,23 +506,35 @@ When you are done, respond with a final plain-text answer."
         from: &str,
         to: &str,
         context: &CommandContext,
+        options: &AgentOptions,
+        state: &mut AgentState,
     ) -> Result<String, ExecutionError> {
         let resolved = self.resolve_workspace_path(context, path, PathOperation::Edit)?;
+        if !state.read_paths.contains(&resolved) {
+            return Err(ExecutionError::Dispatch(
+                "edit requires reading the target file first".to_string(),
+            ));
+        }
         let original = self
             .fs
-            .read_to_string(&resolved)
+            .read_to_string_limited(&resolved, options.max_read_bytes)
             .await
             .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+        if original.contains("[rustcode:truncated]") {
+            return Err(ExecutionError::Dispatch(
+                    "refusing to edit a truncated read; increase --max-read-bytes".to_string(),
+                ));
+        }
 
+        let replacements = original.matches(from).count();
         let updated = original.replace(from, to);
         self.fs
             .write_string(&resolved, &updated)
             .await
             .map_err(|err| ExecutionError::Executor(err.to_string()))?;
 
-        let changed = if original == updated { 0 } else { 1 };
         Ok(format!(
-            "edit applied ({changed} replacement groups) to {}",
+            "edit applied ({replacements} replacements) to {}",
             resolved.display()
         ))
     }
@@ -797,7 +868,10 @@ impl CommandExecutor for Engine {
 
         let command_result = match command {
             Command::Run { prompt } => self.run_prompt(prompt, &context, publisher.clone()).await,
-            Command::Agent { prompt } => self.run_agent(prompt, &context, publisher.clone()).await,
+            Command::Agent { prompt, options } => {
+                self.run_agent(prompt, options, &context, publisher.clone())
+                    .await
+            }
             Command::Exec { command, args } => {
                 self.run_exec(command, args, &context, publisher.clone())
                     .await
@@ -930,6 +1004,53 @@ fn agent_tool_specs() -> Vec<ToolSpec> {
     ]
 }
 
+fn tool_payload_json(ok: bool, output: String, max_bytes: usize) -> String {
+    let mut truncated = false;
+    let mut candidate_output = output;
+
+    // Prefer preserving structured JSON while bounding the size deterministically.
+    // If output is too large, progressively truncate the output string until the JSON fits.
+    for _ in 0..8 {
+        let payload = json!({
+            "ok": ok,
+            "truncated": truncated,
+            "output": candidate_output,
+        })
+        .to_string();
+
+        if payload.len() <= max_bytes {
+            return payload;
+        }
+
+        truncated = true;
+        let limit = max_bytes.saturating_sub(256);
+        candidate_output = truncate_utf8_bytes(&candidate_output, limit);
+    }
+
+    json!({
+        "ok": ok,
+        "truncated": true,
+        "output": "[tool output truncated]".to_string(),
+    })
+    .to_string()
+}
+
+fn truncate_utf8_bytes(input: &str, max_bytes: usize) -> String {
+    if input.len() <= max_bytes {
+        return input.to_string();
+    }
+    let mut end = 0usize;
+    for (idx, _) in input.char_indices() {
+        if idx > max_bytes {
+            break;
+        }
+        end = idx;
+    }
+    let prefix = &input[..end];
+    format!("{prefix}\n...[truncated]...\n")
+}
+
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
@@ -969,11 +1090,31 @@ mod tests {
             Err(IoError::Io("not used".to_string()))
         }
 
+        async fn read_to_string_limited(
+            &self,
+            _path: &Path,
+            _max_bytes: usize,
+        ) -> Result<String, IoError> {
+            Err(IoError::Io("not used".to_string()))
+        }
+
+        async fn exists(&self, _path: &Path) -> Result<bool, IoError> {
+            Err(IoError::Io("not used".to_string()))
+        }
+
         async fn write_string(&self, _path: &Path, _contents: &str) -> Result<(), IoError> {
             Err(IoError::Io("not used".to_string()))
         }
 
         async fn list_dir(&self, _path: &Path) -> Result<Vec<PathBuf>, IoError> {
+            Err(IoError::Io("not used".to_string()))
+        }
+
+        async fn list_dir_limited(
+            &self,
+            _path: &Path,
+            _max_entries: usize,
+        ) -> Result<Vec<PathBuf>, IoError> {
             Err(IoError::Io("not used".to_string()))
         }
     }
@@ -984,11 +1125,31 @@ mod tests {
             Ok("agent-read-ok".to_string())
         }
 
+        async fn read_to_string_limited(
+            &self,
+            _path: &Path,
+            _max_bytes: usize,
+        ) -> Result<String, IoError> {
+            Ok("agent-read-ok".to_string())
+        }
+
+        async fn exists(&self, _path: &Path) -> Result<bool, IoError> {
+            Ok(true)
+        }
+
         async fn write_string(&self, _path: &Path, _contents: &str) -> Result<(), IoError> {
             Ok(())
         }
 
         async fn list_dir(&self, _path: &Path) -> Result<Vec<PathBuf>, IoError> {
+            Ok(vec![self.root.join("a.txt"), self.root.join("dir")])
+        }
+
+        async fn list_dir_limited(
+            &self,
+            _path: &Path,
+            _max_entries: usize,
+        ) -> Result<Vec<PathBuf>, IoError> {
             Ok(vec![self.root.join("a.txt"), self.root.join("dir")])
         }
     }
@@ -1180,6 +1341,7 @@ mod tests {
             .execute(
                 Command::Agent {
                     prompt: "hi".to_string(),
+                    options: AgentOptions::default(),
                 },
                 context,
                 publisher.clone(),

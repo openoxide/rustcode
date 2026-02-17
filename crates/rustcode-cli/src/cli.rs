@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use rustcode_core::command::Command;
+use rustcode_core::command::{AgentOptions, Command};
 
 #[derive(Debug, Parser)]
 #[command(name = "rustcode", about = "Production-grade CLI/TUI systems tool")]
@@ -40,6 +40,37 @@ pub enum TopCommand {
     },
     Agent {
         prompt: String,
+        #[arg(long = "max-steps", default_value_t = AgentOptions::default().max_steps)]
+        max_steps: usize,
+        #[arg(
+            long = "max-tool-calls",
+            default_value_t = AgentOptions::default().max_tool_calls_per_step
+        )]
+        max_tool_calls_per_step: usize,
+        #[arg(long = "allow-write", default_value_t = false)]
+        allow_write: bool,
+        #[arg(long = "allow-edit", default_value_t = false)]
+        allow_edit: bool,
+        #[arg(
+            long = "max-read-bytes",
+            default_value_t = AgentOptions::default().max_read_bytes
+        )]
+        max_read_bytes: usize,
+        #[arg(
+            long = "max-list-entries",
+            default_value_t = AgentOptions::default().max_list_entries
+        )]
+        max_list_entries: usize,
+        #[arg(
+            long = "max-tool-result-bytes",
+            default_value_t = AgentOptions::default().max_tool_result_bytes
+        )]
+        max_tool_result_bytes: usize,
+        #[arg(
+            long = "max-write-bytes",
+            default_value_t = AgentOptions::default().max_write_bytes
+        )]
+        max_write_bytes: usize,
     },
     Exec {
         command: String,
@@ -183,7 +214,29 @@ pub enum McpCommand {
 pub fn map_command(command: TopCommand) -> Command {
     match command {
         TopCommand::Run { prompt } => Command::Run { prompt },
-        TopCommand::Agent { prompt } => Command::Agent { prompt },
+        TopCommand::Agent {
+            prompt,
+            max_steps,
+            max_tool_calls_per_step,
+            allow_write,
+            allow_edit,
+            max_read_bytes,
+            max_list_entries,
+            max_tool_result_bytes,
+            max_write_bytes,
+        } => Command::Agent {
+            prompt,
+            options: AgentOptions {
+                max_steps,
+                max_tool_calls_per_step,
+                allow_write,
+                allow_edit,
+                max_read_bytes,
+                max_list_entries,
+                max_tool_result_bytes,
+                max_write_bytes,
+            },
+        },
         TopCommand::Exec { command, args } => Command::Exec { command, args },
         TopCommand::List { path } => Command::List { path },
         TopCommand::Models { .. } => {
@@ -272,7 +325,7 @@ mod tests {
     fn agent_accepts_prompt() {
         let cli = Cli::try_parse_from(["rustcode", "agent", "hello"]).expect("cli should parse");
         match cli.command {
-            TopCommand::Agent { prompt } => {
+            TopCommand::Agent { prompt, .. } => {
                 assert_eq!(prompt, "hello");
             }
             _ => panic!("expected agent command"),

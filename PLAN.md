@@ -1048,6 +1048,40 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - Pass: `./scripts/ci_matrix.sh` writes `benchmarks/latest.json` and `git status` remains clean (2026-02-17)
 
+51. Agent Safety Hardening (Limits + Read-Before-Mutate)
+- Status: completed
+- Scope:
+  - Make `agent` safe-by-default while staying usable:
+    - read-only default
+    - explicit opt-in for write/edit
+    - bounded tool output to avoid context blowups
+    - refuse blind overwrites (must read file before overwriting)
+  - Match OpenCode’s truncation and “read before write/edit” semantics where practical.
+- Milestone 51 references (code + docs):
+  - `opencode/packages/opencode/src/tool/truncation.ts` (50KiB defaults + truncation messaging)
+  - `opencode/packages/opencode/src/tool/write.txt` (read-before-overwrite guidance)
+  - `opencode/packages/opencode/src/tool/edit.txt` (read-before-edit guidance)
+  - `https://opencode.ai/docs`
+- Deliverables:
+  - CLI: `agent` has explicit safety flags:
+    - `--allow-write` and `--allow-edit`
+    - `--max-read-bytes`, `--max-tool-result-bytes`, `--max-write-bytes`
+    - `--max-steps`, `--max-tool-calls`, `--max-list-entries`
+  - FS port supports bounded ops:
+    - `read_to_string_limited`
+    - `list_dir_limited`
+    - `exists` for overwrite checks
+  - Engine behavior:
+    - rejects `write` without `--allow-write` (or `--allow-edit`)
+    - rejects `edit` without `--allow-edit`
+    - rejects overwriting existing files unless the file was read earlier in the agent session
+    - rejects edits when the read was truncated (forces caller to increase max-read-bytes)
+    - caps tool-result JSON payload size deterministically
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `rustcode-cli agent --help` shows safety flags and limits (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+
 
 ## Update Log
 - 2026-02-17:

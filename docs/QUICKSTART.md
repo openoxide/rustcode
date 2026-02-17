@@ -41,6 +41,12 @@ Tool-calling agent runs require an OpenAI-compatible provider that supports `too
 cargo run -q -p rustcode-cli -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY agent "list files then read Cargo.toml"
 ```
 
+Safety defaults:
+- `agent` runs are read-only by default. To allow mutation tools:
+  - `--allow-write` for creating/overwriting files
+  - `--allow-edit` for in-place edits
+- Overwriting an existing file requires reading it first (agent refuses blind overwrites).
+
 ## Auth Commands
 ```bash
 cargo run -q -p rustcode-cli -- auth methods openrouter

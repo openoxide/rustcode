@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use async_trait::async_trait;
 use thiserror::Error;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
@@ -25,8 +26,11 @@ pub struct ProcessOutput {
 #[async_trait]
 pub trait FileSystemPort: Send + Sync {
     async fn read_to_string(&self, path: &Path) -> Result<String, IoError>;
+    async fn read_to_string_limited(&self, path: &Path, max_bytes: usize) -> Result<String, IoError>;
+    async fn exists(&self, path: &Path) -> Result<bool, IoError>;
     async fn write_string(&self, path: &Path, contents: &str) -> Result<(), IoError>;
     async fn list_dir(&self, path: &Path) -> Result<Vec<PathBuf>, IoError>;
+    async fn list_dir_limited(&self, path: &Path, max_entries: usize) -> Result<Vec<PathBuf>, IoError>;
 }
 
 #[async_trait]
@@ -47,6 +51,38 @@ pub struct LocalIo;
 impl FileSystemPort for LocalIo {
     async fn read_to_string(&self, path: &Path) -> Result<String, IoError> {
         tokio::fs::read_to_string(path)
+            .await
+            .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))
+    }
+
+    async fn read_to_string_limited(&self, path: &Path, max_bytes: usize) -> Result<String, IoError> {
+        let mut file = tokio::fs::File::open(path)
+            .await
+            .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))?;
+
+        // Read at most max_bytes + 1 to detect truncation without allocating the full file.
+        let mut buf = Vec::new();
+        let mut limited = (&mut file).take((max_bytes.saturating_add(1)) as u64);
+        limited
+            .read_to_end(&mut buf)
+            .await
+            .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))?;
+
+        let truncated = buf.len() > max_bytes;
+        if truncated {
+            buf.truncate(max_bytes);
+        }
+
+        let mut text = String::from_utf8_lossy(&buf).to_string();
+        if truncated {
+            // Marker is intentionally machine-detectable so higher layers can refuse unsafe edits.
+            text.push_str("\n[rustcode:truncated]\n");
+        }
+        Ok(text)
+    }
+
+    async fn exists(&self, path: &Path) -> Result<bool, IoError> {
+        tokio::fs::try_exists(path)
             .await
             .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))
     }
@@ -74,6 +110,27 @@ impl FileSystemPort for LocalIo {
             .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))?
         {
             paths.push(entry.path());
+        }
+
+        paths.sort();
+        Ok(paths)
+    }
+
+    async fn list_dir_limited(&self, path: &Path, max_entries: usize) -> Result<Vec<PathBuf>, IoError> {
+        let mut entries = tokio::fs::read_dir(path)
+            .await
+            .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))?;
+        let mut paths = Vec::new();
+
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))?
+        {
+            paths.push(entry.path());
+            if paths.len() >= max_entries {
+                break;
+            }
         }
 
         paths.sort();
