@@ -71,6 +71,8 @@ pub enum TopCommand {
 
 #[derive(Debug, Clone, Subcommand)]
 pub enum AuthCommand {
+    #[command(alias = "ls")]
+    List,
     Methods {
         provider: String,
     },
@@ -82,6 +84,7 @@ pub enum AuthCommand {
         #[arg(long = "from-env")]
         from_env: String,
     },
+    #[command(alias = "logout")]
     Remove {
         provider: String,
     },
@@ -225,6 +228,31 @@ mod tests {
                 assert_eq!(from_env, "OPENROUTER_API_KEY");
             }
             _ => panic!("expected auth set-key command"),
+        }
+    }
+
+    #[test]
+    fn auth_list_alias_parses() {
+        let cli = Cli::try_parse_from(["rustcode", "auth", "ls"]).expect("cli should parse");
+        match cli.command {
+            TopCommand::Auth {
+                command: AuthCommand::List,
+            } => {}
+            _ => panic!("expected auth list command"),
+        }
+    }
+
+    #[test]
+    fn auth_remove_logout_alias_parses() {
+        let cli = Cli::try_parse_from(["rustcode", "auth", "logout", "openrouter"])
+            .expect("cli should parse");
+        match cli.command {
+            TopCommand::Auth {
+                command: AuthCommand::Remove { provider },
+            } => {
+                assert_eq!(provider, "openrouter");
+            }
+            _ => panic!("expected auth remove command"),
         }
     }
 

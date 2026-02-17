@@ -252,6 +252,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 15. Auth Login UX Parity and Device Flow
 - Status: completed
 - Deliverables:
+  - Added `auth list` (`auth ls`) to enumerate stored credentials.
+  - Added `auth logout <provider>` alias to `auth remove`.
   - `auth login` now supports providerless mode and lists providers from models index (opencode-style discovery flow).
   - Added `auth login <provider> --from-env <ENV_VAR>` for direct API-key storage in the login path.
   - Added provider priority sorting for login listing to match opencode UX emphasis:
@@ -265,6 +267,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `cargo check --workspace` (2026-02-17)
   - Pass: `cargo test --workspace` (2026-02-17)
   - Pass: live CLI usage probes:
+    - `RUSTCODE_AUTH_FILE=/tmp/... rustcode auth ls` lists stored providers and credential type.
+    - `RUSTCODE_AUTH_FILE=/tmp/... rustcode auth logout openrouter` removes stored credential via logout alias.
     - `rustcode auth login` lists 91 providers with methods and priority ordering.
     - `RUSTCODE_AUTH_FILE=/tmp/... RUSTCODE_TEST_KEY=... rustcode auth login openrouter --from-env RUSTCODE_TEST_KEY` stores key.
     - `RUSTCODE_AUTH_FILE=/tmp/... rustcode auth status openrouter` reports `credential=stored:api_key`.
@@ -444,6 +448,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `scripts/benchmark_assert.sh <artifact>`
   - Completed Milestone 15 auth login UX parity and provider discovery:
     - `auth login` now supports providerless provider listing from models index, matching opencode discovery-first flow.
+    - added `auth list` (`auth ls`) and `auth logout` alias parity with opencode-style credential management.
     - added `auth login <provider> --from-env <ENV_VAR>` as the direct API-key path.
     - added Copilot device OAuth start/poll implementation in `rustcode-auth` with enterprise domain support.
     - added CLI controls `--domain`, `--no-wait`, `--timeout-secs` for device-flow operation.

@@ -189,6 +189,59 @@ fn auth_login_from_env_requires_provider() {
 }
 
 #[test]
+fn auth_list_and_logout_alias_work() {
+    let auth_path = make_temp_file_path("auth-list-logout");
+
+    let set_output = Command::new(rustcode_bin())
+        .args([
+            "auth",
+            "set-key",
+            "openrouter",
+            "--from-env",
+            "RUSTCODE_TEST_KEY",
+        ])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_TEST_KEY", "integration-secret")
+        .output()
+        .expect("must run rustcode auth set-key");
+    assert!(
+        set_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&set_output.stdout),
+        String::from_utf8_lossy(&set_output.stderr)
+    );
+
+    let list_output = Command::new(rustcode_bin())
+        .args(["auth", "ls"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode auth ls");
+    assert!(
+        list_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&list_output.stdout),
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let list_stdout = String::from_utf8(list_output.stdout).expect("stdout must be utf8");
+    assert!(list_stdout.contains("providers=1"));
+    assert!(list_stdout.contains("provider=openrouter\tcredential=stored:api_key"));
+
+    let logout_output = Command::new(rustcode_bin())
+        .args(["auth", "logout", "openrouter"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode auth logout");
+    assert!(
+        logout_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&logout_output.stdout),
+        String::from_utf8_lossy(&logout_output.stderr)
+    );
+    let logout_stdout = String::from_utf8(logout_output.stdout).expect("stdout must be utf8");
+    assert!(logout_stdout.contains("removed credential for provider=openrouter"));
+}
+
+#[test]
 fn models_command_reads_custom_models_index() {
     let models_path = make_temp_file_path("models-index");
     std::fs::write(

@@ -112,6 +112,25 @@ async fn main() -> Result<()> {
 async fn handle_auth_command(command: AuthCommand) -> Result<()> {
     let store = AuthStore::open_default();
     match command {
+        AuthCommand::List => {
+            let providers = store.providers()?;
+            if !write_stdout_line(&format!("providers={}", providers.len()))?
+                || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+            {
+                return Ok(());
+            }
+
+            for provider in providers {
+                let credential = match store.get(&provider)? {
+                    Some(StoredCredential::ApiKey { .. }) => "stored:api_key",
+                    Some(StoredCredential::OAuth { .. }) => "stored:oauth",
+                    None => "none",
+                };
+                if !write_stdout_line(&format!("provider={provider}\tcredential={credential}"))? {
+                    return Ok(());
+                }
+            }
+        }
         AuthCommand::Methods { provider } => {
             let methods = methods_for_provider(&provider);
             let rendered = methods
