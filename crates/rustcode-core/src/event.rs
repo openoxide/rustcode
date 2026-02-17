@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 pub type EventId = u64;
 pub const EVENT_SCHEMA_VERSION: u16 = 1;
 
+fn default_schema_version() -> u16 {
+    EVENT_SCHEMA_VERSION
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum EventScope {
     System,
@@ -25,11 +29,36 @@ pub enum EventPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Event {
+    #[serde(default = "default_schema_version")]
     pub schema_version: u16,
     pub id: EventId,
     pub timestamp: SystemTime,
     pub scope: EventScope,
     pub payload: EventPayload,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_event_without_schema_version_deserializes() {
+        let raw = r#"{
+            "id": 7,
+            "timestamp": {"secs_since_epoch": 0, "nanos_since_epoch": 0},
+            "scope": "System",
+            "payload": {"type": "Completed"}
+        }"#;
+
+        let event: Event = serde_json::from_str(raw).expect("legacy event must deserialize");
+        assert_eq!(event.schema_version, EVENT_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn new_events_set_schema_version() {
+        let event = Event::new(1, EventScope::System, EventPayload::Completed);
+        assert_eq!(event.schema_version, EVENT_SCHEMA_VERSION);
+    }
 }
 
 impl Event {

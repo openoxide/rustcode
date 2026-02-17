@@ -176,9 +176,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add event schema compatibility tests for future version bumps.
-2. Start TUI integration work with event-consumer loop contracts.
-3. Expand plugin boundary with fixture plugin crate integration tests.
+1. Start TUI integration work with event-consumer loop contracts.
+2. Expand plugin boundary with fixture plugin crate integration tests.
+3. Add benchmark harness for startup and memory tracking.
 
 ## Update Log
 - 2026-02-17:
@@ -228,3 +228,6 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - JSON stream envelope/`Completed` event assertion.
     - SIGINT cancellation behavior assertion for long-running command.
   - Validation pass: `cargo test --workspace` including integration tests.
+  - Added event schema compatibility tests in `rustcode-core`:
+    - legacy event JSON without `schema_version` deserializes to schema `1`
+    - newly emitted events retain schema `1`.
