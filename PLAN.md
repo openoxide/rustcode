@@ -529,6 +529,21 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `human_run_output_is_plain_text_by_default`
     - `human_run_output_uses_event_envelope_with_event_debug`
 
+29. Auth Login Source Selection UX (Parity-Oriented)
+- Status: completed
+- Deliverables:
+  - Added context-aware login method resolution:
+    - `--from-env` with omitted `--method` now forces `api_key`.
+    - interactive terminals prompt for method selection when a provider exposes multiple auth methods and `--method` is omitted.
+    - non-interactive environments keep deterministic default behavior.
+  - Added interactive API-key entry path for `auth login <provider>` when selected method is `api_key` and no `--from-env` is provided.
+  - Added non-interactive guardrail error for API-key providers to prevent hanging/ambiguous automation behavior.
+  - Added integration test for non-interactive `auth login openrouter` failure contract.
+- Validation:
+  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration test `auth_login_api_key_provider_requires_from_env_in_non_interactive_mode`
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -562,9 +577,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add explicit provider-auth source selection UX for `auth login` (OAuth vs API key) with parity-oriented prompts.
-2. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
-3. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
+1. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
+2. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
+3. Add initial MCP auth/login command surface parity for remote OAuth-capable servers.
 
 ## Update Log
 - 2026-02-17:
@@ -819,6 +834,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - default human run output now streams plain text chunks instead of debug envelopes.
     - added `--event-debug` to preserve envelope-style human event output when needed.
     - added integration coverage for both rendering modes.
+  - Completed Milestone 29 auth login source selection UX:
+    - interactive terminals now prompt for auth method when multiple methods are available.
+    - API-key login supports interactive key entry for TTY workflows.
+    - non-interactive API-key provider login remains deterministic and fails with explicit `--from-env` guidance.
   - Completed Milestone 21 OAuth credential runtime consumption:
     - `rustcode-llm` now resolves OAuth access tokens from auth store when env/config keys are absent.
     - added unit coverage for OAuth fallback (`resolves_oauth_access_from_auth_store_when_env_missing`).

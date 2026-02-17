@@ -323,6 +323,18 @@ fn auth_login_from_env_requires_provider() {
 }
 
 #[test]
+fn auth_login_api_key_provider_requires_from_env_in_non_interactive_mode() {
+    let output = Command::new(rustcode_bin())
+        .args(["auth", "login", "openrouter"])
+        .output()
+        .expect("must run rustcode auth login");
+
+    assert!(!output.status.success(), "command should fail");
+    let stderr = String::from_utf8(output.stderr).expect("stderr must be utf8");
+    assert!(stderr.contains("requires --from-env in non-interactive mode"));
+}
+
+#[test]
 fn auth_methods_gitlab_reports_browser_oauth() {
     let output = Command::new(rustcode_bin())
         .args(["auth", "methods", "gitlab"])

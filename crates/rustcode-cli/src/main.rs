@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
@@ -275,18 +275,13 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
             }
             let provider = provider.expect("provider is checked").to_ascii_lowercase();
             let methods = methods_for_provider(&provider);
-            let selected_method = if from_env.is_some() && method.is_none() {
-                if methods.contains(&AuthMethod::ApiKey) {
-                    AuthMethod::ApiKey
-                } else {
-                    anyhow::bail!(
-                        "provider={provider} does not support api_key login via --from-env"
-                    );
-                }
-            } else {
-                resolve_login_method(method.as_deref(), &methods)
-                    .with_context(|| format!("unsupported auth method for provider={provider}"))?
-            };
+            let selected_method = resolve_login_method_with_context(
+                &provider,
+                method.as_deref(),
+                &methods,
+                from_env.is_some(),
+            )
+            .with_context(|| format!("unsupported auth method for provider={provider}"))?;
 
             if let Some(env_name) = from_env {
                 if selected_method != AuthMethod::ApiKey {
@@ -309,9 +304,13 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
 
             match selected_method {
                 AuthMethod::ApiKey => {
-                    anyhow::bail!(
-                        "method=api_key requires --from-env: `rustcode auth login {provider} --from-env <ENV_VAR>`"
-                    );
+                    let key = prompt_for_api_key(&provider)?;
+                    store.set_api_key(&provider, &key)?;
+                    if !write_stdout_line(&format!("stored api key for provider={provider}"))?
+                        || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+                    {
+                        return Ok(());
+                    }
                 }
                 AuthMethod::OAuthDeviceCode => {
                     let flow = start_device_code_flow(&provider, domain.as_deref()).await?;
@@ -639,6 +638,100 @@ fn resolve_login_method(method: Option<&str>, available: &[AuthMethod]) -> Resul
         .first()
         .copied()
         .ok_or_else(|| anyhow::anyhow!("provider does not advertise any authentication methods"))
+}
+
+fn resolve_login_method_with_context(
+    provider: &str,
+    method: Option<&str>,
+    available: &[AuthMethod],
+    from_env_supplied: bool,
+) -> Result<AuthMethod> {
+    if from_env_supplied && method.is_none() {
+        if available.contains(&AuthMethod::ApiKey) {
+            return Ok(AuthMethod::ApiKey);
+        }
+        anyhow::bail!("provider={provider} does not support api_key login via --from-env");
+    }
+
+    if method.is_some() {
+        return resolve_login_method(method, available);
+    }
+
+    if available.len() > 1 && is_interactive_terminal() {
+        return prompt_for_login_method(provider, available);
+    }
+
+    resolve_login_method(None, available)
+}
+
+fn is_interactive_terminal() -> bool {
+    std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
+}
+
+fn prompt_for_login_method(provider: &str, available: &[AuthMethod]) -> Result<AuthMethod> {
+    let mut stderr = std::io::stderr().lock();
+    writeln!(
+        stderr,
+        "provider={provider} supports multiple auth methods:"
+    )
+    .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+    for (idx, method) in available.iter().enumerate() {
+        writeln!(stderr, "  {}. {}", idx + 1, method.as_str())
+            .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+    }
+    write!(
+        stderr,
+        "select auth method [1-{}] (default 1): ",
+        available.len()
+    )
+    .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+    stderr
+        .flush()
+        .map_err(|err| anyhow::anyhow!("stderr flush failed: {err}"))?;
+
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .map_err(|err| anyhow::anyhow!("failed to read auth method selection: {err}"))?;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Ok(available[0]);
+    }
+    let index: usize = trimmed
+        .parse()
+        .map_err(|_| anyhow::anyhow!("invalid auth method selection: {trimmed}"))?;
+    let zero_based = index
+        .checked_sub(1)
+        .ok_or_else(|| anyhow::anyhow!("invalid auth method selection: {trimmed}"))?;
+    available
+        .get(zero_based)
+        .copied()
+        .ok_or_else(|| anyhow::anyhow!("invalid auth method selection: {trimmed}"))
+}
+
+fn prompt_for_api_key(provider: &str) -> Result<String> {
+    if !is_interactive_terminal() {
+        anyhow::bail!(
+            "method=api_key requires --from-env in non-interactive mode: `rustcode auth login {provider} --from-env <ENV_VAR>`"
+        );
+    }
+
+    let mut stderr = std::io::stderr().lock();
+    write!(stderr, "enter API key for provider={provider}: ")
+        .map_err(|err| anyhow::anyhow!("stderr write failed: {err}"))?;
+    stderr
+        .flush()
+        .map_err(|err| anyhow::anyhow!("stderr flush failed: {err}"))?;
+
+    let mut key = String::new();
+    std::io::stdin()
+        .read_line(&mut key)
+        .map_err(|err| anyhow::anyhow!("failed to read api key input: {err}"))?;
+    let key = key.trim().to_string();
+    if key.is_empty() {
+        anyhow::bail!("api key input must not be empty");
+    }
+    Ok(key)
 }
 
 fn persist_oauth_or_api_key(
