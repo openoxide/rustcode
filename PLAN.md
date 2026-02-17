@@ -116,7 +116,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: engine test verifies plugin `on_event` hook receives emitted events (2026-02-17)
 
 8. TUI Integration
-- Status: in_progress
+- Status: completed
 - Deliverables:
   - Event-consumer-only TUI
   - Dedicated UI loop
@@ -125,6 +125,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - TUI smoke tests
   - manual interaction checklist
   - Pass (partial): event-consumer TUI loop wired in CLI path (`rustcode-cli tui`) with integration + unit tests (2026-02-17)
+  - Pass: structured UI input abstractions (`Domain`/`Resize`/`Shutdown`) with TUI adapter tests (2026-02-17)
+  - Pass: CLI integration confirms TUI routing uses consumer loop and exits cleanly (2026-02-17)
 
 9. Hardening and Benchmarks
 - Status: in_progress
@@ -179,9 +181,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Complete TUI signal/resize handling contracts and smoke checklist.
-2. Add structured UI event abstractions (resize/shutdown) for automatable TUI tests.
-3. Start long-running idle memory drift probe for benchmark hardening.
+1. Start long-running idle memory drift probe for benchmark hardening.
+2. Add benchmark result persistence (JSON artifact) for trend tracking.
+3. Prepare release-prep docs pass (operator/developer quickstart).
 
 ## Update Log
 - 2026-02-17:
@@ -249,3 +251,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Ran benchmark harness with elevated permissions to capture system metrics:
     - startup (`5` runs): reported `0.00s` real per run on this host timer granularity.
     - memory probe: `maximum resident set size: 5,242,880`, `peak memory footprint: 2,064,696`.
+  - Completed Milestone 8:
+    - Added `UiInput` abstractions (`Domain`, `Resize`, `Shutdown`) and `UiSummary` counters.
+    - Added domain-event adapter (`from_domain_receiver`) for TUI event consumption.
+    - Added TUI unit tests for resize/shutdown semantics and maintained CLI TUI integration coverage.

@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
     drop(publisher);
 
     if launch_tui {
-        let _summary = TuiApp::new(event_rx)
+        let _summary = TuiApp::from_domain_receiver(event_rx)
             .run()
             .await
             .context("tui event loop failed")?;
