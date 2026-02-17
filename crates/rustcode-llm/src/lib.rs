@@ -101,7 +101,48 @@ pub struct ProviderDiagnostics {
     pub api_key_source: ApiKeySource,
     pub api_key_env_candidates: Vec<String>,
     pub missing: Vec<String>,
+    pub policy_score: Option<i32>,
+    pub policy_selected: bool,
+    pub policy_available: Option<bool>,
 }
+
+#[derive(Debug, Clone, Copy)]
+struct BackendPolicyCandidate {
+    provider_id: &'static str,
+    provider_agnostic: bool,
+    automation_skills: bool,
+    open_source: bool,
+    lsp_support: bool,
+    privacy: bool,
+    subscription_required: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct BackendPolicyEvaluation {
+    score: i32,
+    available: bool,
+}
+
+const BACKEND_POLICY_CANDIDATES: &[BackendPolicyCandidate] = &[
+    BackendPolicyCandidate {
+        provider_id: "openrouter",
+        provider_agnostic: true,
+        automation_skills: false,
+        open_source: true,
+        lsp_support: true,
+        privacy: true,
+        subscription_required: false,
+    },
+    BackendPolicyCandidate {
+        provider_id: "openai",
+        provider_agnostic: false,
+        automation_skills: true,
+        open_source: false,
+        lsp_support: false,
+        privacy: false,
+        subscription_required: true,
+    },
+];
 
 pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmError> {
     let provider = resolve_provider(config)?;
@@ -161,6 +202,10 @@ pub fn diagnose_provider(
     config: &ResolvedConfig,
     provider_id: Option<&str>,
 ) -> Result<ProviderDiagnostics, LlmError> {
+    let policy_selected_provider = select_provider_by_policy(config).map(|value| value.to_string());
+    let policy_eval_for_input =
+        provider_id.and_then(|value| evaluate_backend_policy(config, value));
+
     let mut effective = config.clone();
     if let Some(provider) = provider_id {
         if !provider.eq_ignore_ascii_case(&effective.llm_provider) {
@@ -183,6 +228,11 @@ pub fn diagnose_provider(
     if resolved.requires_api_key && resolved.api_key.is_none() {
         missing.push("api_key".to_string());
     }
+    let policy_eval =
+        policy_eval_for_input.or_else(|| evaluate_backend_policy(config, &resolved.provider_id));
+    let policy_selected = policy_selected_provider
+        .as_deref()
+        .is_some_and(|value| value.eq_ignore_ascii_case(&resolved.provider_id));
 
     Ok(ProviderDiagnostics {
         provider_id: resolved.provider_id,
@@ -193,18 +243,26 @@ pub fn diagnose_provider(
         api_key_source: resolved.api_key_source,
         api_key_env_candidates: resolved.api_key_env_candidates,
         missing,
+        policy_score: policy_eval.map(|value| value.score),
+        policy_selected,
+        policy_available: policy_eval.map(|value| value.available),
     })
 }
 
 fn resolve_provider(config: &ResolvedConfig) -> Result<ResolvedProvider, LlmError> {
     let (model_provider, _model_id) = parse_model_prefix(&config.model).unwrap_or(("", ""));
-    let provider_id = if !config.llm_provider.trim().is_empty() && config.llm_provider != "null" {
-        config.llm_provider.clone()
-    } else if !model_provider.is_empty() {
-        model_provider.to_string()
-    } else {
-        "null".to_string()
-    };
+    let provider_id: String =
+        if !config.llm_provider.trim().is_empty() && config.llm_provider != "null" {
+            config.llm_provider.clone()
+        } else if !model_provider.is_empty() {
+            model_provider.to_string()
+        } else if config.allow_network {
+            select_provider_by_policy(config)
+                .unwrap_or("null")
+                .to_string()
+        } else {
+            "null".to_string()
+        };
 
     let preset = provider_preset(&provider_id);
     let base_url = config
@@ -260,6 +318,68 @@ fn resolve_api_key(
     }
 
     (None, ApiKeySource::None)
+}
+
+fn select_provider_by_policy(config: &ResolvedConfig) -> Option<&'static str> {
+    BACKEND_POLICY_CANDIDATES
+        .iter()
+        .filter_map(|candidate| {
+            evaluate_backend_policy(config, candidate.provider_id).map(|evaluation| {
+                (
+                    candidate.provider_id,
+                    evaluation.score,
+                    evaluation.available,
+                )
+            })
+        })
+        .max_by(|left, right| {
+            left.1
+                .cmp(&right.1)
+                .then_with(|| left.2.cmp(&right.2))
+                .then_with(|| left.0.cmp(right.0))
+        })
+        .map(|entry| entry.0)
+}
+
+fn evaluate_backend_policy(
+    config: &ResolvedConfig,
+    provider_id: &str,
+) -> Option<BackendPolicyEvaluation> {
+    let candidate = BACKEND_POLICY_CANDIDATES
+        .iter()
+        .find(|candidate| candidate.provider_id.eq_ignore_ascii_case(provider_id))?;
+
+    let policy = &config.backend_selection;
+    let mut score = 0_i32;
+    if candidate.provider_agnostic {
+        score += policy.provider_agnostic_weight;
+    }
+    if candidate.automation_skills {
+        score += policy.automation_skills_weight;
+    }
+    if candidate.open_source {
+        score += policy.open_source_weight;
+    }
+    if candidate.lsp_support {
+        score += policy.lsp_support_weight;
+    }
+    if candidate.privacy {
+        score += policy.privacy_weight;
+    }
+    if candidate.subscription_required {
+        score -= policy.subscription_penalty;
+    }
+
+    let preset = provider_preset(candidate.provider_id);
+    let env_candidates = collect_provider_api_key_envs(candidate.provider_id, &preset);
+    let (api_key, _) = resolve_api_key(config, &env_candidates, candidate.provider_id);
+    let requires_api_key = preset.requires_api_key || !env_candidates.is_empty();
+    let available = !requires_api_key || api_key.is_some();
+    if !available {
+        score -= 1000;
+    }
+
+    Some(BackendPolicyEvaluation { score, available })
 }
 
 fn collect_provider_api_key_envs(provider_id: &str, preset: &ProviderPreset) -> Vec<String> {
@@ -916,6 +1036,49 @@ mod tests {
         assert!(diag.endpoint.is_some());
         assert!(diag.requires_api_key);
         assert!(diag.missing.iter().any(|item| item == "api_key"));
+    }
+
+    #[test]
+    fn policy_selection_prefers_available_backend() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        std::env::remove_var("OPENROUTER_API_KEY");
+        std::env::set_var("OPENAI_API_KEY", "policy-openai-key");
+
+        let cfg = ResolvedConfig {
+            allow_network: true,
+            model: "gpt-5".to_string(),
+            ..ResolvedConfig::default()
+        };
+
+        let provider = resolve_provider(&cfg).expect("provider must resolve");
+        assert_eq!(provider.provider_id, "openai");
+        std::env::remove_var("OPENAI_API_KEY");
+    }
+
+    #[test]
+    fn policy_diagnostics_surface_score_and_selection() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        std::env::set_var("OPENROUTER_API_KEY", "policy-openrouter-key");
+        std::env::remove_var("OPENAI_API_KEY");
+
+        let cfg = ResolvedConfig {
+            allow_network: true,
+            model: "gpt-5".to_string(),
+            ..ResolvedConfig::default()
+        };
+
+        let openrouter =
+            diagnose_provider(&cfg, Some("openrouter")).expect("diagnostic should resolve");
+        assert_eq!(openrouter.policy_score, Some(6));
+        assert_eq!(openrouter.policy_available, Some(true));
+        assert!(openrouter.policy_selected);
+
+        let openai = diagnose_provider(&cfg, Some("openai")).expect("diagnostic should resolve");
+        assert_eq!(openai.policy_score, Some(-998));
+        assert_eq!(openai.policy_available, Some(false));
+        assert!(!openai.policy_selected);
+
+        std::env::remove_var("OPENROUTER_API_KEY");
     }
 
     fn make_temp_file_path(name: &str) -> PathBuf {

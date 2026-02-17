@@ -417,6 +417,9 @@ fn handle_models_command(
                     "api_key_source": render_api_key_source(&diagnostics.api_key_source),
                     "api_key_env_candidates": diagnostics.api_key_env_candidates,
                     "missing": diagnostics.missing,
+                    "policy_score": diagnostics.policy_score,
+                    "policy_selected": diagnostics.policy_selected,
+                    "policy_available": diagnostics.policy_available,
                     "models": model_ids,
                 }
             });
@@ -465,6 +468,21 @@ fn handle_models_command(
                     diagnostics.missing.join(",")
                 }
             ))?
+            || !write_stdout_line(&format!(
+                "policy_score={}",
+                diagnostics
+                    .policy_score
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "<n/a>".to_string())
+            ))?
+            || !write_stdout_line(&format!("policy_selected={}", diagnostics.policy_selected))?
+            || !write_stdout_line(&format!(
+                "policy_available={}",
+                diagnostics
+                    .policy_available
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "<n/a>".to_string())
+            ))?
         {
             return Ok(());
         }
@@ -497,6 +515,9 @@ fn handle_models_command(
                 "endpoint": diagnostics.endpoint,
                 "api_key_source": render_api_key_source(&diagnostics.api_key_source),
                 "missing": diagnostics.missing,
+                "policy_score": diagnostics.policy_score,
+                "policy_selected": diagnostics.policy_selected,
+                "policy_available": diagnostics.policy_available,
             }));
         }
         let payload = serde_json::json!({
@@ -521,11 +542,20 @@ fn handle_models_command(
             diagnostics.missing.join("|")
         };
         if !write_stdout_line(&format!(
-            "{provider_id}\tmodels={}\tname={display_name}\tprotocol={}\tendpoint={}\tapi_key_source={}\tmissing={missing}",
+            "{provider_id}\tmodels={}\tname={display_name}\tprotocol={}\tendpoint={}\tapi_key_source={}\tmissing={missing}\tpolicy_score={}\tpolicy_selected={}\tpolicy_available={}",
             entry.models.len(),
             render_protocol(&diagnostics.protocol),
             diagnostics.endpoint.as_deref().unwrap_or("<unset>"),
             render_api_key_source(&diagnostics.api_key_source),
+            diagnostics
+                .policy_score
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "<n/a>".to_string()),
+            diagnostics.policy_selected,
+            diagnostics
+                .policy_available
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "<n/a>".to_string()),
         ))? {
             return Ok(());
         }

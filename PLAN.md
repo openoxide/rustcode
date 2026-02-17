@@ -443,6 +443,27 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `rustcode auth login openai --no-wait --timeout-secs 10` (real device-flow endpoint)
     - `rustcode auth login github-copilot --no-wait --timeout-secs 10` (real device-flow endpoint)
 
+24. Runtime Backend Policy Routing + Models Diagnostics
+- Status: completed
+- Deliverables:
+  - Wired backend-selection policy into runtime provider routing when provider/model are unpinned and `allow_network=true`.
+  - Added policy candidate evaluation for `openrouter` and `openai`.
+  - Added credential-availability-aware policy scoring (missing key receives a strong penalty).
+  - Extended provider diagnostics and `models` output (human + JSON) with:
+    - `policy_score`
+    - `policy_selected`
+    - `policy_available`
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: unit tests:
+    - `policy_selection_prefers_available_backend`
+    - `policy_diagnostics_surface_score_and_selection`
+  - Pass: integration tests:
+    - `models_summary_includes_diagnostics_columns`
+    - `models_json_summary_is_parseable`
+    - `models_json_provider_detail_includes_models_array`
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -477,7 +498,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
-2. Wire backend selection policy into runtime provider-routing decisions and expose scoring diagnostics in CLI output.
+2. Align GitLab OAuth browser defaults with opencode behavior for gitlab.com vs self-hosted app credentials.
 3. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 
 ## Update Log
@@ -712,6 +733,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Validation pass:
     - `cargo test --workspace`
     - `./scripts/ci_matrix.sh`
+  - Completed Milestone 24 runtime backend policy routing:
+    - provider auto-selection now evaluates backend policy weights and credential availability.
+    - diagnostics and `models` output include `policy_score`, `policy_selected`, `policy_available`.
+    - validated with new llm unit tests, updated CLI integration tests, and full CI matrix.
   - Completed Milestone 21 OAuth credential runtime consumption:
     - `rustcode-llm` now resolves OAuth access tokens from auth store when env/config keys are absent.
     - added unit coverage for OAuth fallback (`resolves_oauth_access_from_auth_store_when_env_missing`).

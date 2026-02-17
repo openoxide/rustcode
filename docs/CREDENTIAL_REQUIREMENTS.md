@@ -15,7 +15,7 @@ This document is the single source of truth for runtime credentials required by 
 | `openai` | `oauth_device_code` | none | none | Uses built-in client ID from opencode/codex-compatible flow. |
 | `openai` | `oauth_browser` | none | none | Uses built-in client ID; callback port set by `--oauth-port`. |
 | `openai` | `api_key` | `--from-env <ENV_VAR>` value | none | Stored as API key credential. |
-| `github-copilot` | `oauth_device_code` | none | `--domain` for enterprise variants | Uses built-in Copilot client ID. |
+| `github-copilot` | `oauth_device_code` | none | `--domain` for enterprise variants | Uses built-in Copilot client ID `Ov23li8tweQw6odWQebz`. |
 | `github-copilot-enterprise` | `oauth_device_code` | none | `--domain` recommended | Domain should target enterprise host. |
 | `github-copilot` / `github-copilot-enterprise` | `api_key` | `--from-env <ENV_VAR>` value | none | Manual token mode. |
 | `gitlab` | `oauth_browser` | `GITLAB_OAUTH_CLIENT_ID` | `GITLAB_OAUTH_CLIENT_SECRET`, `GITLAB_INSTANCE_URL` | Uses PKCE + localhost callback + `/oauth/token`. |

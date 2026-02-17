@@ -449,6 +449,9 @@ fn models_summary_includes_diagnostics_columns() {
     assert!(stdout.contains("protocol="), "stdout: {stdout}");
     assert!(stdout.contains("api_key_source="), "stdout: {stdout}");
     assert!(stdout.contains("missing="), "stdout: {stdout}");
+    assert!(stdout.contains("policy_score="), "stdout: {stdout}");
+    assert!(stdout.contains("policy_selected="), "stdout: {stdout}");
+    assert!(stdout.contains("policy_available="), "stdout: {stdout}");
 }
 
 #[test]
@@ -480,6 +483,11 @@ fn models_json_summary_is_parseable() {
     let parsed: Value = serde_json::from_str(stdout.trim()).expect("stdout must be valid json");
     assert_eq!(parsed["schema_version"].as_u64(), Some(1));
     assert_eq!(parsed["providers"].as_array().map(Vec::len), Some(2));
+    assert!(parsed["providers"]
+        .as_array()
+        .expect("providers must be array")
+        .iter()
+        .all(|provider| provider.get("policy_score").is_some()));
 }
 
 #[test]
@@ -514,6 +522,8 @@ fn models_json_provider_detail_includes_models_array() {
         parsed["provider"]["models"].as_array().map(Vec::len),
         Some(2)
     );
+    assert!(parsed["provider"]["policy_score"].is_null());
+    assert_eq!(parsed["provider"]["policy_selected"].as_bool(), Some(false));
     assert!(parsed["provider"]["models"]
         .as_array()
         .expect("models must be array")
