@@ -142,13 +142,15 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass (partial): drift probe mode added and exercised (`drift 12 4`) with stable sampled RSS (2026-02-17)
 
 10. Documentation and Release Prep
-- Status: pending
+- Status: in_progress
 - Deliverables:
   - architecture doc
   - operator/developer docs
   - changelog policy
 - Validation:
   - docs build + command examples verified
+  - Pass (partial): added `docs/QUICKSTART.md` and `docs/CHANGELOG_POLICY.md` (2026-02-17)
+  - Pass (partial): quickstart command set executed and verified on local workspace (2026-02-17)
 
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
@@ -182,9 +184,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Prepare release-prep docs pass (operator/developer quickstart).
-2. Add `serve`-mode long-run benchmark once service path becomes persistent.
-3. Add trend-comparison utility on top of `benchmarks/latest.json`.
+1. Add `serve`-mode long-run benchmark once service path becomes persistent.
+2. Add trend-comparison utility on top of `benchmarks/latest.json`.
+3. Draft first release note from `PLAN.md` + changelog policy.
 
 ## Update Log
 - 2026-02-17:
@@ -262,3 +264,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added benchmark artifact recorder:
     - `scripts/benchmark_record.sh benchmarks/latest.json`
     - persists startup/memory/drift outputs in JSON for historical tracking.
+  - Started Milestone 10:
+    - Added `docs/QUICKSTART.md` with developer/operator command flows.
+    - Added `docs/CHANGELOG_POLICY.md` with entry format and release gate rules.
+    - Executed quickstart command matrix to verify docs align with current CLI behavior.
