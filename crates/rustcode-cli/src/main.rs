@@ -3,6 +3,7 @@ use std::time::SystemTime;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use rustcode_auth::{methods_for_provider, oauth_login_hint, AuthStore, StoredCredential};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
@@ -20,7 +21,7 @@ use rustcode_tui::TuiApp;
 mod cli;
 mod render;
 
-use cli::{map_command, Cli, TopCommand};
+use cli::{map_command, AuthCommand, Cli, TopCommand};
 use render::{render_event, OutputFormat};
 
 #[tokio::main]
@@ -28,6 +29,9 @@ async fn main() -> Result<()> {
     init_tracing()?;
 
     let cli = Cli::parse();
+    if let TopCommand::Auth { command } = &cli.command {
+        return handle_auth_command(command.clone());
+    }
     let launch_tui = matches!(&cli.command, TopCommand::Tui);
     let cwd = std::env::current_dir().context("failed to resolve current directory")?;
     let output_format = OutputFormat::from_json_flag(cli.json);
@@ -96,6 +100,75 @@ async fn main() -> Result<()> {
         Ok(()) | Err(ExecutionError::Cancelled) => Ok(()),
         Err(err) => Err(anyhow::anyhow!("command execution failed: {err}")),
     }
+}
+
+fn handle_auth_command(command: AuthCommand) -> Result<()> {
+    let store = AuthStore::open_default();
+    match command {
+        AuthCommand::Methods { provider } => {
+            let methods = methods_for_provider(&provider);
+            let rendered = methods
+                .into_iter()
+                .map(|method| method.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            println!("provider={provider}");
+            println!("methods={rendered}");
+        }
+        AuthCommand::Status { provider } => {
+            let methods = methods_for_provider(&provider);
+            let rendered_methods = methods
+                .into_iter()
+                .map(|method| method.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let credential = match store.get(&provider)? {
+                Some(StoredCredential::ApiKey { .. }) => "stored:api_key",
+                Some(StoredCredential::OAuth { .. }) => "stored:oauth",
+                None => "none",
+            };
+            println!("provider={provider}");
+            println!("methods={rendered_methods}");
+            println!("credential={credential}");
+            println!("auth_file={}", store.path().display());
+        }
+        AuthCommand::SetKey { provider, from_env } => {
+            let key = std::env::var(&from_env).with_context(|| {
+                format!("environment variable {from_env} is not set; cannot store key")
+            })?;
+            store.set_api_key(&provider, &key)?;
+            println!("stored api key for provider={provider}");
+            println!("auth_file={}", store.path().display());
+        }
+        AuthCommand::Remove { provider } => {
+            let removed = store.remove(&provider)?;
+            println!(
+                "{} credential for provider={provider}",
+                if removed { "removed" } else { "no stored" }
+            );
+            println!("auth_file={}", store.path().display());
+        }
+        AuthCommand::Login { provider } => {
+            let methods = methods_for_provider(&provider);
+            if !methods
+                .iter()
+                .any(|method| method.as_str() == "oauth_device_code")
+            {
+                anyhow::bail!(
+                    "provider={provider} does not advertise oauth device login; use `rustcode auth set-key {provider} --from-env <ENV_VAR>`"
+                );
+            }
+            let hint = oauth_login_hint(&provider).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "oauth login adapter for provider={provider} is not implemented yet"
+                )
+            })?;
+            println!("provider={provider}");
+            println!("authorize_url={}", hint.authorize_url);
+            println!("instructions={}", hint.instructions);
+        }
+    }
+    Ok(())
 }
 
 fn init_tracing() -> Result<()> {

@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue, AUTHORIZATION};
+use rustcode_auth::AuthStore;
 use rustcode_core::config::ResolvedConfig;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -71,6 +72,7 @@ struct ResolvedProvider {
     base_url: Option<String>,
     api_key: Option<String>,
     requires_api_key: bool,
+    api_key_env_candidates: Vec<String>,
 }
 
 pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmError> {
@@ -85,16 +87,13 @@ pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmEr
                 ));
             }
 
-            let base_url = provider.base_url.ok_or_else(|| {
-                LlmError::Config(format!(
-                    "provider '{}' requires an LLM base URL; set [llm].base_url",
-                    provider.provider_id
-                ))
-            })?;
+            let base_url = provider
+                .base_url
+                .ok_or_else(|| LlmError::Config(missing_base_url_message(&provider.provider_id)))?;
             if provider.requires_api_key && provider.api_key.is_none() {
-                return Err(LlmError::Config(format!(
-                    "provider '{}' requires an API key; set [llm].api_key_env and export the variable",
-                    provider.provider_id
+                return Err(LlmError::Config(missing_api_key_message(
+                    &provider.provider_id,
+                    &provider.api_key_env_candidates,
                 )));
             }
 
@@ -116,10 +115,10 @@ pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmEr
                 .base_url
                 .unwrap_or_else(|| "https://api.anthropic.com".to_string());
             let api_key = provider.api_key.ok_or_else(|| {
-                LlmError::Config(
-                    "provider 'anthropic' requires ANTHROPIC_API_KEY or [llm].api_key_env"
-                        .to_string(),
-                )
+                LlmError::Config(missing_api_key_message(
+                    &provider.provider_id,
+                    &provider.api_key_env_candidates,
+                ))
             })?;
             Ok(Arc::new(AnthropicClient::new(
                 provider.provider_id,
@@ -145,30 +144,68 @@ fn resolve_provider(config: &ResolvedConfig) -> Result<ResolvedProvider, LlmErro
         .llm_base_url
         .clone()
         .or_else(|| preset.default_base_url.clone());
-    let api_key = resolve_api_key(config, &preset);
+    let api_key_env_candidates = collect_provider_api_key_envs(&provider_id, &preset);
+    let api_key = resolve_api_key(config, &api_key_env_candidates, &provider_id);
+    let requires_api_key = preset.requires_api_key || !api_key_env_candidates.is_empty();
 
     Ok(ResolvedProvider {
         provider_id,
         protocol: preset.protocol,
         base_url,
         api_key,
-        requires_api_key: preset.requires_api_key,
+        requires_api_key,
+        api_key_env_candidates,
     })
 }
 
-fn resolve_api_key(config: &ResolvedConfig, preset: &ProviderPreset) -> Option<String> {
+fn resolve_api_key(
+    config: &ResolvedConfig,
+    env_candidates: &[String],
+    provider_id: &str,
+) -> Option<String> {
     if let Some(explicit_env) = config.llm_api_key_env.as_ref() {
         if let Some(value) = read_config_or_env(config, explicit_env) {
             return Some(value);
         }
     }
 
-    for env_name in &preset.default_api_key_envs {
+    for env_name in env_candidates {
         if let Some(value) = read_config_or_env(config, env_name) {
             return Some(value);
         }
     }
-    None
+
+    let store = AuthStore::open_default();
+    store.get_api_key(provider_id).ok().flatten()
+}
+
+fn collect_provider_api_key_envs(provider_id: &str, preset: &ProviderPreset) -> Vec<String> {
+    let mut names = preset.default_api_key_envs.clone();
+    if let Some(meta) = models_provider_metadata(provider_id) {
+        for candidate in &meta.env {
+            if !names.iter().any(|existing| existing == candidate) {
+                names.push(candidate.clone());
+            }
+        }
+    }
+    names
+}
+
+fn missing_api_key_message(provider_id: &str, env_candidates: &[String]) -> String {
+    if env_candidates.is_empty() {
+        format!(
+            "provider '{provider_id}' requires an API key; set [llm].api_key_env and export the variable"
+        )
+    } else {
+        format!(
+            "provider '{provider_id}' requires an API key; expected one of env vars: {} (or set [llm].api_key_env)",
+            env_candidates.join(", ")
+        )
+    }
+}
+
+fn missing_base_url_message(provider_id: &str) -> String {
+    format!("provider '{provider_id}' requires an LLM base URL; set [llm].base_url")
 }
 
 fn read_config_or_env(config: &ResolvedConfig, name: &str) -> Option<String> {
@@ -606,7 +643,13 @@ fn truncate_for_error(body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rustcode_auth::AuthStore;
     use rustcode_core::config::ResolvedConfig;
+    use std::path::PathBuf;
+    use std::sync::{LazyLock, Mutex};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    static ENV_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
     #[test]
     fn resolves_provider_from_model_prefix_when_provider_is_null() {
@@ -692,5 +735,35 @@ mod tests {
             extract_anthropic_text(&payload).as_deref(),
             Some("hello world")
         );
+    }
+
+    #[test]
+    fn resolves_api_key_from_auth_store_when_env_missing() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        let auth_path = make_temp_file_path("llm-auth-store");
+        let store = AuthStore::with_path(auth_path.clone());
+        store
+            .set_api_key("openrouter", "stored-secret")
+            .expect("must write auth key");
+
+        std::env::set_var("RUSTCODE_AUTH_FILE", &auth_path);
+        let cfg = ResolvedConfig {
+            allow_network: true,
+            llm_provider: "openrouter".to_string(),
+            ..ResolvedConfig::default()
+        };
+
+        let provider = resolve_provider(&cfg).expect("provider must resolve");
+        assert_eq!(provider.api_key.as_deref(), Some("stored-secret"));
+        std::env::remove_var("RUSTCODE_AUTH_FILE");
+    }
+
+    fn make_temp_file_path(name: &str) -> PathBuf {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos();
+        let pid = std::process::id();
+        std::env::temp_dir().join(format!("rustcode-llm-{name}-{pid}-{now}.json"))
     }
 }

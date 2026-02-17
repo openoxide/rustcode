@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+rustcode-auth = { path = "../rustcode-auth" }
 rustcode-config = { path = "../rustcode-config" }
 rustcode-core = { path = "../rustcode-core" }
 rustcode-engine = { path = "../rustcode-engine" }

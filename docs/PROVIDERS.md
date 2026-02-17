@@ -63,6 +63,13 @@ api_key_env = "OPENROUTER_API_KEY"
 OPENROUTER_API_KEY=... rustcode run "hello"
 ```
 
+Or store once in the local auth store:
+
+```bash
+OPENROUTER_API_KEY=... rustcode auth set-key openrouter --from-env OPENROUTER_API_KEY
+rustcode auth status openrouter
+```
+
 Ollama local example:
 
 ```toml
@@ -76,3 +83,13 @@ provider = "ollama"
 ```bash
 rustcode run "summarize this directory"
 ```
+
+For providers with OAuth-style login (current hints: GitHub Copilot, GitLab):
+
+```bash
+rustcode auth login github-copilot
+```
+
+Additional OAuth-hint provider currently mapped from opencode plugin references: `openai`.
+
+This prints authorization URL + instructions; token exchange adapters are a separate milestone.

@@ -30,7 +30,7 @@ pub struct Cli {
     pub trust_project_config: bool,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug, Clone, Subcommand)]
 pub enum TopCommand {
     Run {
         prompt: String,
@@ -59,7 +59,32 @@ pub enum TopCommand {
         #[arg(long, default_value = "127.0.0.1:4317")]
         listen: String,
     },
+    Auth {
+        #[command(subcommand)]
+        command: AuthCommand,
+    },
     Version,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum AuthCommand {
+    Methods {
+        provider: String,
+    },
+    Status {
+        provider: String,
+    },
+    SetKey {
+        provider: String,
+        #[arg(long = "from-env")]
+        from_env: String,
+    },
+    Remove {
+        provider: String,
+    },
+    Login {
+        provider: String,
+    },
 }
 
 pub fn map_command(command: TopCommand) -> Command {
@@ -72,6 +97,9 @@ pub fn map_command(command: TopCommand) -> Command {
         TopCommand::Edit { path, from, to } => Command::Edit { path, from, to },
         TopCommand::Tui => Command::Tui,
         TopCommand::Serve { listen } => Command::Serve { listen },
+        TopCommand::Auth { .. } => {
+            panic!("auth command is handled in cli main before engine dispatch")
+        }
         TopCommand::Version => Command::Version,
     }
 }
@@ -161,5 +189,28 @@ mod tests {
             Some("https://openrouter.ai/api/v1")
         );
         assert_eq!(cli.llm_api_key_env.as_deref(), Some("OPENROUTER_API_KEY"));
+    }
+
+    #[test]
+    fn auth_set_key_parses_env_source() {
+        let cli = Cli::try_parse_from([
+            "rustcode",
+            "auth",
+            "set-key",
+            "openrouter",
+            "--from-env",
+            "OPENROUTER_API_KEY",
+        ])
+        .expect("cli should parse");
+
+        match cli.command {
+            TopCommand::Auth {
+                command: AuthCommand::SetKey { provider, from_env },
+            } => {
+                assert_eq!(provider, "openrouter");
+                assert_eq!(from_env, "OPENROUTER_API_KEY");
+            }
+            _ => panic!("expected auth set-key command"),
+        }
     }
 }

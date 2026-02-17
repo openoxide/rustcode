@@ -180,6 +180,29 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - missing-key guard: provider init fails with actionable message
     - live transport path exercised with dummy key against OpenRouter endpoint (expected network/authorization failure path captured)
 
+12. Provider Auth Boundary
+- Status: completed
+- Deliverables:
+  - New `rustcode-auth` crate for credential storage and auth method modeling.
+  - Local auth store (`RUSTCODE_AUTH_FILE` override, default XDG/HOME path, atomic writes, unix `0600` perms).
+  - CLI auth commands:
+    - `auth methods <provider>`
+    - `auth status <provider>`
+    - `auth set-key <provider> --from-env <ENV_VAR>`
+    - `auth remove <provider>`
+    - `auth login <provider>` (OAuth hint endpoint/instructions boundary)
+  - LLM runtime fallback to stored API key when env/config key is not set.
+  - OAuth-capable provider mapping aligned with opencode plugin/docs references:
+    - `openai`
+    - `github-copilot`
+    - `github-copilot-enterprise`
+    - `gitlab`
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration test for auth set/status round-trip (`crates/rustcode-cli/tests/integration_cli.rs`)
+  - Pass: live unsandboxed OpenRouter execution via stored key path returns model output (`OK`) (2026-02-17)
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -213,7 +236,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
-2. Add provider login/OAuth adapter boundary for non-API-key flows (Copilot/GitLab class).
+2. Implement real OAuth token exchange adapters (device/browser flows) behind `rustcode-auth`.
 3. Add provider/model discovery command (`rustcode models`) with resolved provider diagnostics.
 
 ## Update Log
@@ -299,13 +322,23 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - Added models metadata fallback in `rustcode-llm`:
       - loads provider metadata from `RUSTCODE_MODELS_PATH` or `~/.cache/opencode/models.json`
       - inherits provider env keys/endpoints when static preset data is missing.
+    - Added Milestone 12 auth subsystem:
+      - new crate `crates/rustcode-auth`
+      - provider auth methods and OAuth login hint boundary
+      - persistent auth store with file permission hardening
+      - CLI auth command family (`methods`, `status`, `set-key`, `remove`, `login`)
+      - `rustcode-llm` fallback to stored API keys.
+    - Referenced opencode code/docs directly for OAuth-provider parity:
+      - `packages/opencode/src/plugin/codex.ts` (OpenAI OAuth + API-key dual method)
+      - `packages/opencode/src/plugin/copilot.ts` (GitHub Copilot device OAuth)
+      - `packages/web/src/content/docs/providers.mdx` (OpenAI, GitHub Copilot, GitLab auth flows)
     - Ran validation:
       - `cargo fmt --all`
       - `cargo test --workspace`
       - `./scripts/ci_matrix.sh`
       - `./scripts/provider_matrix.sh`
       - runtime smoke probes for null/default, network guard, missing key guard, and remote transport error path.
-      - live OpenRouter key probe attempted; blocked by restricted network in execution environment (transport send failure), no key persisted to repository.
+      - unsandboxed live OpenRouter key probe through `rustcode` auth-store path succeeded, no key persisted to repository.
   - Ran benchmark harness with elevated permissions to capture system metrics:
     - startup (`5` runs): reported `0.00s` real per run on this host timer granularity.
     - memory probe: `maximum resident set size: 5,242,880`, `peak memory footprint: 2,064,696`.

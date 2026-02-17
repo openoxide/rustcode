@@ -4,6 +4,7 @@ members = [
   "crates/rustcode-core",
   "crates/rustcode-engine",
   "crates/rustcode-config",
+  "crates/rustcode-auth",
   "crates/rustcode-io",
   "crates/rustcode-plugins",
   "crates/rustcode-llm",

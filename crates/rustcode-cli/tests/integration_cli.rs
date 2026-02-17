@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
@@ -8,6 +9,15 @@ use serde_json::Value;
 
 fn rustcode_bin() -> &'static str {
     env!("CARGO_BIN_EXE_rustcode-cli")
+}
+
+fn make_temp_file_path(name: &str) -> PathBuf {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("time should be monotonic")
+        .as_nanos();
+    let pid = std::process::id();
+    std::env::temp_dir().join(format!("rustcode-cli-{name}-{pid}-{now}.json"))
 }
 
 fn http_request(port: u16, path: &str) -> std::io::Result<String> {
@@ -48,6 +58,47 @@ fn json_stream_includes_schema_version_and_completion_event() {
     }
 
     assert!(saw_completed, "expected Completed event in stream");
+}
+
+#[test]
+fn auth_set_key_and_status_round_trip() {
+    let auth_path = make_temp_file_path("auth-store");
+
+    let set_output = Command::new(rustcode_bin())
+        .args([
+            "auth",
+            "set-key",
+            "openrouter",
+            "--from-env",
+            "RUSTCODE_TEST_KEY",
+        ])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_TEST_KEY", "integration-secret")
+        .output()
+        .expect("must run rustcode auth set-key");
+
+    assert!(
+        set_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&set_output.stdout),
+        String::from_utf8_lossy(&set_output.stderr)
+    );
+
+    let status_output = Command::new(rustcode_bin())
+        .args(["auth", "status", "openrouter"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode auth status");
+
+    assert!(
+        status_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&status_output.stdout),
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+    let status_stdout = String::from_utf8(status_output.stdout).expect("stdout must be utf8");
+    assert!(status_stdout.contains("provider=openrouter"));
+    assert!(status_stdout.contains("credential=stored:api_key"));
 }
 
 #[cfg(unix)]

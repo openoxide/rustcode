@@ -32,6 +32,14 @@ cargo run -q -p rustcode-cli -- exec echo hi
 cargo run -q -p rustcode-cli -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY run "hello"
 ```
 
+## Auth Commands
+```bash
+cargo run -q -p rustcode-cli -- auth methods openrouter
+cargo run -q -p rustcode-cli -- auth set-key openrouter --from-env OPENROUTER_API_KEY
+cargo run -q -p rustcode-cli -- auth status openrouter
+cargo run -q -p rustcode-cli -- auth remove openrouter
+```
+
 ## TUI Path
 ```bash
 cargo run -q -p rustcode-cli -- tui
