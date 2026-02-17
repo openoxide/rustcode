@@ -41,7 +41,31 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
     if let TopCommand::Auth { command } = &cli.command {
-        return handle_auth_command(command.clone(), cli.json).await;
+        return match handle_auth_command(command.clone(), cli.json).await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                if cli.json {
+                    if let AuthCommand::Login {
+                        provider, method, ..
+                    } = command
+                    {
+                        let payload = serde_json::json!({
+                            "schema_version": 1,
+                            "command": "auth.login",
+                            "provider": provider.as_deref(),
+                            "method": method.as_deref(),
+                            "stage": "failed",
+                            "error_kind": classify_auth_error(&err),
+                            "error": err.to_string(),
+                        });
+                        if let Ok(serialized) = serde_json::to_string(&payload) {
+                            let _ = write_stdout_line(&serialized);
+                        }
+                    }
+                }
+                Err(err)
+            }
+        };
     }
     if let TopCommand::Models { provider } = &cli.command {
         let config = load_effective_config(&cli)?;
@@ -708,6 +732,25 @@ fn login_credential_kind(credential: &rustcode_auth::DeviceCodeFlowCredential) -
     } else {
         "stored:api_key"
     }
+}
+
+fn classify_auth_error(err: &anyhow::Error) -> &'static str {
+    let msg = err.to_string().to_ascii_lowercase();
+    if msg.contains("network")
+        || msg.contains("timed out")
+        || msg.contains("timeout")
+        || msg.contains("connection")
+        || msg.contains("failed to bind")
+    {
+        return "network";
+    }
+    if msg.contains("oauth polling failed")
+        || msg.contains("authorization failed")
+        || msg.contains("invalid oauth")
+    {
+        return "provider";
+    }
+    "validation"
 }
 
 #[derive(Debug, Deserialize)]

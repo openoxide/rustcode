@@ -651,6 +651,25 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth login openrouter --from-env ...`
     - `cargo run -q -p rustcode-cli -- --json auth login openai --method oauth_browser --no-wait`
 
+35. Auth Login JSON Failure Envelope
+- Status: completed
+- Deliverables:
+  - Added structured failure envelope for `--json auth login` command errors:
+    - `stage=failed`
+    - `error_kind` classification (`validation`, `provider`, `network`)
+    - `error` message
+    - provider/method hints when available
+  - Preserved non-JSON failure behavior (stderr + non-zero exit).
+  - Added integration coverage for providerless `--from-env` validation failure with JSON envelope assertions.
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration test:
+    - `auth_login_from_env_requires_provider_json_emits_failed_envelope`
+  - Pass: live CLI probe:
+    - `cargo run -q -p rustcode-cli -- --json auth login --from-env RUSTCODE_TEST_KEY` returned JSON failure envelope and non-zero exit.
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -687,10 +706,24 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 1. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 2. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
 3. Add initial MCP auth/login command surface parity for remote OAuth-capable servers.
-4. Add JSON stage envelopes for login failure/error paths so automation can classify transport vs provider failures.
+4. Add initial `mcp` command surface (`list`, `login`, `logout`) aligned with codex/opencode auth UX and JSON output support.
 
 ## Update Log
 - 2026-02-17:
+  - Completed Milestone 35 auth login JSON failure envelope:
+    - added structured `stage=failed` payloads for `--json auth login` errors.
+    - added `error_kind` classification (`validation`/`provider`/`network`).
+    - added integration test:
+      - `auth_login_from_env_requires_provider_json_emits_failed_envelope`
+  - Referenced parity sources before implementation:
+    - `opencode/packages/opencode/src/cli/cmd/auth.ts`
+    - `codex/codex-rs/cli/src/login.rs`
+  - Validation passed:
+    - `cargo fmt --all`
+    - `cargo test -p rustcode-cli`
+    - `./scripts/ci_matrix.sh`
+    - live probe:
+      - `cargo run -q -p rustcode-cli -- --json auth login --from-env RUSTCODE_TEST_KEY`
   - Completed Milestone 34 auth login JSON stage contract:
     - added JSON stage envelopes for login challenge/wait/poll/authorized phases.
     - added providerless `--json auth login` discovery payload.

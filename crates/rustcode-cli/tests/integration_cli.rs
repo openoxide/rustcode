@@ -557,6 +557,26 @@ fn auth_login_from_env_requires_provider() {
 }
 
 #[test]
+fn auth_login_from_env_requires_provider_json_emits_failed_envelope() {
+    let output = Command::new(rustcode_bin())
+        .args(["--json", "auth", "login", "--from-env", "RUSTCODE_TEST_KEY"])
+        .output()
+        .expect("must run rustcode auth login");
+
+    assert!(!output.status.success(), "command should fail");
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let payload: Value = serde_json::from_str(stdout.trim()).expect("stdout should be json");
+    assert_eq!(payload["schema_version"].as_u64(), Some(1));
+    assert_eq!(payload["command"].as_str(), Some("auth.login"));
+    assert_eq!(payload["stage"].as_str(), Some("failed"));
+    assert_eq!(payload["error_kind"].as_str(), Some("validation"));
+
+    let stderr = String::from_utf8(output.stderr).expect("stderr must be utf8");
+    assert!(stderr.contains("`--from-env` requires a provider"));
+}
+
+#[test]
 fn auth_login_api_key_provider_requires_from_env_in_non_interactive_mode() {
     let output = Command::new(rustcode_bin())
         .args(["auth", "login", "openrouter"])
