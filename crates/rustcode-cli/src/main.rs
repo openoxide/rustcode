@@ -256,6 +256,22 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                 format!("environment variable {from_env} is not set; cannot store key")
             })?;
             store.set_api_key(&provider, &key)?;
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "provider": provider,
+                    "action": "set_key",
+                    "credential": "stored:api_key",
+                    "auth_file": store.path().display().to_string(),
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize auth set-key json")?,
+                )? {
+                    return Ok(());
+                }
+                return Ok(());
+            }
             if !write_stdout_line(&format!("stored api key for provider={provider}"))?
                 || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
             {
@@ -291,6 +307,22 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                 expires_unix,
                 account_id.as_deref(),
             )?;
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "provider": provider,
+                    "action": "set_oauth",
+                    "credential": "stored:oauth",
+                    "auth_file": store.path().display().to_string(),
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize auth set-oauth json")?,
+                )? {
+                    return Ok(());
+                }
+                return Ok(());
+            }
             if !write_stdout_line(&format!("stored oauth credential for provider={provider}"))?
                 || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
             {
@@ -299,6 +331,22 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
         }
         AuthCommand::Remove { provider } => {
             let removed = store.remove(&provider)?;
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "provider": provider,
+                    "action": "remove",
+                    "removed": removed,
+                    "auth_file": store.path().display().to_string(),
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize auth remove json")?,
+                )? {
+                    return Ok(());
+                }
+                return Ok(());
+            }
             if !write_stdout_line(&format!(
                 "{} credential for provider={provider}",
                 if removed { "removed" } else { "no stored" }

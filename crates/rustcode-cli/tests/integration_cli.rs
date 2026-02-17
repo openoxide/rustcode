@@ -186,6 +186,39 @@ fn auth_status_json_is_parseable() {
 }
 
 #[test]
+fn auth_set_key_json_response_is_parseable() {
+    let auth_path = make_temp_file_path("auth-set-key-json-store");
+
+    let output = Command::new(rustcode_bin())
+        .args([
+            "--json",
+            "auth",
+            "set-key",
+            "openrouter",
+            "--from-env",
+            "RUSTCODE_TEST_KEY",
+        ])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_TEST_KEY", "integration-secret")
+        .output()
+        .expect("must run rustcode auth set-key");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let payload: Value = serde_json::from_str(stdout.trim()).expect("must parse json");
+    assert_eq!(payload["schema_version"].as_u64(), Some(1));
+    assert_eq!(payload["provider"].as_str(), Some("openrouter"));
+    assert_eq!(payload["action"].as_str(), Some("set_key"));
+    assert_eq!(payload["credential"].as_str(), Some("stored:api_key"));
+}
+
+#[test]
 fn auth_set_oauth_and_status_round_trip() {
     let auth_path = make_temp_file_path("auth-oauth-store");
 
@@ -230,6 +263,42 @@ fn auth_set_oauth_and_status_round_trip() {
     );
     let status_stdout = String::from_utf8(status_output.stdout).expect("stdout must be utf8");
     assert!(status_stdout.contains("credential=stored:oauth"));
+}
+
+#[test]
+fn auth_set_oauth_json_response_is_parseable() {
+    let auth_path = make_temp_file_path("auth-set-oauth-json-store");
+
+    let output = Command::new(rustcode_bin())
+        .args([
+            "--json",
+            "auth",
+            "set-oauth",
+            "openai",
+            "--access-env",
+            "RUSTCODE_TEST_ACCESS",
+            "--refresh-env",
+            "RUSTCODE_TEST_REFRESH",
+        ])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_TEST_ACCESS", "oauth-access-secret")
+        .env("RUSTCODE_TEST_REFRESH", "oauth-refresh-secret")
+        .output()
+        .expect("must run rustcode auth set-oauth");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let payload: Value = serde_json::from_str(stdout.trim()).expect("must parse json");
+    assert_eq!(payload["schema_version"].as_u64(), Some(1));
+    assert_eq!(payload["provider"].as_str(), Some("openai"));
+    assert_eq!(payload["action"].as_str(), Some("set_oauth"));
+    assert_eq!(payload["credential"].as_str(), Some("stored:oauth"));
 }
 
 #[test]
@@ -735,6 +804,45 @@ fn auth_list_and_logout_alias_work() {
     );
     let logout_stdout = String::from_utf8(logout_output.stdout).expect("stdout must be utf8");
     assert!(logout_stdout.contains("removed credential for provider=openrouter"));
+}
+
+#[test]
+fn auth_remove_json_response_is_parseable() {
+    let auth_path = make_temp_file_path("auth-remove-json-store");
+
+    let set_output = Command::new(rustcode_bin())
+        .args([
+            "auth",
+            "set-key",
+            "openrouter",
+            "--from-env",
+            "RUSTCODE_TEST_KEY",
+        ])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_TEST_KEY", "integration-secret")
+        .output()
+        .expect("must run rustcode auth set-key");
+    assert!(set_output.status.success(), "set-key should succeed");
+
+    let remove_output = Command::new(rustcode_bin())
+        .args(["--json", "auth", "remove", "openrouter"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode auth remove");
+
+    assert!(
+        remove_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&remove_output.stdout),
+        String::from_utf8_lossy(&remove_output.stderr)
+    );
+
+    let stdout = String::from_utf8(remove_output.stdout).expect("stdout must be utf8");
+    let payload: Value = serde_json::from_str(stdout.trim()).expect("must parse json");
+    assert_eq!(payload["schema_version"].as_u64(), Some(1));
+    assert_eq!(payload["provider"].as_str(), Some("openrouter"));
+    assert_eq!(payload["action"].as_str(), Some("remove"));
+    assert_eq!(payload["removed"].as_bool(), Some(true));
 }
 
 #[test]

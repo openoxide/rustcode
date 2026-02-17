@@ -602,6 +602,29 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth status openrouter`
     - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth list`
 
+33. Auth Mutation JSON Contract
+- Status: completed
+- Deliverables:
+  - Added machine-readable envelopes for mutating auth commands:
+    - `rustcode --json auth set-key <provider> --from-env <ENV_VAR>`
+    - `rustcode --json auth set-oauth <provider> --access-env <ENV_VAR> ...`
+    - `rustcode --json auth remove <provider>`
+  - Preserved existing text output contract for non-JSON mutation commands.
+  - Added explicit mutation metadata fields (`action`, `provider`, `credential`/`removed`, `auth_file`).
+  - Added integration tests for each new JSON mutation envelope.
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration tests:
+    - `auth_set_key_json_response_is_parseable`
+    - `auth_set_oauth_json_response_is_parseable`
+    - `auth_remove_json_response_is_parseable`
+  - Pass: live CLI probes:
+    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth set-key openrouter --from-env ...`
+    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth set-oauth openai --access-env ...`
+    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth remove openrouter`
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -638,10 +661,28 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 1. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 2. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
 3. Add initial MCP auth/login command surface parity for remote OAuth-capable servers.
-4. Extend JSON parity to mutating auth commands (`set-key`, `set-oauth`, `remove`) with stable result envelopes.
+4. Define and implement JSON contract for `auth login` flow stages (`no-wait`, polling, completion/failure).
 
 ## Update Log
 - 2026-02-17:
+  - Completed Milestone 33 auth mutation JSON contract:
+    - added JSON envelopes for `auth set-key`, `auth set-oauth`, and `auth remove`.
+    - preserved text output behavior for non-JSON mutation commands.
+    - added integration tests:
+      - `auth_set_key_json_response_is_parseable`
+      - `auth_set_oauth_json_response_is_parseable`
+      - `auth_remove_json_response_is_parseable`
+  - Referenced parity sources before implementation:
+    - `opencode/packages/opencode/src/cli/cmd/auth.ts`
+    - `codex/codex-rs/cli/src/login.rs`
+  - Validation passed:
+    - `cargo fmt --all`
+    - `cargo test -p rustcode-cli`
+    - `./scripts/ci_matrix.sh`
+    - live probes:
+      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth set-key openrouter --from-env ...`
+      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth set-oauth openai --access-env ...`
+      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth remove openrouter`
   - Completed Milestone 32 auth status/list JSON contract:
     - added `--json auth status <provider>` and `--json auth list` payloads.
     - preserved text output behavior for non-JSON invocations.
