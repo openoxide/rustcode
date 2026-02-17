@@ -174,9 +174,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Introduce event envelope versioning for future plugin/tool compatibility.
-2. Add CLI integration test harness for signal and streaming scenarios.
-3. Begin Plugin Boundary v1 with registration lifecycle tests.
+1. Add CLI integration test harness for signal and streaming scenarios.
+2. Begin Plugin Boundary v1 with registration lifecycle tests.
+3. Add event schema compatibility tests for future version bumps.
 
 ## Update Log
 - 2026-02-17:
@@ -216,3 +216,5 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Runtime probes confirmed:
     - successful `edit` and `read` verification path
     - escaped `edit` path rejected with structured failure and non-zero exit.
+  - Added event envelope versioning (`schema_version = 1`) to all emitted events.
+  - Updated renderer contract tests and runtime JSON probes to validate versioned event envelopes.

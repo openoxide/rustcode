@@ -37,6 +37,7 @@ mod tests {
 
     fn sample_event() -> Event {
         Event {
+            schema_version: 1,
             id: 42,
             timestamp: UNIX_EPOCH,
             scope: EventScope::Command,
@@ -57,7 +58,7 @@ mod tests {
         let rendered = render_event(&sample_event(), OutputFormat::Json).expect("must render");
         assert_eq!(
             rendered,
-            "{\"id\":42,\"timestamp\":{\"secs_since_epoch\":0,\"nanos_since_epoch\":0},\"scope\":\"Command\",\"payload\":{\"type\":\"OutputChunk\",\"data\":{\"text\":\"hello\"}}}"
+            "{\"schema_version\":1,\"id\":42,\"timestamp\":{\"secs_since_epoch\":0,\"nanos_since_epoch\":0},\"scope\":\"Command\",\"payload\":{\"type\":\"OutputChunk\",\"data\":{\"text\":\"hello\"}}}"
         );
 
         let reparsed: Event = serde_json::from_str(&rendered).expect("must parse");

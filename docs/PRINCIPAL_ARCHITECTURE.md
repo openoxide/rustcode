@@ -96,7 +96,7 @@ Command shape:
 - `Version`
 
 Event shape:
-- Metadata: `id`, `timestamp`, `scope`
+- Metadata: `schema_version`, `id`, `timestamp`, `scope`
 - Payload: `CommandAccepted`, `OutputChunk`, `Warning`, `Failure`, `Completed`
 
 Rules:
