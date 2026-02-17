@@ -1,0 +1,23 @@
+[package]
+name = "rustcode-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+rustcode-config = { path = "../rustcode-config" }
+rustcode-core = { path = "../rustcode-core" }
+rustcode-engine = { path = "../rustcode-engine" }
+rustcode-io = { path = "../rustcode-io" }
+rustcode-llm = { path = "../rustcode-llm" }
+rustcode-plugins = { path = "../rustcode-plugins" }
+serde_json.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

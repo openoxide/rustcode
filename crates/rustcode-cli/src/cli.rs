@@ -1,0 +1,82 @@
+use clap::{Parser, Subcommand};
+
+use rustcode_core::command::Command;
+
+#[derive(Debug, Parser)]
+#[command(name = "rustcode", about = "Production-grade CLI/TUI systems tool")]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: TopCommand,
+
+    #[arg(long, global = true)]
+    pub json: bool,
+
+    #[arg(long, global = true)]
+    pub profile: Option<String>,
+
+    #[arg(long, global = true)]
+    pub model: Option<String>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TopCommand {
+    Run {
+        prompt: String,
+    },
+    Exec {
+        command: String,
+        args: Vec<String>,
+    },
+    Tui,
+    Serve {
+        #[arg(long, default_value = "127.0.0.1:4317")]
+        listen: String,
+    },
+    Version,
+}
+
+pub fn map_command(command: TopCommand) -> Command {
+    match command {
+        TopCommand::Run { prompt } => Command::Run { prompt },
+        TopCommand::Exec { command, args } => Command::Exec { command, args },
+        TopCommand::Tui => Command::Tui,
+        TopCommand::Serve { listen } => Command::Serve { listen },
+        TopCommand::Version => Command::Version,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_command_is_rejected() {
+        let err = Cli::try_parse_from(["rustcode", "not-a-command"]).expect_err("must fail");
+        let message = err.to_string();
+        assert!(message.contains("unrecognized subcommand"));
+        assert!(message.contains("Usage: rustcode"));
+    }
+
+    #[test]
+    fn invalid_run_flag_is_rejected() {
+        let err = Cli::try_parse_from(["rustcode", "run", "--not-a-flag", "prompt"])
+            .expect_err("must fail");
+        let message = err.to_string();
+        assert!(message.contains("unexpected argument '--not-a-flag'"));
+        assert!(message.contains("use '-- --not-a-flag'"));
+    }
+
+    #[test]
+    fn exec_accepts_args() {
+        let cli =
+            Cli::try_parse_from(["rustcode", "exec", "echo", "hello"]).expect("cli should parse");
+
+        match cli.command {
+            TopCommand::Exec { command, args } => {
+                assert_eq!(command, "echo");
+                assert_eq!(args, vec!["hello"]);
+            }
+            _ => panic!("expected exec command"),
+        }
+    }
+}

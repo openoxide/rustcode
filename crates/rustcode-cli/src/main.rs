@@ -1,0 +1,77 @@
+use std::sync::Arc;
+use std::time::SystemTime;
+
+use anyhow::{Context, Result};
+use clap::Parser;
+use tokio::sync::mpsc;
+use tracing_subscriber::EnvFilter;
+
+use rustcode_config::{ConfigLoader, ConfigSources};
+use rustcode_core::context::{CommandContext, SessionMeta};
+use rustcode_core::ports::CommandExecutor;
+use rustcode_engine::{ChannelPublisher, Engine};
+use rustcode_io::LocalIo;
+use rustcode_llm::NullLlmClient;
+use rustcode_plugins::PluginRegistry;
+
+mod cli;
+mod render;
+
+use cli::{map_command, Cli};
+use render::{render_event, OutputFormat};
+
+#[tokio::main]
+async fn main() -> Result<()> {
+    init_tracing()?;
+
+    let cli = Cli::parse();
+    let cwd = std::env::current_dir().context("failed to resolve current directory")?;
+    let output_format = OutputFormat::from_json_flag(cli.json);
+
+    let config = ConfigLoader::load(&ConfigSources {
+        cwd,
+        profile_override: cli.profile.clone(),
+        model_override: cli.model.clone(),
+    })
+    .context("failed to load configuration")?;
+
+    let context = CommandContext::new(
+        Arc::new(config),
+        SessionMeta {
+            session_id: "session-1".to_string(),
+            request_id: "request-1".to_string(),
+            started_at: SystemTime::now(),
+        },
+    );
+
+    let (event_tx, mut event_rx) = mpsc::channel(512);
+    let publisher = Arc::new(ChannelPublisher::new(event_tx));
+
+    let engine = Engine::new(
+        Arc::new(NullLlmClient),
+        Arc::new(LocalIo),
+        PluginRegistry::default(),
+    );
+
+    let command = map_command(cli.command);
+    engine
+        .execute(command, context, publisher.clone())
+        .await
+        .context("command execution failed")?;
+    drop(publisher);
+
+    while let Some(event) = event_rx.recv().await {
+        println!("{}", render_event(&event, output_format)?);
+    }
+
+    Ok(())
+}
+
+fn init_tracing() -> Result<()> {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    tracing_subscriber::fmt()
+        .with_env_filter(env_filter)
+        .with_target(false)
+        .try_init()
+        .map_err(|err| anyhow::anyhow!("failed to initialize tracing: {err}"))
+}

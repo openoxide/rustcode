@@ -11,12 +11,21 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Current Mode
 - Active mode: Slow Deep Research
-- Status: Analysis complete, implementation not started
+- Status: Implementation active (milestone-driven with test+commit loop)
 
 ## Milestones
 
+0. Comparative Baseline Audit
+- Status: completed
+- Deliverables:
+  - Runtime and UX measurements for `opencode` and `codex`
+  - Static architecture archaeology (entry flow, dependency hubs, cycle signals)
+  - Re-architecture direction captured in `ARCHITECTURE_AUDIT.md`
+- Validation:
+  - command logs and metrics captured during Phase 0/1/2
+
 1. Workspace Bootstrap
-- Status: pending
+- Status: completed
 - Deliverables:
   - Cargo workspace with crates:
     - `rustcode-cli`
@@ -30,9 +39,11 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Shared lint/test config
 - Validation:
   - `cargo check --workspace`
+  - Pass: `cargo check --workspace` (2026-02-17)
+  - Pass: `cargo test --workspace` (2026-02-17)
 
 2. Command Surface and Routing
-- Status: pending
+- Status: completed
 - Deliverables:
   - Strict clap parser
   - Command router with typed command enum
@@ -40,9 +51,11 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - `cargo test -p rustcode-cli`
   - invalid-command snapshots
+  - Pass: strict invalid subcommand and invalid flag diagnostics verified (2026-02-17)
+  - Pass: parser + router module extraction with focused tests (2026-02-17)
 
 3. Layered Config System
-- Status: pending
+- Status: in_progress
 - Deliverables:
   - Deterministic config precedence
   - Explicit trust model for project-local config
@@ -52,7 +65,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - precedence tests
 
 4. Event Protocol and Renderers
-- Status: pending
+- Status: in_progress
 - Deliverables:
   - Domain event types (turn/item/tool/error)
   - Human renderer
@@ -60,9 +73,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - snapshot tests for both output modes
   - `jq`-valid JSONL stream checks
+  - Pass: `cargo run -q -p rustcode-cli -- --json run "hello"` emits structured JSON events (2026-02-17)
 
 5. Engine Skeleton
-- Status: pending
+- Status: in_progress
 - Deliverables:
   - Async execution loop
   - Cancellation propagation
@@ -70,6 +84,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - interrupt integration tests
   - no-panic policy in expected failure paths
+  - Note: signal handling requires explicit graceful shutdown path (`SIGTERM` currently exits hard with code 143)
 
 6. Tool Runtime v1
 - Status: pending
@@ -126,6 +141,20 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Fuzz tests: parser/config where practical
 - Load tests: repeated turns and long-running session stability
 
+## Reference Docs
+- `https://opencode.ai/docs`
+- `https://developers.openai.com/codex/`
+- Use references during implementation phases for behavior parity checks and interoperability assumptions.
+
+## Runtime Baseline (Rustcode Bootstrap)
+- Startup (`cargo run -q -p rustcode-cli -- version`): `0.21s - 0.27s` over 3 runs.
+- Invalid subcommand: clap rejection with usage and non-zero exit.
+- Invalid run flag: clap rejection with `--` escape tip.
+- Large prompt (`200k` chars): completes in `0.20s`, JSON output file `400495` bytes.
+- Interrupt behavior:
+  - `SIGTERM` against running command currently exits `143` (hard stop).
+  - `SIGINT` probe did not yet show a clean cancellation event path; needs dedicated interrupt test harness.
+
 ## Risks and Mitigations
 - Over-engineering:
   - Mitigation: keep first version minimal, defer optional abstractions.
@@ -137,11 +166,22 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Create workspace skeleton and crate manifests.
-2. Implement CLI parse + command enum + invalid command snapshots.
-3. Implement config loader skeleton with deterministic layer ordering.
+1. Expand config trust model (global/user/project layers + explicit trust gate).
+2. Add renderer contract tests (human vs JSON) with stable snapshots.
+3. Implement explicit cancellation path and interrupt integration tests.
 
 ## Update Log
 - 2026-02-17:
   - Created initial execution plan from measured comparative audit.
-  - Marked all build milestones pending until implementation kickoff.
+  - Added Milestone 0 as completed (baseline research and architecture extraction).
+  - Marked implementation milestones pending until coding kickoff.
+  - Completed workspace skeleton (`Cargo.toml`, 8 crates, toolchain pin, shared lints).
+  - Added first-pass command/event/error/config/engine/plugin/IO boundaries.
+  - Validation passed: `cargo check --workspace`, `cargo test --workspace`.
+  - Runtime probes passed: `--help`, invalid subcommand, `--json run`, `exec`.
+  - Added external reference docs for ongoing implementation checks.
+  - Added principal architecture spec: `rustcode/docs/PRINCIPAL_ARCHITECTURE.md`.
+  - Added rustcode runtime baseline metrics and recorded shutdown gap for Milestone 5.
+  - Completed Milestone 2: parser/router split (`cli.rs`) with strict diagnostics tests.
+  - Split event rendering concerns into `render.rs`; validated `--json` and human output paths.
+  - Confirmed `.gitignore` hygiene: minimal 3-rule file, no plan/doc suppression.

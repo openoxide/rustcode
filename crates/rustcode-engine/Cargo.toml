@@ -1,0 +1,18 @@
+[package]
+name = "rustcode-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rustcode-core = { path = "../rustcode-core" }
+rustcode-io = { path = "../rustcode-io" }
+rustcode-llm = { path = "../rustcode-llm" }
+rustcode-plugins = { path = "../rustcode-plugins" }
+async-trait.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[lints]
+workspace = true
