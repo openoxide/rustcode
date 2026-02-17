@@ -57,6 +57,7 @@ Examples:
 - `./scripts/ci_matrix.sh`:
   - runs `check`, `test`, `benchmark_record`, and `benchmark_assert`.
   - enables `ALLOW_MISSING_METRICS=1` automatically on Darwin sandbox environments.
+- GitHub Actions CI uploads `benchmarks/latest.json` as artifact `rustcode-benchmarks-latest`.
 - `./scripts/benchmark_snapshot.sh <latest> <history_dir>`:
   - writes UTC-timestamped benchmark snapshots.
   - prunes oldest snapshots beyond `KEEP_BENCHMARK_SNAPSHOTS` (default `20`).

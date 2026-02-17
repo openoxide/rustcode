@@ -191,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add CI artifact upload for `benchmarks/latest.json`.
-2. Extend load benchmark with percentile latency capture.
-3. Add per-connection serve request timeout to avoid stalled sockets.
+1. Extend load benchmark with percentile latency capture.
+2. Add per-connection serve request timeout to avoid stalled sockets.
+3. Add serve-mode smoke probe to CI (request/response assertion during run).
 
 ## Update Log
 - 2026-02-17:
@@ -314,6 +314,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Validation pass:
     - `cargo test --workspace`
     - `./scripts/ci_matrix.sh`
+  - CI benchmark artifact publication enabled:
+    - workflow now uploads `benchmarks/latest.json` via `actions/upload-artifact@v4`.
+    - artifact name: `rustcode-benchmarks-latest`.
   - Added structured serve telemetry:
     - introduced `EventPayload::ServeRequest { method, path, status }`.
     - `serve` now emits route-level events for each handled request.

@@ -15,3 +15,9 @@ jobs:
           toolchain: 1.93.0
       - name: Run CI matrix
         run: ./scripts/ci_matrix.sh
+      - name: Upload benchmark artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustcode-benchmarks-latest
+          path: benchmarks/latest.json
+          if-no-files-found: error
