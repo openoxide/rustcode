@@ -61,6 +61,47 @@ fn json_stream_includes_schema_version_and_completion_event() {
 }
 
 #[test]
+fn human_run_output_is_plain_text_by_default() {
+    let output = Command::new(rustcode_bin())
+        .args(["run", "integration-human"])
+        .output()
+        .expect("must run rustcode binary");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains("null-llm response"));
+    assert!(
+        !stdout.contains("OutputChunk"),
+        "stdout should be coalesced"
+    );
+}
+
+#[test]
+fn human_run_output_uses_event_envelope_with_event_debug() {
+    let output = Command::new(rustcode_bin())
+        .args(["--event-debug", "run", "integration-human-debug"])
+        .output()
+        .expect("must run rustcode binary");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains("OutputChunk"));
+    assert!(stdout.contains("Completed"));
+}
+
+#[test]
 fn auth_set_key_and_status_round_trip() {
     let auth_path = make_temp_file_path("auth-store");
 

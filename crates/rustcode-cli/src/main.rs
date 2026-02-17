@@ -21,6 +21,7 @@ use rustcode_config::{ConfigLoader, ConfigSources};
 use rustcode_core::config::ResolvedConfig;
 use rustcode_core::context::{CommandContext, SessionMeta};
 use rustcode_core::error::ExecutionError;
+use rustcode_core::event::EventPayload;
 use rustcode_core::ports::CommandExecutor;
 use rustcode_engine::{ChannelPublisher, Engine, WorkspacePermissionPolicy};
 use rustcode_io::LocalIo;
@@ -48,6 +49,7 @@ async fn main() -> Result<()> {
     }
     let launch_tui = matches!(&cli.command, TopCommand::Tui);
     let output_format = OutputFormat::from_json_flag(cli.json);
+    let event_debug = cli.event_debug;
 
     let config = load_effective_config(&cli)?;
     let llm_client = build_client(&config).context("failed to initialize llm provider")?;
@@ -96,11 +98,43 @@ async fn main() -> Result<()> {
             .await
             .context("tui event loop failed")?;
     } else {
+        let mut streamed_text_open = false;
         while let Some(event) = event_rx.recv().await {
+            if matches!(output_format, OutputFormat::Human) && !event_debug {
+                match &event.payload {
+                    EventPayload::OutputChunk { text } => {
+                        if !write_stdout_raw(text)? {
+                            return Ok(());
+                        }
+                        streamed_text_open = true;
+                        continue;
+                    }
+                    EventPayload::Completed => {
+                        if streamed_text_open {
+                            if !write_stdout_raw("\n")? {
+                                return Ok(());
+                            }
+                            streamed_text_open = false;
+                        }
+                        continue;
+                    }
+                    _ => {
+                        if streamed_text_open {
+                            if !write_stdout_raw("\n")? {
+                                return Ok(());
+                            }
+                            streamed_text_open = false;
+                        }
+                    }
+                }
+            }
             let rendered = render_event(&event, output_format)?;
             if !write_stdout_line(&rendered)? {
                 return Ok(());
             }
+        }
+        if streamed_text_open {
+            let _ = write_stdout_raw("\n")?;
         }
     }
 
@@ -636,6 +670,20 @@ fn write_stdout_line(line: &str) -> Result<bool> {
     let mut stdout = std::io::stdout().lock();
     match writeln!(stdout, "{line}") {
         Ok(()) => Ok(true),
+        Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => Ok(false),
+        Err(err) => Err(anyhow::anyhow!("stdout write failed: {err}")),
+    }
+}
+
+fn write_stdout_raw(text: &str) -> Result<bool> {
+    let mut stdout = std::io::stdout().lock();
+    match write!(stdout, "{text}") {
+        Ok(()) => {
+            stdout
+                .flush()
+                .map_err(|err| anyhow::anyhow!("stdout flush failed: {err}"))?;
+            Ok(true)
+        }
         Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => Ok(false),
         Err(err) => Err(anyhow::anyhow!("stdout write failed: {err}")),
     }

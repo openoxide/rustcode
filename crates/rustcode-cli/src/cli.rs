@@ -11,6 +11,9 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
+    #[arg(long = "event-debug", global = true, default_value_t = false)]
+    pub event_debug: bool,
+
     #[arg(long, global = true)]
     pub profile: Option<String>,
 
@@ -221,6 +224,13 @@ mod tests {
             Some("https://openrouter.ai/api/v1")
         );
         assert_eq!(cli.llm_api_key_env.as_deref(), Some("OPENROUTER_API_KEY"));
+    }
+
+    #[test]
+    fn event_debug_flag_parses_globally() {
+        let cli = Cli::try_parse_from(["rustcode", "--event-debug", "run", "ping"])
+            .expect("cli should parse");
+        assert!(cli.event_debug);
     }
 
     #[test]

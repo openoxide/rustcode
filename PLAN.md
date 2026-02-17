@@ -512,6 +512,23 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `rustcode auth login openai --from-env RUSTCODE_OPENAI_KEY` stores API key without requiring `--method api_key`.
     - `rustcode auth status openai` reports `credential=stored:api_key`.
 
+28. Human Renderer Stream Coalescing + Debug Mode
+- Status: completed
+- Deliverables:
+  - Added global CLI flag `--event-debug` to preserve event-envelope human rendering.
+  - Default human output now prints `OutputChunk` payload text directly (stream-coalesced) and suppresses noisy `Completed` lines.
+  - Non-output events (`CommandAccepted`, `Warning`, `Failure`, `ServeRequest`) still render with event context in human mode.
+  - Added parser coverage for `--event-debug` flag.
+  - Added integration coverage for:
+    - plain-text default human run output
+    - event-envelope output when `--event-debug` is set.
+- Validation:
+  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration tests:
+    - `human_run_output_is_plain_text_by_default`
+    - `human_run_output_uses_event_envelope_with_event_debug`
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -547,7 +564,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 ## Next Action Queue
 1. Add explicit provider-auth source selection UX for `auth login` (OAuth vs API key) with parity-oriented prompts.
 2. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
-3. Add renderer mode improvements for streamed chunks (coalesced human output vs event-debug output).
+3. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
 
 ## Update Log
 - 2026-02-17:
@@ -798,6 +815,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `auth login --from-env` now auto-selects `api_key` when method is omitted.
     - added OpenAI integration coverage for default `--from-env` behavior.
     - empty auth-store files now load as empty state instead of parse errors.
+  - Completed Milestone 28 human renderer stream coalescing:
+    - default human run output now streams plain text chunks instead of debug envelopes.
+    - added `--event-debug` to preserve envelope-style human event output when needed.
+    - added integration coverage for both rendering modes.
   - Completed Milestone 21 OAuth credential runtime consumption:
     - `rustcode-llm` now resolves OAuth access tokens from auth store when env/config keys are absent.
     - added unit coverage for OAuth fallback (`resolves_oauth_access_from_auth_store_when_env_missing`).
