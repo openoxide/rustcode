@@ -108,6 +108,25 @@ case "$mode" in
     iterations="${1:-10}"
     parallel="${2:-4}"
     echo "Benchmark: load (iterations=$iterations parallel=$parallel)"
+    latencies=()
+
+    percentile() {
+      local p="$1"
+      shift
+      local values=("$@")
+      local n=${#values[@]}
+      if (( n == 0 )); then
+        echo "0"
+        return
+      fi
+
+      local rank=$(( (p * n + 99) / 100 ))
+      if (( rank < 1 )); then
+        rank=1
+      fi
+
+      printf '%s\n' "${values[@]}" | sort -n | awk -v rank="$rank" 'NR == rank { print; exit }'
+    }
 
     run_batch() {
       local batch="$1"
@@ -125,8 +144,19 @@ case "$mode" in
 
     for batch in $(seq 1 "$iterations"); do
       echo "batch=$batch"
-      run_batch "$batch"
+      elapsed="$(TIMEFORMAT='%R'; { time run_batch "$batch"; } 2>&1)"
+      elapsed="${elapsed//$'\n'/}"
+      latencies+=("$elapsed")
+      echo "batch_latency_s=$elapsed"
     done
+
+    p50="$(percentile 50 "${latencies[@]}")"
+    p95="$(percentile 95 "${latencies[@]}")"
+    max="$(printf '%s\n' "${latencies[@]}" | sort -n | tail -n1)"
+
+    echo "latency_p50_s=$p50"
+    echo "latency_p95_s=$p95"
+    echo "latency_max_s=$max"
     ;;
   *)
     usage
