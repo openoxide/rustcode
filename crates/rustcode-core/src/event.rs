@@ -23,6 +23,17 @@ pub enum EventPayload {
     CommandAccepted {
         name: String,
     },
+    ToolCall {
+        id: String,
+        name: String,
+        arguments: String,
+    },
+    ToolResult {
+        id: String,
+        name: String,
+        ok: bool,
+        output: String,
+    },
     OutputChunk {
         text: String,
     },

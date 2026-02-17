@@ -38,6 +38,9 @@ pub enum TopCommand {
     Run {
         prompt: String,
     },
+    Agent {
+        prompt: String,
+    },
     Exec {
         command: String,
         args: Vec<String>,
@@ -180,6 +183,7 @@ pub enum McpCommand {
 pub fn map_command(command: TopCommand) -> Command {
     match command {
         TopCommand::Run { prompt } => Command::Run { prompt },
+        TopCommand::Agent { prompt } => Command::Agent { prompt },
         TopCommand::Exec { command, args } => Command::Exec { command, args },
         TopCommand::List { path } => Command::List { path },
         TopCommand::Models { .. } => {
@@ -261,6 +265,17 @@ mod tests {
                 assert_eq!(to, "new");
             }
             _ => panic!("expected edit command"),
+        }
+    }
+
+    #[test]
+    fn agent_accepts_prompt() {
+        let cli = Cli::try_parse_from(["rustcode", "agent", "hello"]).expect("cli should parse");
+        match cli.command {
+            TopCommand::Agent { prompt } => {
+                assert_eq!(prompt, "hello");
+            }
+            _ => panic!("expected agent command"),
         }
     }
 

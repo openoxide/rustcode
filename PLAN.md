@@ -953,6 +953,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Update Log
 - 2026-02-17:
+  - Agent loop v0 (tool calling):
+    - added `agent` command wired through CLI -> core -> engine.
+    - implemented a bounded tool loop using OpenAI-compatible tool-calling (`list`, `read`, `write`, `edit`) with structured `ToolCall`/`ToolResult` events.
+    - added unit coverage for an agent run that triggers a tool call and returns a final response.
   - LLM chat/tool-call groundwork:
     - extended `rustcode-llm` with a `chat` request/response surface and OpenAI tool-call parsing (needed for the upcoming agent loop).
   - LLM cancellation + timeout hardening:

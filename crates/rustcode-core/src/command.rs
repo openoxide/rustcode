@@ -3,6 +3,9 @@ pub enum Command {
     Run {
         prompt: String,
     },
+    Agent {
+        prompt: String,
+    },
     Exec {
         command: String,
         args: Vec<String>,

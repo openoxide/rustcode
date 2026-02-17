@@ -1004,6 +1004,7 @@ dependencies = [
  "rustcode-io",
  "rustcode-llm",
  "rustcode-plugins",
+ "serde_json",
  "tokio",
  "tokio-util",
  "tracing",
