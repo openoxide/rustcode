@@ -222,7 +222,10 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
                     "provider={provider} does not advertise oauth device login; use `rustcode auth login {provider} --from-env <ENV_VAR>`"
                 );
             }
-            if provider == "github-copilot" || provider == "github-copilot-enterprise" {
+            if provider == "openai"
+                || provider == "github-copilot"
+                || provider == "github-copilot-enterprise"
+            {
                 let flow = start_device_code_flow(&provider, domain.as_deref()).await?;
                 if !write_stdout_line(&format!("provider={provider}"))?
                     || !write_stdout_line(&format!("authorize_url={}", flow.verification_uri))?

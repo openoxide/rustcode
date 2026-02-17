@@ -321,6 +321,26 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `backend_selection_policy_rejects_negative_weight`
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
 
+18. OpenAI Device-Code OAuth Flow
+- Status: completed
+- Deliverables:
+  - Extended `rustcode-auth` device-code engine to support `openai` provider.
+  - Implemented OpenAI device flow stages aligned with Codex/OpenCode patterns:
+    - start: `POST /api/accounts/deviceauth/usercode`
+    - poll: `POST /api/accounts/deviceauth/token`
+    - exchange: `POST /oauth/token` with `authorization_code` + `code_verifier`
+  - Reused existing CLI auth controls for OpenAI OAuth:
+    - `auth login openai --no-wait`
+    - `auth login openai --timeout-secs <n>`
+  - Added parser utility for interval values returned as either number or string.
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: live CLI probes:
+    - `rustcode auth login openai --no-wait --timeout-secs 5` reaches network path and emits expected transport failure in restricted environment.
+    - `RUSTCODE_AUTH_FILE=/tmp/... OPENAI_TEST_TOKEN=... rustcode auth login openai --from-env OPENAI_TEST_TOKEN` stores token path.
+    - `RUSTCODE_AUTH_FILE=/tmp/... rustcode auth status openai` confirms credential visibility.
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -354,7 +374,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
-2. Implement remaining real OAuth token exchange adapters (OpenAI browser/device and GitLab OAuth callback) behind `rustcode-auth`.
+2. Implement remaining OAuth adapters and token persistence semantics for GitLab/browser flows (store refresh/access metadata, not only API-key path).
 3. Wire backend selection policy into runtime provider-routing decisions and expose scoring diagnostics in CLI output.
 
 ## Update Log
@@ -530,6 +550,17 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
       - `cargo test --workspace`
       - `./scripts/ci_matrix.sh`
       - focused config policy tests for layering + validation.
+  - Completed Milestone 18 OpenAI device-code OAuth flow:
+    - implemented start/poll/exchange flow for `openai` in `rustcode-auth`.
+    - wired CLI `auth login openai` into device-flow path with shared wait/no-wait semantics.
+    - added interval parser support for mixed string/number formats from upstream auth endpoints.
+    - referenced parity sources:
+      - `opencode/packages/opencode/src/plugin/codex.ts`
+      - `codex/codex-rs/login/src/device_code_auth.rs`
+    - validated via:
+      - `cargo test --workspace`
+      - `./scripts/ci_matrix.sh`
+      - live OpenAI login probes for network path, `--from-env` fallback, and status reporting.
     - enforces conservative memory thresholds with environment overrides.
   - Extended benchmark harness with drift mode and captured sample stability run:
     - `./scripts/benchmark.sh drift 12 4`

@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use thiserror::Error;
 use tokio::time::sleep;
 
@@ -226,6 +226,7 @@ pub async fn start_device_code_flow(
     domain: Option<&str>,
 ) -> Result<DeviceCodeFlowStart, AuthError> {
     match provider {
+        "openai" => start_openai_device_code(provider).await,
         "github-copilot" | "github-copilot-enterprise" => {
             let normalized_domain = normalize_domain(domain.unwrap_or("github.com"))?;
             start_github_device_code(provider, &normalized_domain).await
@@ -241,6 +242,7 @@ pub async fn poll_device_code_flow_for_api_key(
     timeout: Duration,
 ) -> Result<String, AuthError> {
     match flow.provider.as_str() {
+        "openai" => poll_openai_device_code(flow, timeout).await,
         "github-copilot" | "github-copilot-enterprise" => {
             poll_github_device_code(flow, timeout).await
         }
@@ -267,6 +269,28 @@ struct GithubTokenResponse {
     interval: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+struct OpenAiDeviceCodeResponse {
+    device_auth_id: String,
+    #[serde(alias = "usercode")]
+    user_code: String,
+    #[serde(default, deserialize_with = "deserialize_u64_string_or_number")]
+    interval: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiDeviceTokenPollResponse {
+    authorization_code: Option<String>,
+    code_verifier: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OpenAiTokenExchangeResponse {
+    access_token: String,
+}
+
+const OPENAI_ISSUER: &str = "https://auth.openai.com";
+const OPENAI_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const GITHUB_CLIENT_ID: &str = "Ov23li8tweQw6odWQebz";
 
 async fn start_github_device_code(
@@ -309,6 +333,44 @@ async fn start_github_device_code(
         device_code: parsed.device_code,
         interval_secs: parsed.interval.unwrap_or(5).max(1),
         expires_in_secs: parsed.expires_in.unwrap_or(900),
+    })
+}
+
+async fn start_openai_device_code(provider: &str) -> Result<DeviceCodeFlowStart, AuthError> {
+    let client = reqwest::Client::new();
+    let response = client
+        .post(format!("{OPENAI_ISSUER}/api/accounts/deviceauth/usercode"))
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/json")
+        .json(&serde_json::json!({
+            "client_id": OPENAI_CLIENT_ID
+        }))
+        .send()
+        .await
+        .map_err(|err| AuthError::Network(err.to_string()))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| AuthError::Network(err.to_string()))?;
+    if !status.is_success() {
+        return Err(AuthError::OAuthFailed(format!(
+            "device code request failed with {status}: {body}"
+        )));
+    }
+
+    let parsed: OpenAiDeviceCodeResponse =
+        serde_json::from_str(&body).map_err(|err| AuthError::Parse(err.to_string()))?;
+
+    Ok(DeviceCodeFlowStart {
+        provider: provider.to_string(),
+        domain: "auth.openai.com".to_string(),
+        verification_uri: format!("{OPENAI_ISSUER}/codex/device"),
+        user_code: parsed.user_code,
+        device_code: parsed.device_auth_id,
+        interval_secs: parsed.interval.max(1),
+        expires_in_secs: 900,
     })
 }
 
@@ -378,6 +440,119 @@ async fn poll_github_device_code(
     }
 
     Err(AuthError::OAuthTimeout)
+}
+
+async fn poll_openai_device_code(
+    flow: &DeviceCodeFlowStart,
+    timeout: Duration,
+) -> Result<String, AuthError> {
+    let client = reqwest::Client::new();
+    let deadline = Instant::now() + timeout;
+    let interval = flow.interval_secs.max(1);
+
+    while Instant::now() < deadline {
+        let response = client
+            .post(format!("{OPENAI_ISSUER}/api/accounts/deviceauth/token"))
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .json(&serde_json::json!({
+                "device_auth_id": flow.device_code,
+                "user_code": flow.user_code,
+            }))
+            .send()
+            .await
+            .map_err(|err| AuthError::Network(err.to_string()))?;
+
+        let status = response.status();
+        let body = response
+            .text()
+            .await
+            .map_err(|err| AuthError::Network(err.to_string()))?;
+
+        if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::NOT_FOUND {
+            sleep(Duration::from_secs(interval)).await;
+            continue;
+        }
+        if !status.is_success() {
+            return Err(AuthError::OAuthFailed(format!(
+                "oauth polling failed with {status}: {body}"
+            )));
+        }
+
+        let polled: OpenAiDeviceTokenPollResponse =
+            serde_json::from_str(&body).map_err(|err| AuthError::Parse(err.to_string()))?;
+        let authorization_code = polled.authorization_code.ok_or_else(|| {
+            AuthError::Parse(
+                "missing authorization_code in openai device token response".to_string(),
+            )
+        })?;
+        let code_verifier = polled.code_verifier.ok_or_else(|| {
+            AuthError::Parse("missing code_verifier in openai device token response".to_string())
+        })?;
+
+        let exchange = client
+            .post(format!("{OPENAI_ISSUER}/oauth/token"))
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .body(
+                reqwest::Url::parse_with_params(
+                    "http://localhost",
+                    &[
+                        ("grant_type", "authorization_code"),
+                        ("code", authorization_code.as_str()),
+                        (
+                            "redirect_uri",
+                            "https://auth.openai.com/deviceauth/callback",
+                        ),
+                        ("client_id", OPENAI_CLIENT_ID),
+                        ("code_verifier", code_verifier.as_str()),
+                    ],
+                )
+                .map_err(|err| AuthError::Parse(err.to_string()))?
+                .query()
+                .unwrap_or_default()
+                .to_string(),
+            )
+            .send()
+            .await
+            .map_err(|err| AuthError::Network(err.to_string()))?;
+
+        let exchange_status = exchange.status();
+        let exchange_body = exchange
+            .text()
+            .await
+            .map_err(|err| AuthError::Network(err.to_string()))?;
+        if !exchange_status.is_success() {
+            return Err(AuthError::OAuthFailed(format!(
+                "openai token exchange failed with {exchange_status}: {exchange_body}"
+            )));
+        }
+        let token: OpenAiTokenExchangeResponse = serde_json::from_str(&exchange_body)
+            .map_err(|err| AuthError::Parse(err.to_string()))?;
+        return Ok(token.access_token);
+    }
+
+    Err(AuthError::OAuthTimeout)
+}
+
+fn deserialize_u64_string_or_number<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum NumberOrString {
+        Number(u64),
+        String(String),
+    }
+
+    let value = NumberOrString::deserialize(deserializer)?;
+    match value {
+        NumberOrString::Number(number) => Ok(number),
+        NumberOrString::String(text) => {
+            text.trim().parse::<u64>().map_err(serde::de::Error::custom)
+        }
+    }
 }
 
 fn normalize_domain(raw: &str) -> Result<String, AuthError> {
@@ -495,6 +670,23 @@ mod tests {
             normalize_domain("company.ghe.com").expect("must normalize"),
             "company.ghe.com"
         );
+    }
+
+    #[test]
+    fn parses_interval_from_string_or_number() {
+        #[derive(Deserialize)]
+        struct Holder {
+            #[serde(deserialize_with = "deserialize_u64_string_or_number")]
+            value: u64,
+        }
+
+        let parsed_number: Holder =
+            serde_json::from_str(r#"{"value":5}"#).expect("number interval must parse");
+        assert_eq!(parsed_number.value, 5);
+
+        let parsed_string: Holder =
+            serde_json::from_str(r#"{"value":"7"}"#).expect("string interval must parse");
+        assert_eq!(parsed_string.value, 7);
     }
 
     fn make_temp_file_path(name: &str) -> PathBuf {
