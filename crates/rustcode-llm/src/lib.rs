@@ -18,6 +18,51 @@ pub struct LlmRequest {
     pub prompt: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChatRole {
+    System,
+    User,
+    Assistant,
+    Tool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatMessage {
+    pub role: ChatRole,
+    pub content: Value,
+    // Tool result messages use `tool_call_id`. Assistant messages that trigger tools should
+    // populate `tool_calls` so the next turn can reference them.
+    pub tool_call_id: Option<String>,
+    pub tool_calls: Vec<ToolCall>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatRequest {
+    pub model: String,
+    pub messages: Vec<ChatMessage>,
+    pub tools: Vec<ToolSpec>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatResponse {
+    pub text: String,
+    pub tool_calls: Vec<ToolCall>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ToolSpec {
+    pub name: String,
+    pub description: String,
+    pub parameters: Value,
+}
+
 #[derive(Debug, Clone)]
 pub struct LlmResponse {
     pub text: String,
@@ -37,6 +82,12 @@ pub enum LlmError {
 #[async_trait]
 pub trait LlmClient: Send + Sync {
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError>;
+
+    async fn chat(&self, _request: ChatRequest) -> Result<ChatResponse, LlmError> {
+        Err(LlmError::Invalid(
+            "chat is not supported by the active provider client".to_string(),
+        ))
+    }
 }
 
 const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -834,6 +885,74 @@ impl LlmClient for OpenAiCompatibleClient {
             }
         }
     }
+
+    async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, LlmError> {
+        let model = model_for_provider(&self.provider_id, &request.model);
+        let mut headers = HeaderMap::new();
+        if let Some(api_key) = &self.api_key {
+            let bearer = format!("Bearer {api_key}");
+            let value = HeaderValue::from_str(&bearer)
+                .map_err(|err| LlmError::Config(format!("invalid auth header: {err}")))?;
+            headers.insert(AUTHORIZATION, value);
+        }
+        apply_provider_default_headers(&self.provider_id, &mut headers)
+            .map_err(LlmError::Config)?;
+
+        let messages = request
+            .messages
+            .iter()
+            .map(openai_message_value)
+            .collect::<Vec<_>>();
+        let tools = request
+            .tools
+            .iter()
+            .map(openai_tool_spec_value)
+            .collect::<Vec<_>>();
+
+        let response = self
+            .http
+            .post(&self.endpoint)
+            .headers(headers)
+            .json(&json!({
+                "model": model,
+                "messages": messages,
+                "tools": tools,
+                "tool_choice": "auto",
+                "stream": false,
+            }))
+            .send();
+        let response = timeout(HTTP_RESPONSE_HEADER_TIMEOUT, response)
+            .await
+            .map_err(|_| {
+                LlmError::Transport("timed out waiting for provider response headers".to_string())
+            })?
+            .map_err(|err| LlmError::Transport(err.to_string()))?;
+
+        let status = response.status();
+        let body = timeout(HTTP_RESPONSE_BODY_TIMEOUT, response.text())
+            .await
+            .map_err(|_| LlmError::Transport("timed out reading provider body".to_string()))?
+            .map_err(|err| LlmError::Transport(err.to_string()))?;
+        if !status.is_success() {
+            return Err(LlmError::Transport(format!(
+                "provider returned {}: {}",
+                status,
+                truncate_for_error(&body)
+            )));
+        }
+
+        let parsed: Value = serde_json::from_str(&body)
+            .map_err(|err| LlmError::Invalid(format!("response is not valid JSON: {err}")))?;
+        let tool_calls = extract_openai_tool_calls(&parsed);
+        let text = extract_openai_text(&parsed).unwrap_or_default();
+        if text.is_empty() && tool_calls.is_empty() {
+            return Err(LlmError::Invalid(
+                "provider response did not include content or tool calls".to_string(),
+            ));
+        }
+
+        Ok(ChatResponse { text, tool_calls })
+    }
 }
 
 #[derive(Debug)]
@@ -1099,6 +1218,67 @@ fn model_for_provider(provider_id: &str, requested_model: &str) -> String {
     requested_model.to_string()
 }
 
+fn openai_role_value(role: ChatRole) -> &'static str {
+    match role {
+        ChatRole::System => "system",
+        ChatRole::User => "user",
+        ChatRole::Assistant => "assistant",
+        ChatRole::Tool => "tool",
+    }
+}
+
+fn openai_tool_call_value(call: &ToolCall) -> Value {
+    json!({
+        "id": call.id,
+        "type": "function",
+        "function": {
+            "name": call.name,
+            "arguments": call.arguments,
+        }
+    })
+}
+
+fn openai_message_value(message: &ChatMessage) -> Value {
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "role".to_string(),
+        Value::String(openai_role_value(message.role).to_string()),
+    );
+    obj.insert("content".to_string(), message.content.clone());
+    if message.role == ChatRole::Tool {
+        if let Some(tool_call_id) = message.tool_call_id.as_ref() {
+            obj.insert(
+                "tool_call_id".to_string(),
+                Value::String(tool_call_id.clone()),
+            );
+        }
+    }
+    if message.role == ChatRole::Assistant && !message.tool_calls.is_empty() {
+        obj.insert(
+            "tool_calls".to_string(),
+            Value::Array(
+                message
+                    .tool_calls
+                    .iter()
+                    .map(openai_tool_call_value)
+                    .collect(),
+            ),
+        );
+    }
+    Value::Object(obj)
+}
+
+fn openai_tool_spec_value(tool: &ToolSpec) -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+        }
+    })
+}
+
 fn apply_provider_default_headers(
     provider_id: &str,
     headers: &mut HeaderMap,
@@ -1277,6 +1457,44 @@ fn extract_openai_text(value: &Value) -> Option<String> {
     } else {
         Some(combined)
     }
+}
+
+fn extract_openai_tool_calls(value: &Value) -> Vec<ToolCall> {
+    let Some(message) = value.get("choices").and_then(|choices| choices.get(0)) else {
+        return Vec::new();
+    };
+    let Some(message) = message.get("message") else {
+        return Vec::new();
+    };
+    let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    let mut parsed = Vec::new();
+    for call in tool_calls {
+        let Some(id) = call.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(function) = call.get("function") else {
+            continue;
+        };
+        let Some(name) = function.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(arguments) = function.get("arguments") else {
+            continue;
+        };
+        let arguments = match arguments {
+            Value::String(raw) => raw.clone(),
+            other => other.to_string(),
+        };
+        parsed.push(ToolCall {
+            id: id.to_string(),
+            name: name.to_string(),
+            arguments,
+        });
+    }
+    parsed
 }
 
 fn extract_openai_stream_delta(value: &Value) -> Option<String> {
@@ -1543,6 +1761,32 @@ mod tests {
             extract_openai_stream_delta(&array_delta).as_deref(),
             Some("hello")
         );
+    }
+
+    #[test]
+    fn parses_openai_tool_calls_from_response() {
+        let payload = json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "read",
+                            "arguments": "{\"path\":\"README.md\"}"
+                        }
+                    }]
+                }
+            }]
+        });
+
+        let calls = extract_openai_tool_calls(&payload);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "call_1");
+        assert_eq!(calls[0].name, "read");
+        assert!(calls[0].arguments.contains("README.md"));
     }
 
     #[test]

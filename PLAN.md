@@ -953,6 +953,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Update Log
 - 2026-02-17:
+  - LLM chat/tool-call groundwork:
+    - extended `rustcode-llm` with a `chat` request/response surface and OpenAI tool-call parsing (needed for the upcoming agent loop).
   - LLM cancellation + timeout hardening:
     - `run` now respects cancellation while awaiting the LLM request (drops in-flight request future on `SIGINT`).
     - added baseline HTTP connect + response-header + body/stream idle timeouts in `rustcode-llm` to avoid indefinite hangs.
