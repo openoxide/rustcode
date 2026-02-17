@@ -136,7 +136,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - warm startup under `50ms` for trivial non-interactive command
   - stable memory in long-run idle sample
   - Pass (partial): benchmark harness script added (`scripts/benchmark.sh`) with startup and memory modes (2026-02-17)
-  - Note: sandbox restricts detailed `/usr/bin/time -l` metrics; fallback timing output used in restricted runs.
+  - Pass: elevated benchmark run captured timing and RSS metrics (`startup 5`, `memory "bench memory probe"`, 2026-02-17)
 
 10. Documentation and Release Prep
 - Status: pending
@@ -180,8 +180,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Complete TUI signal/resize handling contracts and smoke checklist.
-2. Run benchmark harness outside sandbox-restricted timing mode to capture RSS baselines.
-3. Add structured UI event abstractions (resize/shutdown) for automatable TUI tests.
+2. Add structured UI event abstractions (resize/shutdown) for automatable TUI tests.
+3. Start long-running idle memory drift probe for benchmark hardening.
 
 ## Update Log
 - 2026-02-17:
@@ -246,3 +246,6 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - validated via `cargo test -p rustcode-plugins` and `cargo test --workspace`.
   - Added TUI smoke checklist doc: `docs/TUI_SMOKE_CHECKLIST.md`.
   - Captured manual validation expectations for launch, Ctrl+C, resize, and repeat stability.
+  - Ran benchmark harness with elevated permissions to capture system metrics:
+    - startup (`5` runs): reported `0.00s` real per run on this host timer granularity.
+    - memory probe: `maximum resident set size: 5,242,880`, `peak memory footprint: 2,064,696`.
