@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -19,5 +20,22 @@ pub trait CommandExecutor: Send + Sync {
         command: Command,
         context: CommandContext,
         publisher: Arc<dyn EventPublisher>,
+    ) -> Result<(), ExecutionError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PathOperation {
+    List,
+    Read,
+    Write,
+    Edit,
+}
+
+pub trait PermissionPolicy: Send + Sync {
+    fn allow_path(
+        &self,
+        workspace_root: &Path,
+        candidate: &Path,
+        operation: PathOperation,
     ) -> Result<(), ExecutionError>;
 }

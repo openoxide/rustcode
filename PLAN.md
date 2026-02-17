@@ -92,7 +92,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: runtime signal probes for `SIGINT` and `SIGTERM` emit cancellation warning and clean exit (`rustcode-cli exec sleep 30`, 2026-02-17)
 
 6. Tool Runtime v1
-- Status: in_progress
+- Status: completed
 - Deliverables:
   - Core tools (`list`, `read`, `write`, `edit`, `exec`)
   - Permission policy hooks
@@ -100,8 +100,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - unit + integration tests
   - invalid input and boundary tests
-  - Pass (partial): `list`, `read`, `write`, `exec` command paths wired and validated (2026-02-17)
-  - Pass (partial): workspace boundary rejection for `../` escape paths with structured failure event (2026-02-17)
+  - Pass: `list`, `read`, `write`, `edit`, `exec` command paths wired and validated (2026-02-17)
+  - Pass: workspace boundary rejection for `../` escape paths with structured failure event (2026-02-17)
+  - Pass: permission policy hook introduced and enforced in engine path resolution (2026-02-17)
 
 7. Plugin Boundary v1
 - Status: pending
@@ -173,9 +174,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add `edit` command semantics and explicit permission-policy hook interface.
-2. Introduce event envelope versioning for future plugin/tool compatibility.
-3. Add CLI integration test harness for signal and streaming scenarios.
+1. Introduce event envelope versioning for future plugin/tool compatibility.
+2. Add CLI integration test harness for signal and streaming scenarios.
+3. Begin Plugin Boundary v1 with registration lifecycle tests.
 
 ## Update Log
 - 2026-02-17:
@@ -208,3 +209,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Runtime probes confirmed:
     - positive flows for `list/read/write`
     - non-zero failure and structured `Failure` event for escaped paths.
+  - Completed Milestone 6:
+    - Added `edit` command semantics (`from` -> `to` replacement flow).
+    - Introduced `PermissionPolicy` hook (`PathOperation`) and default workspace policy.
+    - Wired all filesystem tools through policy-gated path resolution.
+  - Runtime probes confirmed:
+    - successful `edit` and `read` verification path
+    - escaped `edit` path rejected with structured failure and non-zero exit.

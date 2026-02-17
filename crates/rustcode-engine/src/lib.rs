@@ -15,7 +15,7 @@ use rustcode_core::command::Command;
 use rustcode_core::context::CommandContext;
 use rustcode_core::error::{ExecutionError, PublishError};
 use rustcode_core::event::{Event, EventPayload, EventScope};
-use rustcode_core::ports::{CommandExecutor, EventPublisher};
+use rustcode_core::ports::{CommandExecutor, EventPublisher, PathOperation, PermissionPolicy};
 use rustcode_io::{FileSystemPort, IoError, ProcessOutput, ProcessPort};
 use rustcode_llm::{LlmClient, LlmRequest};
 use rustcode_plugins::PluginRegistry;
@@ -41,10 +41,32 @@ impl EventPublisher for ChannelPublisher {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct WorkspacePermissionPolicy;
+
+impl PermissionPolicy for WorkspacePermissionPolicy {
+    fn allow_path(
+        &self,
+        workspace_root: &Path,
+        candidate: &Path,
+        _operation: PathOperation,
+    ) -> Result<(), ExecutionError> {
+        if candidate.starts_with(workspace_root) {
+            Ok(())
+        } else {
+            Err(ExecutionError::Dispatch(format!(
+                "path escapes workspace root: {}",
+                candidate.display()
+            )))
+        }
+    }
+}
+
 pub struct Engine {
     llm: Arc<dyn LlmClient>,
     fs: Arc<dyn FileSystemPort>,
     process: Arc<dyn ProcessPort>,
+    permission_policy: Arc<dyn PermissionPolicy>,
     plugins: PluginRegistry,
     next_event_id: AtomicU64,
 }
@@ -54,12 +76,14 @@ impl Engine {
         llm: Arc<dyn LlmClient>,
         fs: Arc<dyn FileSystemPort>,
         process: Arc<dyn ProcessPort>,
+        permission_policy: Arc<dyn PermissionPolicy>,
         plugins: PluginRegistry,
     ) -> Self {
         Self {
             llm,
             fs,
             process,
+            permission_policy,
             plugins,
             next_event_id: AtomicU64::new(1),
         }
@@ -156,7 +180,7 @@ impl Engine {
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
         let target = path.unwrap_or_else(|| ".".to_string());
-        let resolved = self.resolve_workspace_path(context, &target)?;
+        let resolved = self.resolve_workspace_path(context, &target, PathOperation::List)?;
         let entries = self
             .fs
             .list_dir(&resolved)
@@ -191,7 +215,7 @@ impl Engine {
         context: &CommandContext,
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
-        let resolved = self.resolve_workspace_path(context, &path)?;
+        let resolved = self.resolve_workspace_path(context, &path, PathOperation::Read)?;
         let contents = self
             .fs
             .read_to_string(&resolved)
@@ -214,7 +238,7 @@ impl Engine {
         context: &CommandContext,
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
-        let resolved = self.resolve_workspace_path(context, &path)?;
+        let resolved = self.resolve_workspace_path(context, &path, PathOperation::Write)?;
         self.fs
             .write_string(&resolved, &contents)
             .await
@@ -231,10 +255,47 @@ impl Engine {
         .await
     }
 
+    async fn run_edit(
+        &self,
+        path: String,
+        from: String,
+        to: String,
+        context: &CommandContext,
+        publisher: Arc<dyn EventPublisher>,
+    ) -> Result<(), ExecutionError> {
+        let resolved = self.resolve_workspace_path(context, &path, PathOperation::Edit)?;
+        let original = self
+            .fs
+            .read_to_string(&resolved)
+            .await
+            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+
+        let updated = original.replace(&from, &to);
+        self.fs
+            .write_string(&resolved, &updated)
+            .await
+            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+
+        let changed = if original == updated { 0 } else { 1 };
+        self.emit(
+            publisher,
+            EventScope::Tool,
+            EventPayload::OutputChunk {
+                text: format!(
+                    "edit applied ({changed} replacement groups) to {}",
+                    resolved.display()
+                ),
+            },
+            context,
+        )
+        .await
+    }
+
     fn resolve_workspace_path(
         &self,
         context: &CommandContext,
         requested: &str,
+        operation: PathOperation,
     ) -> Result<PathBuf, ExecutionError> {
         let root = absolute_normalized(&context.config.workspace_root).map_err(|err| {
             ExecutionError::Dispatch(format!(
@@ -251,11 +312,8 @@ impl Engine {
         };
         let normalized = lexical_normalize(joined);
 
-        if !normalized.starts_with(&root) {
-            return Err(ExecutionError::Dispatch(format!(
-                "path escapes workspace root: {requested}"
-            )));
-        }
+        self.permission_policy
+            .allow_path(&root, &normalized, operation)?;
 
         Ok(normalized)
     }
@@ -315,6 +373,10 @@ impl CommandExecutor for Engine {
             Command::Read { path } => self.run_read(path, &context, publisher.clone()).await,
             Command::Write { path, contents } => {
                 self.run_write(path, contents, &context, publisher.clone())
+                    .await
+            }
+            Command::Edit { path, from, to } => {
+                self.run_edit(path, from, to, &context, publisher.clone())
                     .await
             }
             Command::Tui => {
@@ -461,6 +523,7 @@ mod tests {
             Arc::new(NullLlmClient),
             Arc::new(DummyFs),
             Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
             PluginRegistry::default(),
         );
         let publisher = Arc::new(CollectingPublisher::default());
@@ -512,6 +575,7 @@ mod tests {
             Arc::new(NullLlmClient),
             Arc::new(DummyFs),
             Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
             PluginRegistry::default(),
         );
         let publisher = Arc::new(CollectingPublisher::default());

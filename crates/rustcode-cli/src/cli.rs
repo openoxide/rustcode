@@ -40,6 +40,11 @@ pub enum TopCommand {
         path: String,
         contents: String,
     },
+    Edit {
+        path: String,
+        from: String,
+        to: String,
+    },
     Tui,
     Serve {
         #[arg(long, default_value = "127.0.0.1:4317")]
@@ -55,6 +60,7 @@ pub fn map_command(command: TopCommand) -> Command {
         TopCommand::List { path } => Command::List { path },
         TopCommand::Read { path } => Command::Read { path },
         TopCommand::Write { path, contents } => Command::Write { path, contents },
+        TopCommand::Edit { path, from, to } => Command::Edit { path, from, to },
         TopCommand::Tui => Command::Tui,
         TopCommand::Serve { listen } => Command::Serve { listen },
         TopCommand::Version => Command::Version,
@@ -107,6 +113,21 @@ mod tests {
                 assert_eq!(contents, "hello world");
             }
             _ => panic!("expected write command"),
+        }
+    }
+
+    #[test]
+    fn edit_accepts_path_and_tokens() {
+        let cli = Cli::try_parse_from(["rustcode", "edit", "README.md", "old", "new"])
+            .expect("cli should parse");
+
+        match cli.command {
+            TopCommand::Edit { path, from, to } => {
+                assert_eq!(path, "README.md");
+                assert_eq!(from, "old");
+                assert_eq!(to, "new");
+            }
+            _ => panic!("expected edit command"),
         }
     }
 }

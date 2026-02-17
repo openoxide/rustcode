@@ -11,7 +11,7 @@ use rustcode_config::{ConfigLoader, ConfigSources};
 use rustcode_core::context::{CommandContext, SessionMeta};
 use rustcode_core::error::ExecutionError;
 use rustcode_core::ports::CommandExecutor;
-use rustcode_engine::{ChannelPublisher, Engine};
+use rustcode_engine::{ChannelPublisher, Engine, WorkspacePermissionPolicy};
 use rustcode_io::LocalIo;
 use rustcode_llm::NullLlmClient;
 use rustcode_plugins::PluginRegistry;
@@ -56,6 +56,7 @@ async fn main() -> Result<()> {
         Arc::new(NullLlmClient),
         io.clone(),
         io,
+        Arc::new(WorkspacePermissionPolicy),
         PluginRegistry::default(),
     );
 

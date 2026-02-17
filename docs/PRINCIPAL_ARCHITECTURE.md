@@ -149,6 +149,9 @@ Versioning:
 - Event schema version added before external integrations are promoted.
 - Backward compatibility tested with golden JSON snapshots.
 
+Current extension seam in implementation:
+- `PermissionPolicy` hook for path operations (`list/read/write/edit`) allowing policy replacement without engine refactor.
+
 Why not dynamic loading first:
 - It front-loads ABI/security complexity and slows stabilization of core contracts.
 
