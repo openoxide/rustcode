@@ -182,9 +182,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add benchmark result persistence (JSON artifact) for trend tracking.
-2. Prepare release-prep docs pass (operator/developer quickstart).
-3. Add `serve`-mode long-run benchmark once service path becomes persistent.
+1. Prepare release-prep docs pass (operator/developer quickstart).
+2. Add `serve`-mode long-run benchmark once service path becomes persistent.
+3. Add trend-comparison utility on top of `benchmarks/latest.json`.
 
 ## Update Log
 - 2026-02-17:
@@ -259,3 +259,6 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Extended benchmark harness with drift mode and captured sample stability run:
     - `./scripts/benchmark.sh drift 12 4`
     - RSS samples stabilized at `~5424 KB` over sampled window.
+  - Added benchmark artifact recorder:
+    - `scripts/benchmark_record.sh benchmarks/latest.json`
+    - persists startup/memory/drift outputs in JSON for historical tracking.

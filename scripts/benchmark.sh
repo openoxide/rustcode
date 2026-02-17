@@ -61,7 +61,7 @@ case "$mode" in
     interval="${2:-5}"
     echo "Benchmark: drift (seconds=$seconds interval=$interval)"
 
-    output_file="$(mktemp /tmp/rustcode-drift-XXXX.log)"
+    output_file="$(mktemp /tmp/rustcode-drift.XXXXXX)"
     "$bin" exec sleep 120 >"$output_file" 2>&1 &
     pid="$!"
     echo "pid=$pid"

@@ -2,6 +2,7 @@
 
 ## Harness
 - Script: `scripts/benchmark.sh`
+- Recorder: `scripts/benchmark_record.sh`
 - Modes:
   - `startup [runs]`
   - `memory [prompt]`
@@ -12,6 +13,7 @@ Examples:
 ./scripts/benchmark.sh startup 5
 ./scripts/benchmark.sh memory "benchmark memory"
 ./scripts/benchmark.sh drift 20 5
+./scripts/benchmark_record.sh benchmarks/latest.json
 ```
 
 ## Notes
@@ -28,3 +30,5 @@ Examples:
 - `./scripts/benchmark.sh drift 12 4`:
   - observed RSS samples: `32 KB -> 5,424 KB -> 5,424 KB`
   - process remained stable and exited cleanly on cancellation.
+- `./scripts/benchmark_record.sh benchmarks/latest.json`:
+  - persists startup/memory/drift command output in JSON artifact format.
