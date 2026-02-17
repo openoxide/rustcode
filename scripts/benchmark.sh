@@ -8,7 +8,7 @@ Usage:
   scripts/benchmark.sh memory [prompt]
   scripts/benchmark.sh drift [seconds] [interval]
   scripts/benchmark.sh serve [seconds] [interval]
-  scripts/benchmark.sh load [iterations] [parallel]
+  scripts/benchmark.sh load [iterations] [parallel] [warmup]
 USAGE
 }
 
@@ -107,7 +107,8 @@ case "$mode" in
   load)
     iterations="${1:-10}"
     parallel="${2:-4}"
-    echo "Benchmark: load (iterations=$iterations parallel=$parallel)"
+    warmup="${3:-1}"
+    echo "Benchmark: load (iterations=$iterations parallel=$parallel warmup=$warmup)"
     latencies=()
 
     percentile() {
@@ -141,6 +142,11 @@ case "$mode" in
         wait "$pid"
       done
     }
+
+    for warmup_batch in $(seq 1 "$warmup"); do
+      echo "warmup_batch=$warmup_batch"
+      run_batch "warmup-$warmup_batch"
+    done
 
     for batch in $(seq 1 "$iterations"); do
       echo "batch=$batch"

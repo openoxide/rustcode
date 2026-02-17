@@ -21,3 +21,6 @@ jobs:
           name: rustcode-benchmarks-latest
           path: benchmarks/latest.json
           if-no-files-found: error
+      - name: Release benchmark gate
+        if: startsWith(github.ref_name, 'release/') || startsWith(github.base_ref, 'release/')
+        run: ./scripts/benchmark_release_gate.sh benchmarks/release-baseline.json benchmarks/latest.json

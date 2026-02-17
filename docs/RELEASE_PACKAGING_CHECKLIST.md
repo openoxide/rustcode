@@ -10,6 +10,7 @@
 2. `cargo test --workspace`
 3. `./scripts/benchmark_record.sh benchmarks/latest.json`
 4. `./scripts/benchmark_assert.sh benchmarks/latest.json`
+5. `./scripts/benchmark_release_gate.sh benchmarks/release-baseline.json benchmarks/latest.json`
 
 ## Artifact Naming
 - Binary artifact base: `rustcode-cli`

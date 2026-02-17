@@ -191,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add benchmark comparison gate against prior baseline on release branches.
-2. Add platform-specific benchmark parser to reduce `ALLOW_MISSING_METRICS` use.
-3. Add serve telemetry assertion script for CI artifacts.
+1. Add platform-specific benchmark parser to reduce `ALLOW_MISSING_METRICS` use.
+2. Add serve telemetry assertion script for CI artifacts.
+3. Add baseline refresh workflow for `benchmarks/release-baseline.json`.
 
 ## Update Log
 - 2026-02-17:
@@ -328,6 +328,14 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - introduced `scripts/serve_smoke.sh` to validate live `/health` and `404` routes.
     - wired smoke probe into `scripts/ci_matrix.sh` before benchmark recording.
     - added `ALLOW_SERVE_SMOKE_SKIP` fallback for restricted local bind environments.
+  - Release benchmark comparison gate added:
+    - introduced `scripts/benchmark_release_gate.sh` for baseline-vs-candidate delta enforcement.
+    - added tracked baseline artifact `benchmarks/release-baseline.json`.
+    - wired CI release branch gate in `.github/workflows/ci.yml`.
+  - Load benchmark stabilization:
+    - added warmup support to `scripts/benchmark.sh load` (`[warmup]` arg).
+    - increased recorder sampling to `load 20 2 2` in `scripts/benchmark_record.sh`.
+    - refreshed baseline artifact so release gate compares like-for-like load telemetry.
   - Added structured serve telemetry:
     - introduced `EventPayload::ServeRequest { method, path, status }`.
     - `serve` now emits route-level events for each handled request.
