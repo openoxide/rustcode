@@ -301,34 +301,42 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
                     }
                 }
                 AuthMethod::OAuthBrowser => {
-                    if provider != "gitlab" {
-                        let hint = oauth_login_hint(&provider).ok_or_else(|| {
-                            anyhow::anyhow!(
-                                "oauth login adapter for provider={provider} is not implemented yet"
-                            )
-                        })?;
-                        if !write_stdout_line(&format!("provider={provider}"))?
-                            || !write_stdout_line(&format!("method={}", selected_method.as_str()))?
-                            || !write_stdout_line(&format!("authorize_url={}", hint.authorize_url))?
-                            || !write_stdout_line(&format!("instructions={}", hint.instructions))?
-                        {
+                    let (oauth_domain, client_id, client_secret) = match provider.as_str() {
+                        "gitlab" => (
+                            domain
+                                .or_else(|| std::env::var("GITLAB_INSTANCE_URL").ok())
+                                .unwrap_or_else(|| "gitlab.com".to_string()),
+                            Some(std::env::var("GITLAB_OAUTH_CLIENT_ID").with_context(|| {
+                                "environment variable GITLAB_OAUTH_CLIENT_ID is required for gitlab browser oauth; set it from your GitLab OAuth app"
+                            })?),
+                            std::env::var("GITLAB_OAUTH_CLIENT_SECRET").ok(),
+                        ),
+                        "openai" => (
+                            domain.unwrap_or_else(|| "auth.openai.com".to_string()),
+                            None,
+                            None,
+                        ),
+                        _ => {
+                            let hint = oauth_login_hint(&provider).ok_or_else(|| {
+                                anyhow::anyhow!(
+                                    "oauth login adapter for provider={provider} is not implemented yet"
+                                )
+                            })?;
+                            if !write_stdout_line(&format!("provider={provider}"))?
+                                || !write_stdout_line(&format!("method={}", selected_method.as_str()))?
+                                || !write_stdout_line(&format!("authorize_url={}", hint.authorize_url))?
+                                || !write_stdout_line(&format!("instructions={}", hint.instructions))?
+                            {
+                                return Ok(());
+                            }
                             return Ok(());
                         }
-                        return Ok(());
-                    }
-
-                    let gitlab_domain = domain
-                        .or_else(|| std::env::var("GITLAB_INSTANCE_URL").ok())
-                        .unwrap_or_else(|| "gitlab.com".to_string());
-                    let client_id = std::env::var("GITLAB_OAUTH_CLIENT_ID").with_context(|| {
-                        "environment variable GITLAB_OAUTH_CLIENT_ID is required for gitlab browser oauth; set it from your GitLab OAuth app"
-                    })?;
-                    let client_secret = std::env::var("GITLAB_OAUTH_CLIENT_SECRET").ok();
+                    };
 
                     let flow = start_browser_oauth_flow(
                         &provider,
-                        Some(&gitlab_domain),
-                        &client_id,
+                        Some(&oauth_domain),
+                        client_id.as_deref(),
                         oauth_port,
                     )
                     .await?;

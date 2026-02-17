@@ -88,6 +88,7 @@ For OAuth-capable providers:
 
 ```bash
 rustcode auth login openai
+rustcode auth login openai --method oauth_browser --oauth-port 1455
 rustcode auth login github-copilot
 GITLAB_OAUTH_CLIENT_ID=... rustcode auth login gitlab --method oauth_browser
 ```

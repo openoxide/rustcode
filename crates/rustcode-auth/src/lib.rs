@@ -213,7 +213,11 @@ pub struct OAuthLoginHint {
 pub fn methods_for_provider(provider_id: &str) -> Vec<AuthMethod> {
     let provider = provider_id.to_ascii_lowercase();
     match provider.as_str() {
-        "openai" => vec![AuthMethod::OAuthDeviceCode, AuthMethod::ApiKey],
+        "openai" => vec![
+            AuthMethod::OAuthDeviceCode,
+            AuthMethod::OAuthBrowser,
+            AuthMethod::ApiKey,
+        ],
         "github-copilot" | "github-copilot-enterprise" => {
             vec![AuthMethod::OAuthDeviceCode, AuthMethod::ApiKey]
         }
@@ -227,7 +231,7 @@ pub fn oauth_login_hint(provider_id: &str) -> Option<OAuthLoginHint> {
     let (url, instructions) = match provider.as_str() {
         "openai" => (
             "https://chatgpt.com",
-            "Use `rustcode auth login openai` for headless device flow, or `rustcode auth login openai --from-env <ENV_VAR>` for API-key mode.",
+            "Use `rustcode auth login openai` for headless device flow, or `rustcode auth login openai --method oauth_browser` for browser OAuth.",
         ),
         "github-copilot" | "github-copilot-enterprise" => (
             "https://github.com/login/device",
@@ -306,10 +310,11 @@ pub struct BrowserOAuthFlowStart {
 pub async fn start_browser_oauth_flow(
     provider: &str,
     domain: Option<&str>,
-    client_id: &str,
+    client_id: Option<&str>,
     callback_port: u16,
 ) -> Result<BrowserOAuthFlowStart, AuthError> {
     match provider {
+        "openai" => start_openai_browser_oauth_flow(domain, callback_port),
         "gitlab" => start_gitlab_browser_oauth_flow(domain, client_id, callback_port),
         other => Err(AuthError::Validation(format!(
             "provider {other} does not support browser oauth flow"
@@ -323,6 +328,7 @@ pub async fn complete_browser_oauth_flow(
     client_secret: Option<&str>,
 ) -> Result<DeviceCodeFlowCredential, AuthError> {
     match flow.provider.as_str() {
+        "openai" => complete_openai_browser_oauth_flow(flow, timeout).await,
         "gitlab" => complete_gitlab_browser_oauth_flow(flow, timeout, client_secret).await,
         other => Err(AuthError::Validation(format!(
             "provider {other} does not support browser oauth completion"
@@ -382,6 +388,7 @@ struct OpenAiTokenExchangeResponse {
     access_token: String,
     refresh_token: Option<String>,
     expires_in: Option<u64>,
+    id_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -397,7 +404,9 @@ const OPENAI_ISSUER: &str = "https://auth.openai.com";
 const OPENAI_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const GITHUB_CLIENT_ID: &str = "Ov23li8tweQw6odWQebz";
 const GITLAB_DEFAULT_SCOPES: &str = "api read_user read_repository";
-const OAUTH_CALLBACK_PATH: &str = "/callback";
+const OPENAI_BROWSER_SCOPES: &str = "openid profile email offline_access";
+const GITLAB_OAUTH_CALLBACK_PATH: &str = "/callback";
+const OPENAI_OAUTH_CALLBACK_PATH: &str = "/auth/callback";
 
 async fn start_github_device_code(
     provider: &str,
@@ -651,11 +660,62 @@ async fn poll_openai_device_code(
     Err(AuthError::OAuthTimeout)
 }
 
-fn start_gitlab_browser_oauth_flow(
+fn start_openai_browser_oauth_flow(
     domain: Option<&str>,
-    client_id: &str,
     callback_port: u16,
 ) -> Result<BrowserOAuthFlowStart, AuthError> {
+    if callback_port == 0 {
+        return Err(AuthError::Validation(
+            "oauth callback port must be between 1 and 65535".to_string(),
+        ));
+    }
+
+    let normalized_domain = normalize_domain(domain.unwrap_or("auth.openai.com"))?;
+    let issuer = format!("https://{normalized_domain}");
+    let redirect_uri = format!("http://127.0.0.1:{callback_port}{OPENAI_OAUTH_CALLBACK_PATH}");
+    let state = generate_oauth_state();
+    let code_verifier = generate_code_verifier();
+    let code_challenge = generate_pkce_code_challenge(&code_verifier);
+
+    let mut authorize_url =
+        reqwest::Url::parse(&format!("{issuer}/oauth/authorize")).map_err(|err| {
+            AuthError::Validation(format!("invalid openai oauth authorize url: {err}"))
+        })?;
+    {
+        let mut query = authorize_url.query_pairs_mut();
+        query.append_pair("response_type", "code");
+        query.append_pair("client_id", OPENAI_CLIENT_ID);
+        query.append_pair("redirect_uri", &redirect_uri);
+        query.append_pair("scope", OPENAI_BROWSER_SCOPES);
+        query.append_pair("code_challenge", &code_challenge);
+        query.append_pair("code_challenge_method", "S256");
+        query.append_pair("state", &state);
+        query.append_pair("id_token_add_organizations", "true");
+        query.append_pair("codex_cli_simplified_flow", "true");
+        query.append_pair("originator", "rustcode");
+    }
+
+    Ok(BrowserOAuthFlowStart {
+        provider: "openai".to_string(),
+        domain: normalized_domain,
+        authorize_url: authorize_url.to_string(),
+        redirect_uri,
+        client_id: OPENAI_CLIENT_ID.to_string(),
+        state,
+        code_verifier,
+    })
+}
+
+fn start_gitlab_browser_oauth_flow(
+    domain: Option<&str>,
+    client_id: Option<&str>,
+    callback_port: u16,
+) -> Result<BrowserOAuthFlowStart, AuthError> {
+    let client_id = client_id.ok_or_else(|| {
+        AuthError::Validation(
+            "gitlab oauth client id is required to start browser oauth flow".to_string(),
+        )
+    })?;
     if client_id.trim().is_empty() {
         return Err(AuthError::Validation(
             "gitlab oauth client id must not be empty".to_string(),
@@ -668,7 +728,7 @@ fn start_gitlab_browser_oauth_flow(
     }
 
     let normalized_domain = normalize_domain(domain.unwrap_or("gitlab.com"))?;
-    let redirect_uri = format!("http://127.0.0.1:{callback_port}{OAUTH_CALLBACK_PATH}");
+    let redirect_uri = format!("http://127.0.0.1:{callback_port}{GITLAB_OAUTH_CALLBACK_PATH}");
     let state = generate_oauth_state();
     let code_verifier = generate_code_verifier();
     let code_challenge = generate_pkce_code_challenge(&code_verifier);
@@ -705,8 +765,8 @@ async fn complete_gitlab_browser_oauth_flow(
     timeout: Duration,
     client_secret: Option<&str>,
 ) -> Result<DeviceCodeFlowCredential, AuthError> {
-    let callback_port = callback_port_from_redirect_uri(&flow.redirect_uri)?;
-    let code = wait_for_oauth_callback(callback_port, &flow.state, timeout).await?;
+    let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
+    let code = wait_for_oauth_callback(&callback, &flow.state, timeout).await?;
 
     let token_url = format!("https://{}/oauth/token", flow.domain);
     let client = reqwest::Client::new();
@@ -760,14 +820,70 @@ async fn complete_gitlab_browser_oauth_flow(
     })
 }
 
+async fn complete_openai_browser_oauth_flow(
+    flow: &BrowserOAuthFlowStart,
+    timeout: Duration,
+) -> Result<DeviceCodeFlowCredential, AuthError> {
+    let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
+    let code = wait_for_oauth_callback(&callback, &flow.state, timeout).await?;
+
+    let token_url = format!("https://{}/oauth/token", flow.domain);
+    let client = reqwest::Client::new();
+    let response = client
+        .post(token_url)
+        .header("Accept", "application/json")
+        .header("Content-Type", "application/x-www-form-urlencoded")
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", code.as_str()),
+            ("redirect_uri", flow.redirect_uri.as_str()),
+            ("client_id", flow.client_id.as_str()),
+            ("code_verifier", flow.code_verifier.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|err| AuthError::Network(err.to_string()))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| AuthError::Network(err.to_string()))?;
+    if !status.is_success() {
+        return Err(AuthError::OAuthFailed(format!(
+            "openai token exchange failed with {status}: {body}"
+        )));
+    }
+
+    let token: OpenAiTokenExchangeResponse =
+        serde_json::from_str(&body).map_err(|err| AuthError::Parse(err.to_string()))?;
+    let account_id = token
+        .id_token
+        .as_deref()
+        .and_then(extract_openai_account_id_from_jwt)
+        .or_else(|| extract_openai_account_id_from_jwt(&token.access_token));
+
+    Ok(DeviceCodeFlowCredential {
+        access_token: token.access_token,
+        refresh_token: token.refresh_token,
+        expires_in_secs: token.expires_in,
+        account_id,
+    })
+}
+
 async fn wait_for_oauth_callback(
-    callback_port: u16,
+    callback: &CallbackRoute,
     expected_state: &str,
     timeout: Duration,
 ) -> Result<String, AuthError> {
-    let listener = TcpListener::bind(("127.0.0.1", callback_port))
+    let listener = TcpListener::bind(("127.0.0.1", callback.port))
         .await
-        .map_err(|err| AuthError::Network(format!("failed to bind oauth callback port: {err}")))?;
+        .map_err(|err| {
+            AuthError::Network(format!(
+                "failed to bind oauth callback port {}: {err}",
+                callback.port
+            ))
+        })?;
     let deadline = tokio::time::Instant::now() + timeout.max(Duration::from_secs(1));
 
     loop {
@@ -781,7 +897,9 @@ async fn wait_for_oauth_callback(
             .map_err(|_| AuthError::OAuthTimeout)?
             .map_err(|err| AuthError::Network(format!("oauth callback accept failed: {err}")))?;
         let (mut socket, _) = accepted;
-        if let Some(code) = handle_oauth_callback_connection(&mut socket, expected_state).await? {
+        if let Some(code) =
+            handle_oauth_callback_connection(&mut socket, expected_state, &callback.path).await?
+        {
             return Ok(code);
         }
     }
@@ -790,6 +908,7 @@ async fn wait_for_oauth_callback(
 async fn handle_oauth_callback_connection(
     socket: &mut tokio::net::TcpStream,
     expected_state: &str,
+    expected_path: &str,
 ) -> Result<Option<String>, AuthError> {
     let mut buffer = [0_u8; 16 * 1024];
     let read = tokio::time::timeout(Duration::from_secs(5), socket.read(&mut buffer))
@@ -815,7 +934,7 @@ async fn handle_oauth_callback_connection(
 
     let parsed_url = reqwest::Url::parse(&format!("http://localhost{target}"))
         .map_err(|err| AuthError::Parse(format!("oauth callback url parse failed: {err}")))?;
-    if parsed_url.path() != OAUTH_CALLBACK_PATH {
+    if parsed_url.path() != expected_path {
         write_callback_response(socket, "404 Not Found", "not found").await?;
         return Ok(None);
     }
@@ -875,12 +994,51 @@ async fn write_callback_response(
     Ok(())
 }
 
-fn callback_port_from_redirect_uri(redirect_uri: &str) -> Result<u16, AuthError> {
+#[derive(Debug, Clone)]
+struct CallbackRoute {
+    port: u16,
+    path: String,
+}
+
+fn callback_route_from_redirect_uri(redirect_uri: &str) -> Result<CallbackRoute, AuthError> {
     let parsed = reqwest::Url::parse(redirect_uri)
         .map_err(|err| AuthError::Validation(format!("invalid redirect uri: {err}")))?;
-    parsed.port_or_known_default().ok_or_else(|| {
+    let port = parsed.port_or_known_default().ok_or_else(|| {
         AuthError::Validation("redirect uri does not contain a callback port".to_string())
-    })
+    })?;
+    let path = if parsed.path().is_empty() {
+        "/".to_string()
+    } else {
+        parsed.path().to_string()
+    };
+    Ok(CallbackRoute { port, path })
+}
+
+fn extract_openai_account_id_from_jwt(token: &str) -> Option<String> {
+    let payload = token.split('.').nth(1)?;
+    let decoded = URL_SAFE_NO_PAD.decode(payload.as_bytes()).ok()?;
+    let claims = serde_json::from_slice::<serde_json::Value>(&decoded).ok()?;
+
+    claims
+        .get("chatgpt_account_id")
+        .and_then(serde_json::Value::as_str)
+        .map(ToOwned::to_owned)
+        .or_else(|| {
+            claims
+                .get("https://api.openai.com/auth")
+                .and_then(|value| value.get("chatgpt_account_id"))
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+        })
+        .or_else(|| {
+            claims
+                .get("organizations")
+                .and_then(serde_json::Value::as_array)
+                .and_then(|values| values.first())
+                .and_then(|value| value.get("id"))
+                .and_then(serde_json::Value::as_str)
+                .map(ToOwned::to_owned)
+        })
 }
 
 fn generate_oauth_state() -> String {
@@ -1065,7 +1223,11 @@ mod tests {
     fn oauth_method_mapping_is_provider_specific() {
         assert_eq!(
             methods_for_provider("openai"),
-            vec![AuthMethod::OAuthDeviceCode, AuthMethod::ApiKey]
+            vec![
+                AuthMethod::OAuthDeviceCode,
+                AuthMethod::OAuthBrowser,
+                AuthMethod::ApiKey,
+            ]
         );
         assert_eq!(
             methods_for_provider("github-copilot"),
@@ -1117,6 +1279,36 @@ mod tests {
         assert_eq!(parsed_string.value, 7);
     }
 
+    #[tokio::test]
+    async fn openai_browser_flow_builds_authorize_url() {
+        let flow = start_browser_oauth_flow("openai", None, None, 1455)
+            .await
+            .expect("openai browser flow should start");
+        assert_eq!(flow.provider, "openai");
+        assert_eq!(flow.redirect_uri, "http://127.0.0.1:1455/auth/callback");
+        assert!(flow
+            .authorize_url
+            .contains("https://auth.openai.com/oauth/authorize"));
+        assert!(flow
+            .authorize_url
+            .contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"));
+        assert!(flow.authorize_url.contains("code_challenge_method=S256"));
+    }
+
+    #[test]
+    fn extracts_openai_account_id_from_jwt_claims() {
+        let payload = serde_json::json!({
+            "chatgpt_account_id": "acct_123"
+        });
+        let encoded =
+            URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).expect("payload should serialize"));
+        let token = format!("header.{encoded}.signature");
+        assert_eq!(
+            extract_openai_account_id_from_jwt(&token).as_deref(),
+            Some("acct_123")
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn gitlab_browser_flow_round_trip_with_mock_token_exchange() {
         let Some(callback_port) = allocate_port() else {
@@ -1135,10 +1327,14 @@ mod tests {
             return;
         };
 
-        let flow =
-            start_browser_oauth_flow("gitlab", Some(&token_domain), "client-123", callback_port)
-                .await
-                .expect("flow should start");
+        let flow = start_browser_oauth_flow(
+            "gitlab",
+            Some(&token_domain),
+            Some("client-123"),
+            callback_port,
+        )
+        .await
+        .expect("flow should start");
         let authorize_url =
             reqwest::Url::parse(&flow.authorize_url).expect("authorize url should parse");
         let state = authorize_url

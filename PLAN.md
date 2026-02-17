@@ -11,6 +11,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Before implementing a feature, check both `opencode` and `codex` code/docs for behavior parity and capture references in the update log.
 - Do not consider a feature complete with tests alone; run live CLI usage paths for that feature and record observed output.
 - Ask the user immediately when external credentials, account context, or provider-specific access is required for end-to-end validation.
+- Maintain `docs/CREDENTIAL_REQUIREMENTS.md` as the canonical credential/env-var matrix; update it in the same commit as any auth flow change.
 
 ## Current Mode
 - Active mode: Slow Deep Research
@@ -418,6 +419,30 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `GITLAB_OAUTH_CLIENT_ID=... rustcode auth login gitlab --method oauth_browser --no-wait`
     - missing-client-id and api_key-without-env error paths.
 
+23. OpenAI Browser OAuth Adapter + Credential Rules
+- Status: completed
+- Deliverables:
+  - Implemented OpenAI browser OAuth adapter in `rustcode-auth`:
+    - authorize URL builder (`/oauth/authorize`) with PKCE and Codex-compatible parameters
+    - localhost callback handling on `/auth/callback`
+    - token exchange (`/oauth/token`) with PKCE verifier
+    - account-id extraction from JWT claims when available
+  - Extended `auth login` browser method routing:
+    - `openai` and `gitlab` now use concrete adapters instead of hint-only path.
+  - Added credentials governance doc:
+    - `docs/CREDENTIAL_REQUIREMENTS.md`
+    - includes required/optional env vars, provider matrix, and “ask-user-before-live-secrets” rule.
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration tests:
+    - `auth_login_openai_browser_no_wait_emits_authorize_url`
+    - updated providerless methods listing includes `oauth_browser` for OpenAI.
+  - Pass: live provider probes:
+    - `rustcode auth login openai --method oauth_browser --no-wait --oauth-port 1455`
+    - `rustcode auth login openai --no-wait --timeout-secs 10` (real device-flow endpoint)
+    - `rustcode auth login github-copilot --no-wait --timeout-secs 10` (real device-flow endpoint)
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -428,6 +453,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 ## Reference Docs
 - `https://opencode.ai/docs`
 - `https://developers.openai.com/codex/`
+- `docs/CREDENTIAL_REQUIREMENTS.md`
 - Use references during implementation phases for behavior parity checks and interoperability assumptions.
 
 ## Runtime Baseline (Rustcode Bootstrap)
@@ -451,8 +477,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
-2. Implement browser OAuth adapter for OpenAI (`oauth_browser`) to match opencode codex plugin parity.
-3. Wire backend selection policy into runtime provider-routing decisions and expose scoring diagnostics in CLI output.
+2. Wire backend selection policy into runtime provider-routing decisions and expose scoring diagnostics in CLI output.
+3. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 
 ## Update Log
 - 2026-02-17:
@@ -695,6 +721,12 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - implemented PKCE authorize URL + localhost callback + `/oauth/token` exchange for GitLab browser OAuth.
     - added CLI method selection + `--oauth-port` and updated provider docs.
     - validated via workspace tests, CI matrix, and live CLI probes for success and failure paths.
+  - Completed Milestone 23 OpenAI browser OAuth adapter + credential rules:
+    - implemented OpenAI browser OAuth authorize/callback/token-exchange path with PKCE.
+    - extracted OpenAI account context (`account_id`) from JWT claims when present.
+    - extended CLI browser method path to support both `openai` and `gitlab`.
+    - added `docs/CREDENTIAL_REQUIREMENTS.md` and linked it in operating rules.
+    - validated against real provider endpoints for OpenAI/Copilot device flows and OpenAI browser no-wait flow.
   - CI benchmark artifact publication enabled:
     - workflow now uploads `benchmarks/latest.json` via `actions/upload-artifact@v4`.
     - artifact name: `rustcode-benchmarks-latest`.
