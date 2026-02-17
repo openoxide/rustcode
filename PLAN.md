@@ -187,9 +187,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add trend-comparison utility on top of `benchmarks/latest.json`.
-2. Add automated benchmark assertions with conservative thresholds.
-3. Begin release packaging checklist (versioning, tagging, artifact naming).
+1. Add automated benchmark assertions with conservative thresholds.
+2. Begin release packaging checklist (versioning, tagging, artifact naming).
+3. Add benchmark history rotation policy (`latest` + dated snapshots).
 
 ## Update Log
 - 2026-02-17:
@@ -271,6 +271,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Completed Milestone 10:
     - Added release-prep docs (`QUICKSTART`, `CHANGELOG_POLICY`, `RELEASE_NOTES_DRAFT`).
     - Verified quickstart command matrix aligns with current CLI behavior.
+  - Added benchmark comparator utility:
+    - `scripts/benchmark_compare.sh <old.json> <new.json>`
+    - reports RSS and peak-footprint deltas for trend checks.
   - Extended benchmark harness with drift mode and captured sample stability run:
     - `./scripts/benchmark.sh drift 12 4`
     - RSS samples stabilized at `~5424 KB` over sampled window.

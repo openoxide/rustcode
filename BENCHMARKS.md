@@ -3,6 +3,7 @@
 ## Harness
 - Script: `scripts/benchmark.sh`
 - Recorder: `scripts/benchmark_record.sh`
+- Comparator: `scripts/benchmark_compare.sh`
 - Modes:
   - `startup [runs]`
   - `memory [prompt]`
@@ -16,6 +17,7 @@ Examples:
 ./scripts/benchmark.sh drift 20 5
 ./scripts/benchmark.sh serve 20 5
 ./scripts/benchmark_record.sh benchmarks/latest.json
+./scripts/benchmark_compare.sh benchmarks/old.json benchmarks/latest.json
 ```
 
 ## Notes
@@ -37,3 +39,5 @@ Examples:
   - service loop remained stable and exited cleanly on cancellation.
 - `./scripts/benchmark_record.sh benchmarks/latest.json`:
   - persists startup/memory/drift command output in JSON artifact format.
+- `./scripts/benchmark_compare.sh <old> <new>`:
+  - reports deltas for `maximum resident set size` and `peak memory footprint`.
