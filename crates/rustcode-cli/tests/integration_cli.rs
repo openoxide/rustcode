@@ -1198,6 +1198,53 @@ fn mcp_list_includes_configured_servers_without_credentials() {
 }
 
 #[test]
+fn mcp_list_reads_project_config_mcp_servers_when_trusted() {
+    let root = std::env::temp_dir().join(format!(
+        "rustcode-mcp-project-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).expect("must create project root");
+    std::fs::write(
+        root.join("rustcode.toml"),
+        r#"
+[mcp.servers.github]
+url = "https://accounts.google.com"
+oauth = { enabled = true, client_id = "cfg-client" }
+"#,
+    )
+    .expect("must write project config");
+
+    let output = Command::new(rustcode_bin())
+        .args(["--trust-project-config", "--json", "mcp", "list"])
+        .current_dir(&root)
+        .output()
+        .expect("must run rustcode mcp list");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_str(
+        String::from_utf8(output.stdout)
+            .expect("stdout must be utf8")
+            .trim(),
+    )
+    .expect("must parse json");
+    let servers = payload["servers"]
+        .as_array()
+        .expect("servers should be array");
+    assert!(servers
+        .iter()
+        .any(|row| row["name"].as_str() == Some("github")));
+}
+
+#[test]
 fn mcp_login_resolves_url_from_configured_server() {
     let Some((port, handle)) = spawn_mcp_discovery_server() else {
         return;

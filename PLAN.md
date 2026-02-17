@@ -791,16 +791,20 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Note: full live callback completion against a third-party MCP provider still requires user-provided app credentials.
 
 41. Layered MCP Config Integration
-- Status: in progress
+- Status: completed
 - Deliverables:
   - Move MCP server definitions from JSON sidecar fallback into layered `rustcode-config` resolution (global/user/project trust model).
   - Keep `RUSTCODE_MCP_SERVERS_PATH` fallback for compatibility while preferring resolved config state.
   - Add schema validation and diagnostics for MCP config fields (`url`, `oauth`, client-id/client-secret env references).
   - Ensure MCP config loading shares precedence semantics with existing LLM/plugin config paths.
-- Validation target:
-  - `cargo test -p rustcode-config -p rustcode-cli`
-  - `./scripts/ci_matrix.sh`
-  - live `mcp list/login` probes with global/user/project overrides
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test -p rustcode-config -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration test:
+    - `mcp_list_reads_project_config_mcp_servers_when_trusted`
+  - Pass: live probe:
+    - `cd <project-with-rustcode.toml> && rustcode --trust-project-config --json mcp list` includes configured servers
 
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
@@ -842,6 +846,12 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Update Log
 - 2026-02-17:
+  - Completed Milestone 41 layered MCP config integration:
+    - added `[mcp.servers.<name>]` to layered TOML config via `rustcode-config`.
+    - updated `rustcode-cli` MCP commands to consume `ResolvedConfig.mcp_servers` (preferred) with JSON sidecar fallback.
+    - added merge semantics so user/project layers override url/oauth fields without dropping prior settings.
+    - added schema validation for MCP server fields.
+    - added CLI integration test for project-config-backed MCP listing.
   - CI hang investigation (workflows):
     - root cause: OAuth round-trip tests used proxy-aware reqwest defaults without timeouts, which can stall in CI.
     - fix: added an internal auth HTTP client builder with explicit timeouts + `no_proxy()`; callback test requests use short no-proxy timeouts.

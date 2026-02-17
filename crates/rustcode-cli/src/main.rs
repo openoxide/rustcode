@@ -19,7 +19,7 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 use rustcode_config::{ConfigLoader, ConfigSources};
-use rustcode_core::config::ResolvedConfig;
+use rustcode_core::config::{McpServerConfig as CoreMcpServerConfig, ResolvedConfig};
 use rustcode_core::context::{CommandContext, SessionMeta};
 use rustcode_core::error::ExecutionError;
 use rustcode_core::event::EventPayload;
@@ -69,8 +69,30 @@ async fn main() -> Result<()> {
         };
     }
     if let TopCommand::Mcp { command } = &cli.command {
-        return match handle_mcp_command(command.clone(), cli.json).await {
-            Ok(()) => Ok(()),
+        let config_result = load_effective_config(&cli);
+        return match config_result {
+            Ok(config) => match handle_mcp_command(command.clone(), cli.json, &config).await {
+                Ok(()) => Ok(()),
+                Err(err) => {
+                    if cli.json {
+                        if let McpCommand::Login { name, url, .. } = command {
+                            let payload = serde_json::json!({
+                                "schema_version": 1,
+                                "command": "mcp.login",
+                                "name": name,
+                                "url": url,
+                                "stage": "failed",
+                                "error_kind": classify_mcp_error(&err),
+                                "error": err.to_string(),
+                            });
+                            if let Ok(serialized) = serde_json::to_string(&payload) {
+                                let _ = write_stdout_line(&serialized);
+                            }
+                        }
+                    }
+                    Err(err)
+                }
+            },
             Err(err) => {
                 if cli.json {
                     if let McpCommand::Login { name, url, .. } = command {
@@ -743,9 +765,13 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
     Ok(())
 }
 
-async fn handle_mcp_command(command: McpCommand, json_output: bool) -> Result<()> {
+async fn handle_mcp_command(
+    command: McpCommand,
+    json_output: bool,
+    config: &ResolvedConfig,
+) -> Result<()> {
     let store = AuthStore::open_default();
-    let configured_servers = load_mcp_servers_config()?;
+    let configured_servers = resolve_configured_mcp_servers(config)?;
     match command {
         McpCommand::List => {
             let stored_servers = store
@@ -1170,6 +1196,20 @@ impl McpConfigEntry {
     }
 }
 
+impl From<&CoreMcpServerConfig> for McpConfigEntry {
+    fn from(value: &CoreMcpServerConfig) -> Self {
+        let oauth = Some(McpOAuthConfig::Settings(McpOAuthSettings {
+            enabled: Some(value.oauth.enabled),
+            client_id: value.oauth.client_id.clone(),
+            client_secret_env: value.oauth.client_secret_env.clone(),
+        }));
+        Self {
+            url: value.url.clone(),
+            oauth,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum McpLoginMethod {
     TokenImport,
@@ -1280,6 +1320,16 @@ fn load_mcp_servers_config() -> Result<BTreeMap<String, McpConfigEntry>> {
         .with_context(|| format!("failed to read MCP servers config {}", path.display()))?;
     serde_json::from_str::<BTreeMap<String, McpConfigEntry>>(&raw)
         .with_context(|| format!("failed to parse MCP servers config {}", path.display()))
+}
+
+fn resolve_configured_mcp_servers(
+    config: &ResolvedConfig,
+) -> Result<BTreeMap<String, McpConfigEntry>> {
+    let mut merged = load_mcp_servers_config()?;
+    for (name, server) in &config.mcp_servers {
+        merged.insert(name.clone(), McpConfigEntry::from(server));
+    }
+    Ok(merged)
 }
 
 fn resolve_mcp_servers_path() -> Option<PathBuf> {

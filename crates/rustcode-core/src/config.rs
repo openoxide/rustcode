@@ -10,6 +10,7 @@ pub struct ResolvedConfig {
     pub llm_provider: String,
     pub llm_base_url: Option<String>,
     pub llm_api_key_env: Option<String>,
+    pub mcp_servers: BTreeMap<String, McpServerConfig>,
     pub plugins: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub backend_selection: BackendSelectionPolicy,
@@ -25,6 +26,29 @@ pub struct BackendSelectionPolicy {
     pub lsp_support_weight: i32,
     pub privacy_weight: i32,
     pub subscription_penalty: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpServerConfig {
+    pub url: Option<String>,
+    pub oauth: McpOAuthConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct McpOAuthConfig {
+    pub enabled: bool,
+    pub client_id: Option<String>,
+    pub client_secret_env: Option<String>,
+}
+
+impl Default for McpOAuthConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            client_id: None,
+            client_secret_env: None,
+        }
+    }
 }
 
 impl Default for BackendSelectionPolicy {
@@ -50,6 +74,7 @@ impl Default for ResolvedConfig {
             llm_provider: "null".to_string(),
             llm_base_url: None,
             llm_api_key_env: None,
+            mcp_servers: BTreeMap::new(),
             plugins: Vec::new(),
             env: BTreeMap::new(),
             backend_selection: BackendSelectionPolicy::default(),

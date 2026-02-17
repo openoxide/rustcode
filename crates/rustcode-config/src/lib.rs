@@ -2,7 +2,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use rustcode_core::config::{BackendSelectionPolicy, ResolvedConfig};
+use rustcode_core::config::{
+    BackendSelectionPolicy, McpOAuthConfig, McpServerConfig, ResolvedConfig,
+};
 use rustcode_core::error::ConfigError;
 use serde::Deserialize;
 
@@ -44,6 +46,7 @@ struct FileConfig {
     profile: Option<String>,
     model: Option<String>,
     llm: Option<LlmConfig>,
+    mcp: Option<McpConfig>,
     allow_network: Option<bool>,
     plugins: Option<Vec<String>>,
     env: Option<BTreeMap<String, String>>,
@@ -58,6 +61,31 @@ struct LlmConfig {
     base_url: Option<String>,
     #[serde(alias = "apiKeyEnv")]
     api_key_env: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct McpConfig {
+    servers: Option<BTreeMap<String, McpServerFileConfig>>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct McpServerFileConfig {
+    url: Option<String>,
+    oauth: Option<McpOAuthFileConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum McpOAuthFileConfig {
+    Enabled(bool),
+    Settings(McpOAuthFileSettings),
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct McpOAuthFileSettings {
+    enabled: Option<bool>,
+    client_id: Option<String>,
+    client_secret_env: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -253,6 +281,11 @@ fn apply_file(cfg: &mut ResolvedConfig, file_cfg: &FileConfig) {
             cfg.llm_api_key_env = Some(api_key_env.clone());
         }
     }
+    if let Some(mcp) = &file_cfg.mcp {
+        if let Some(servers) = &mcp.servers {
+            merge_mcp_servers(&mut cfg.mcp_servers, servers);
+        }
+    }
     if let Some(allow_network) = file_cfg.allow_network {
         cfg.allow_network = allow_network;
     }
@@ -268,6 +301,39 @@ fn apply_file(cfg: &mut ResolvedConfig, file_cfg: &FileConfig) {
         if let Some(backend_selection) = &policy.backend_selection {
             merge_backend_selection_policy(&mut cfg.backend_selection, backend_selection);
         }
+    }
+}
+
+fn merge_mcp_servers(
+    current: &mut BTreeMap<String, McpServerConfig>,
+    incoming: &BTreeMap<String, McpServerFileConfig>,
+) {
+    for (name, server) in incoming {
+        let mut entry = current.remove(name).unwrap_or(McpServerConfig {
+            url: None,
+            oauth: McpOAuthConfig::default(),
+        });
+        if server.url.is_some() {
+            entry.url = server.url.clone();
+        }
+        let oauth = match &server.oauth {
+            None => entry.oauth.clone(),
+            Some(McpOAuthFileConfig::Enabled(enabled)) => McpOAuthConfig {
+                enabled: *enabled,
+                client_id: entry.oauth.client_id.clone(),
+                client_secret_env: entry.oauth.client_secret_env.clone(),
+            },
+            Some(McpOAuthFileConfig::Settings(settings)) => McpOAuthConfig {
+                enabled: settings.enabled.unwrap_or(true),
+                client_id: settings.client_id.clone().or(entry.oauth.client_id),
+                client_secret_env: settings
+                    .client_secret_env
+                    .clone()
+                    .or(entry.oauth.client_secret_env),
+            },
+        };
+        entry.oauth = oauth;
+        current.insert(name.clone(), entry);
     }
 }
 
@@ -363,6 +429,34 @@ fn validate(cfg: &ResolvedConfig) -> Result<(), ConfigError> {
             return Err(ConfigError::Validation(
                 "llm.api_key_env must not be empty".to_string(),
             ));
+        }
+    }
+    for (name, server) in &cfg.mcp_servers {
+        if name.trim().is_empty() {
+            return Err(ConfigError::Validation(
+                "mcp.servers entries must have non-empty names".to_string(),
+            ));
+        }
+        if let Some(url) = server.url.as_ref() {
+            if url.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "mcp.servers.{name}.url must not be empty"
+                )));
+            }
+        }
+        if let Some(client_id) = server.oauth.client_id.as_ref() {
+            if client_id.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "mcp.servers.{name}.oauth.client_id must not be empty"
+                )));
+            }
+        }
+        if let Some(secret_env) = server.oauth.client_secret_env.as_ref() {
+            if secret_env.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "mcp.servers.{name}.oauth.client_secret_env must not be empty"
+                )));
+            }
         }
     }
     validate_non_negative(
@@ -607,6 +701,106 @@ apiKeyEnv = "ANTHROPIC_API_KEY"
             Some("https://api.anthropic.com")
         );
         assert_eq!(cfg.llm_api_key_env.as_deref(), Some("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn mcp_server_config_layers_and_merges() {
+        let temp_root = make_temp_dir("mcp-config");
+        let cwd = temp_root.join("project");
+        fs::create_dir_all(&cwd).expect("must create cwd");
+
+        let global = temp_root.join("global.toml");
+        let user = temp_root.join("user.toml");
+        let project = cwd.join("rustcode.toml");
+
+        write_config(
+            &global,
+            r#"
+[mcp.servers.github]
+url = "https://global.example.com/mcp"
+oauth = true
+"#,
+        );
+        write_config(
+            &user,
+            &format!(
+                r#"
+[mcp.servers.github]
+url = "https://user.example.com/mcp"
+oauth = {{ enabled = true, client_id = "user-client" }}
+
+[trust]
+projects = ["{}"]
+"#,
+                cwd.display()
+            ),
+        );
+        write_config(
+            &project,
+            r#"
+[mcp.servers.github]
+oauth = { enabled = false }
+
+[mcp.servers.linear]
+url = "https://linear.example.com/mcp"
+"#,
+        );
+
+        let mut sources = ConfigSources::new(cwd);
+        sources.read_process_env = false;
+        sources.global_config_path = Some(global);
+        sources.user_config_path = Some(user);
+        sources.project_config_path = Some(project);
+        sources.trust_project = true;
+
+        let cfg = ConfigLoader::load(&sources).expect("config should load");
+        assert_eq!(cfg.mcp_servers.len(), 2);
+
+        let github = cfg
+            .mcp_servers
+            .get("github")
+            .expect("github mcp config should exist");
+        assert_eq!(github.url.as_deref(), Some("https://user.example.com/mcp"));
+        assert!(!github.oauth.enabled);
+        assert_eq!(github.oauth.client_id.as_deref(), Some("user-client"));
+
+        let linear = cfg
+            .mcp_servers
+            .get("linear")
+            .expect("linear mcp config should exist");
+        assert_eq!(
+            linear.url.as_deref(),
+            Some("https://linear.example.com/mcp")
+        );
+        assert!(linear.oauth.enabled);
+    }
+
+    #[test]
+    fn mcp_server_config_rejects_empty_url() {
+        let temp_root = make_temp_dir("mcp-config-invalid");
+        let cwd = temp_root.join("project");
+        fs::create_dir_all(&cwd).expect("must create cwd");
+        let global = temp_root.join("global.toml");
+
+        write_config(
+            &global,
+            r#"
+[mcp.servers.github]
+url = "   "
+"#,
+        );
+
+        let mut sources = ConfigSources::new(cwd);
+        sources.read_process_env = false;
+        sources.global_config_path = Some(global);
+
+        let err = ConfigLoader::load(&sources).expect_err("must reject empty mcp url");
+        match err {
+            ConfigError::Validation(message) => {
+                assert!(message.contains("mcp.servers.github.url"));
+            }
+            _ => panic!("expected validation error"),
+        }
     }
 
     #[test]
