@@ -127,7 +127,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass (partial): event-consumer TUI loop wired in CLI path (`rustcode-cli tui`) with integration + unit tests (2026-02-17)
 
 9. Hardening and Benchmarks
-- Status: pending
+- Status: in_progress
 - Deliverables:
   - startup benchmark
   - memory benchmark
@@ -135,6 +135,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation targets:
   - warm startup under `50ms` for trivial non-interactive command
   - stable memory in long-run idle sample
+  - Pass (partial): benchmark harness script added (`scripts/benchmark.sh`) with startup and memory modes (2026-02-17)
+  - Note: sandbox restricts detailed `/usr/bin/time -l` metrics; fallback timing output used in restricted runs.
 
 10. Documentation and Release Prep
 - Status: pending
@@ -179,7 +181,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 ## Next Action Queue
 1. Complete TUI signal/resize handling contracts and smoke checklist.
 2. Expand plugin boundary with fixture plugin crate integration tests.
-3. Add benchmark harness for startup and memory tracking.
+3. Run benchmark harness outside sandbox-restricted timing mode to capture RSS baselines.
 
 ## Update Log
 - 2026-02-17:
@@ -236,3 +238,6 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - Wired `tui` command path to `rustcode-tui` event consumer.
     - Added `UiSummary` contract and TUI loop consumption test.
     - Added CLI integration test asserting `tui` route uses TUI path and exits cleanly.
+  - Started Milestone 9:
+    - Added benchmark harness `scripts/benchmark.sh` and usage doc `BENCHMARKS.md`.
+    - Validated startup mode and fallback timing behavior in restricted environment.
