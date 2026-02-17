@@ -193,7 +193,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 ## Next Action Queue
 1. Add serve telemetry assertion script for CI artifacts.
 2. Add baseline refresh workflow for `benchmarks/release-baseline.json`.
-3. Define GitHub release automation flow (`tag -> artifact -> release notes -> gh release`).
+3. Add release PR template/checklist enforcement before tag cut.
 
 ## Update Log
 - 2026-02-17:
@@ -343,6 +343,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - CI stability hardening:
     - de-flaked `sigint_cancels_long_running_command_gracefully` integration test with explicit child-running precondition.
     - improved failure diagnostics by including child exit status in assertion output.
+  - GitHub release automation:
+    - added `scripts/release_with_gh.sh` (`--dry-run`, `--skip-checks`, configurable notes/artifact paths).
+    - script enforces clean tree, unique tag checks, CI/release-gate checks, and `gh release create`.
   - Added structured serve telemetry:
     - introduced `EventPayload::ServeRequest { method, path, status }`.
     - `serve` now emits route-level events for each handled request.

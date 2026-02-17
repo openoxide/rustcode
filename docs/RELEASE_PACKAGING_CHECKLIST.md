@@ -22,6 +22,9 @@
 1. Finalize `docs/RELEASE_NOTES_DRAFT.md` into release notes.
 2. Create annotated tag: `v<version>`.
 3. Include benchmark artifact reference (`benchmarks/latest.json`) in release metadata.
+4. Preferred automation:
+   - dry-run: `./scripts/release_with_gh.sh <version> --dry-run`
+   - execute: `./scripts/release_with_gh.sh <version>`
 
 ## Post-Release
 1. Snapshot benchmark artifact:
