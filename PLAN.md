@@ -180,8 +180,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Complete TUI signal/resize handling contracts and smoke checklist.
-2. Expand plugin boundary with fixture plugin crate integration tests.
-3. Run benchmark harness outside sandbox-restricted timing mode to capture RSS baselines.
+2. Run benchmark harness outside sandbox-restricted timing mode to capture RSS baselines.
+3. Define first TUI manual smoke checklist and persist it in repo.
 
 ## Update Log
 - 2026-02-17:
@@ -241,3 +241,6 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Started Milestone 9:
     - Added benchmark harness `scripts/benchmark.sh` and usage doc `BENCHMARKS.md`.
     - Validated startup mode and fallback timing behavior in restricted environment.
+  - Expanded plugin boundary validation with fixture integration test:
+    - `crates/rustcode-plugins/tests/fixture_plugin.rs`
+    - validated via `cargo test -p rustcode-plugins` and `cargo test --workspace`.

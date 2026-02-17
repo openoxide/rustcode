@@ -10,5 +10,8 @@ rustcode-core = { path = "../rustcode-core" }
 async-trait.workspace = true
 thiserror.workspace = true
 
+[dev-dependencies]
+tokio.workspace = true
+
 [lints]
 workspace = true

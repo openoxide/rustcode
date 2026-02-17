@@ -387,6 +387,7 @@ dependencies = [
  "async-trait",
  "rustcode-core",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
