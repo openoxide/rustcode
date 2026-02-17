@@ -544,6 +544,22 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration test `auth_login_api_key_provider_requires_from_env_in_non_interactive_mode`
 
+30. Providerless Auth Methods Discovery
+- Status: completed
+- Deliverables:
+  - Updated `auth methods` command to accept optional provider:
+    - `rustcode auth methods <provider>` preserves provider-specific behavior.
+    - `rustcode auth methods` now lists available providers with auth methods.
+  - Added providerless method listing sourced from models index (`RUSTCODE_MODELS_PATH`/cache path resolution).
+  - Added fallback listing for known OAuth-capable providers when models index is unavailable.
+  - Added parser and integration coverage for optional-provider command contract.
+- Validation:
+  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration test `auth_methods_without_provider_lists_available_rows`
+  - Pass: live CLI probe:
+    - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- auth methods` returned provider rows with method sets.
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -580,9 +596,20 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 1. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 2. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
 3. Add initial MCP auth/login command surface parity for remote OAuth-capable servers.
+4. Add `auth methods --json` machine-readable output parity for automation flows.
 
 ## Update Log
 - 2026-02-17:
+  - Completed Milestone 30 providerless auth-method discovery:
+    - `auth methods` now supports providerless mode and lists provider/method rows.
+    - preserved provider-specific output for `auth methods <provider>`.
+    - added parser test `auth_methods_parses_with_optional_provider`.
+    - added integration test `auth_methods_without_provider_lists_available_rows`.
+  - Validation passed:
+    - `cargo fmt --all`
+    - `cargo test -p rustcode-cli`
+    - `./scripts/ci_matrix.sh`
+    - live probe: `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- auth methods`
   - Created initial execution plan from measured comparative audit.
   - Added Milestone 0 as completed (baseline research and architecture extraction).
   - Marked implementation milestones pending until coding kickoff.

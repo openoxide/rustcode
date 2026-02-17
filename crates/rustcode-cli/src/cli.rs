@@ -77,7 +77,7 @@ pub enum AuthCommand {
     #[command(alias = "ls")]
     List,
     Methods {
-        provider: String,
+        provider: Option<String>,
     },
     Status {
         provider: String,
@@ -303,6 +303,27 @@ mod tests {
                 command: AuthCommand::List,
             } => {}
             _ => panic!("expected auth list command"),
+        }
+    }
+
+    #[test]
+    fn auth_methods_parses_with_optional_provider() {
+        let with_provider = Cli::try_parse_from(["rustcode", "auth", "methods", "openai"])
+            .expect("cli should parse");
+        match with_provider.command {
+            TopCommand::Auth {
+                command: AuthCommand::Methods { provider },
+            } => assert_eq!(provider.as_deref(), Some("openai")),
+            _ => panic!("expected auth methods command"),
+        }
+
+        let without_provider =
+            Cli::try_parse_from(["rustcode", "auth", "methods"]).expect("cli should parse");
+        match without_provider.command {
+            TopCommand::Auth {
+                command: AuthCommand::Methods { provider },
+            } => assert!(provider.is_none()),
+            _ => panic!("expected auth methods command"),
         }
     }
 

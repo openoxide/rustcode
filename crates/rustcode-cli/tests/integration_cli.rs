@@ -352,6 +352,45 @@ fn auth_methods_gitlab_reports_browser_oauth() {
 }
 
 #[test]
+fn auth_methods_without_provider_lists_available_rows() {
+    let models_path = make_temp_file_path("auth-methods-models");
+    std::fs::write(
+        &models_path,
+        r#"{
+  "openai": { "name": "OpenAI", "models": { "gpt-5": {} } },
+  "openrouter": { "name": "OpenRouter", "models": { "openai/gpt-5": {} } }
+}"#,
+    )
+    .expect("must write models fixture");
+
+    let output = Command::new(rustcode_bin())
+        .args(["auth", "methods"])
+        .env("RUSTCODE_MODELS_PATH", &models_path)
+        .output()
+        .expect("must run rustcode auth methods");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains("providers=2"), "stdout: {stdout}");
+    assert!(
+        stdout.contains(
+            "provider=openai\tname=OpenAI\tmethods=oauth_device_code|oauth_browser|api_key"
+        ),
+        "stdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("provider=openrouter\tname=OpenRouter\tmethods=api_key"),
+        "stdout: {stdout}"
+    );
+}
+
+#[test]
 fn auth_login_gitlab_browser_no_wait_emits_authorize_url() {
     let output = Command::new(rustcode_bin())
         .args([

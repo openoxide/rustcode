@@ -167,16 +167,20 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
             }
         }
         AuthCommand::Methods { provider } => {
-            let methods = methods_for_provider(&provider);
-            let rendered = methods
-                .into_iter()
-                .map(|method| method.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            if !write_stdout_line(&format!("provider={provider}"))?
-                || !write_stdout_line(&format!("methods={rendered}"))?
-            {
-                return Ok(());
+            if let Some(provider) = provider {
+                let methods = methods_for_provider(&provider);
+                let rendered = methods
+                    .into_iter()
+                    .map(|method| method.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if !write_stdout_line(&format!("provider={provider}"))?
+                    || !write_stdout_line(&format!("methods={rendered}"))?
+                {
+                    return Ok(());
+                }
+            } else {
+                list_auth_methods()?;
             }
         }
         AuthCommand::Status { provider } => {
@@ -826,6 +830,57 @@ fn list_auth_login_providers() -> Result<()> {
         )?
         || !write_stdout_line(&format!("providers={}", rows.len()))?
     {
+        return Ok(());
+    }
+    for (provider_id, display_name, methods) in rows.drain(..) {
+        if !write_stdout_line(&format!(
+            "provider={provider_id}\tname={display_name}\tmethods={methods}"
+        ))? {
+            return Ok(());
+        }
+    }
+    Ok(())
+}
+
+fn list_auth_methods() -> Result<()> {
+    let index = load_models_index();
+    let mut rows: Vec<(String, String, String)> = match index {
+        Ok(index) => {
+            let mut rows = index
+                .into_iter()
+                .map(|(provider_id, provider)| {
+                    let methods = render_auth_methods(&methods_for_provider(&provider_id));
+                    let display_name = provider.name.unwrap_or_else(|| provider_id.clone());
+                    (provider_id, display_name, methods)
+                })
+                .collect::<Vec<_>>();
+            rows.sort_by(|a, b| {
+                auth_login_priority(&a.0)
+                    .cmp(&auth_login_priority(&b.0))
+                    .then_with(|| a.1.cmp(&b.1))
+            });
+            rows
+        }
+        Err(err) => {
+            if !write_stdout_line(&format!("warning={err}"))? {
+                return Ok(());
+            }
+            let mut rows = known_oauth_providers()
+                .iter()
+                .map(|provider| {
+                    (
+                        (*provider).to_string(),
+                        (*provider).to_string(),
+                        render_auth_methods(&methods_for_provider(provider)),
+                    )
+                })
+                .collect::<Vec<_>>();
+            rows.sort_by(|a, b| a.0.cmp(&b.0));
+            rows
+        }
+    };
+
+    if !write_stdout_line(&format!("providers={}", rows.len()))? {
         return Ok(());
     }
     for (provider_id, display_name, methods) in rows.drain(..) {
