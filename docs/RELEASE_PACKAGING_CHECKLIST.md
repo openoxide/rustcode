@@ -30,4 +30,6 @@
 1. Snapshot benchmark artifact:
    - `./scripts/benchmark_snapshot.sh benchmarks/latest.json benchmarks/history`
 2. Rotate old snapshots via retention policy.
-3. Advance `PLAN.md` next-action queue for following cycle.
+3. Refresh release baseline (for next release branch comparisons):
+   - `./scripts/refresh_release_baseline.sh --from-latest`
+4. Advance `PLAN.md` next-action queue for following cycle.

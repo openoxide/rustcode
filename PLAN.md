@@ -191,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add baseline refresh workflow for `benchmarks/release-baseline.json`.
-2. Add release PR template/checklist enforcement before tag cut.
-3. Add optional CI mode that runs release gate on manual dispatch.
+1. Add release PR template/checklist enforcement before tag cut.
+2. Add optional CI mode that runs release gate on manual dispatch.
+3. Add CI baseline-drift report comment for release PRs.
 
 ## Update Log
 - 2026-02-17:
@@ -350,6 +350,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - added `scripts/assert_serve_telemetry.sh` for benchmark artifact validation.
     - updated `scripts/benchmark.sh serve` to generate `/health` and unknown-route request events.
     - wired serve telemetry assertion into `scripts/ci_matrix.sh`.
+  - Baseline refresh workflow:
+    - added `scripts/refresh_release_baseline.sh` to validate and promote release baseline artifacts.
+    - supports `--from-latest` fast path for post-release baseline promotion.
   - Added structured serve telemetry:
     - introduced `EventPayload::ServeRequest { method, path, status }`.
     - `serve` now emits route-level events for each handled request.

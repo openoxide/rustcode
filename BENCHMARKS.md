@@ -8,6 +8,7 @@
 - Release Gate: `scripts/benchmark_release_gate.sh`
 - Metrics Parser: `scripts/benchmark_metrics.sh`
 - Serve Telemetry Assert: `scripts/assert_serve_telemetry.sh`
+- Baseline Refresh: `scripts/refresh_release_baseline.sh`
 - Snapshot/Rotation: `scripts/benchmark_snapshot.sh`
 - Modes:
   - `startup [runs]`
@@ -28,6 +29,7 @@ Examples:
 ./scripts/benchmark_assert.sh benchmarks/latest.json
 ./scripts/assert_serve_telemetry.sh benchmarks/latest.json
 ./scripts/benchmark_release_gate.sh benchmarks/release-baseline.json benchmarks/latest.json
+./scripts/refresh_release_baseline.sh
 ./scripts/benchmark_snapshot.sh benchmarks/latest.json benchmarks/history
 ```
 
@@ -79,6 +81,8 @@ Examples:
 - GitHub Actions release branches (`release/*`) execute:
   - `./scripts/benchmark_release_gate.sh benchmarks/release-baseline.json benchmarks/latest.json`
   - release gate uses a tracked baseline artifact: `benchmarks/release-baseline.json`.
+- `./scripts/refresh_release_baseline.sh [--from-latest]`:
+  - regenerates/validates benchmark artifact and promotes it to `benchmarks/release-baseline.json`.
 - `./scripts/benchmark_snapshot.sh <latest> <history_dir>`:
   - writes UTC-timestamped benchmark snapshots.
   - prunes oldest snapshots beyond `KEEP_BENCHMARK_SNAPSHOTS` (default `20`).
