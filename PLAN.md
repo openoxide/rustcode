@@ -723,6 +723,24 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `cargo run -q -p rustcode-cli -- --json mcp login demo --url https://example.com/mcp` (unsupported discovery path)
     - `cargo run -q -p rustcode-cli -- --json mcp login demo --from-env ... --url https://example.com/mcp` (env credential path)
 
+38. MCP Login JSON Failure Envelope
+- Status: completed
+- Deliverables:
+  - Added structured failure envelope for `--json mcp login` command errors:
+    - `stage=failed`
+    - `error_kind` classification (`validation`, `provider`, `network`)
+    - `error` message and request context fields (`name`, `url`)
+  - Preserved non-JSON failure behavior (stderr + non-zero exit).
+  - Added integration coverage for missing login mode (`--from-env`/`--url`) in JSON mode.
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration test:
+    - `mcp_login_missing_mode_json_emits_failed_envelope`
+  - Pass: live CLI probe:
+    - `cargo run -q -p rustcode-cli -- --json mcp login github` returns JSON failure envelope and non-zero exit.
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -763,6 +781,22 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Update Log
 - 2026-02-17:
+  - Completed Milestone 38 MCP login JSON failure envelope:
+    - added structured `stage=failed` payloads for `--json mcp login` errors.
+    - added `error_kind` classification (`validation`/`provider`/`network`).
+    - added integration test:
+      - `mcp_login_missing_mode_json_emits_failed_envelope`
+  - Milestone 38 references (code + docs):
+    - `opencode/packages/opencode/src/cli/cmd/mcp.ts`
+    - `codex/codex-rs/cli/src/mcp_cmd.rs`
+    - `https://opencode.ai/docs`
+    - `https://developers.openai.com/codex/`
+  - Validation passed:
+    - `cargo fmt --all`
+    - `cargo test -p rustcode-cli`
+    - `./scripts/ci_matrix.sh`
+    - live probe:
+      - `cargo run -q -p rustcode-cli -- --json mcp login github`
   - Completed Milestone 37 MCP OAuth discovery + staged login contract:
     - added discovery primitive (`discover_mcp_oauth`) in `rustcode-auth`.
     - extended `mcp login --url` to emit staged contract (`oauth_discovered`, `awaiting_token_import`).

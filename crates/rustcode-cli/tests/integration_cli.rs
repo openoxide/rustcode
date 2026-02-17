@@ -1157,6 +1157,23 @@ fn mcp_login_requires_from_env_in_non_interactive_mode() {
 }
 
 #[test]
+fn mcp_login_missing_mode_json_emits_failed_envelope() {
+    let output = Command::new(rustcode_bin())
+        .args(["--json", "mcp", "login", "github"])
+        .output()
+        .expect("must run rustcode mcp login");
+
+    assert!(!output.status.success(), "command should fail");
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let payload: Value = serde_json::from_str(stdout.trim()).expect("stdout should be json");
+    assert_eq!(payload["schema_version"].as_u64(), Some(1));
+    assert_eq!(payload["command"].as_str(), Some("mcp.login"));
+    assert_eq!(payload["name"].as_str(), Some("github"));
+    assert_eq!(payload["stage"].as_str(), Some("failed"));
+    assert_eq!(payload["error_kind"].as_str(), Some("validation"));
+}
+
+#[test]
 fn mcp_login_oauth_discovery_json_emits_staged_contract() {
     let Some((port, handle)) = spawn_mcp_discovery_server() else {
         return;

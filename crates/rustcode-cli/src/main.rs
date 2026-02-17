@@ -68,7 +68,28 @@ async fn main() -> Result<()> {
         };
     }
     if let TopCommand::Mcp { command } = &cli.command {
-        return handle_mcp_command(command.clone(), cli.json).await;
+        return match handle_mcp_command(command.clone(), cli.json).await {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                if cli.json {
+                    if let McpCommand::Login { name, url, .. } = command {
+                        let payload = serde_json::json!({
+                            "schema_version": 1,
+                            "command": "mcp.login",
+                            "name": name,
+                            "url": url,
+                            "stage": "failed",
+                            "error_kind": classify_mcp_error(&err),
+                            "error": err.to_string(),
+                        });
+                        if let Ok(serialized) = serde_json::to_string(&payload) {
+                            let _ = write_stdout_line(&serialized);
+                        }
+                    }
+                }
+                Err(err)
+            }
+        };
     }
     if let TopCommand::Models { provider } = &cli.command {
         let config = load_effective_config(&cli)?;
@@ -957,6 +978,25 @@ fn classify_auth_error(err: &anyhow::Error) -> &'static str {
     if msg.contains("oauth polling failed")
         || msg.contains("authorization failed")
         || msg.contains("invalid oauth")
+    {
+        return "provider";
+    }
+    "validation"
+}
+
+fn classify_mcp_error(err: &anyhow::Error) -> &'static str {
+    let msg = err.to_string().to_ascii_lowercase();
+    if msg.contains("network")
+        || msg.contains("timed out")
+        || msg.contains("timeout")
+        || msg.contains("connection")
+    {
+        return "network";
+    }
+    if msg.contains("oauth")
+        || msg.contains("authorization_endpoint")
+        || msg.contains("token_endpoint")
+        || msg.contains("does not advertise")
     {
         return "provider";
     }
