@@ -560,6 +560,27 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: live CLI probe:
     - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- auth methods` returned provider rows with method sets.
 
+31. Auth Methods JSON Contract
+- Status: completed
+- Deliverables:
+  - Added machine-readable output for auth method discovery:
+    - `rustcode --json auth methods <provider>`
+    - `rustcode --json auth methods`
+  - Preserved existing text output contract for non-JSON paths.
+  - Added shared provider-row resolver for auth login/method listings to reduce duplicate behavior paths.
+  - Included optional warning field in JSON providerless output when models index discovery falls back.
+  - Added integration coverage for JSON parseability and row content.
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration tests:
+    - `auth_methods_json_provider_detail_is_parseable`
+    - `auth_methods_json_without_provider_lists_available_rows`
+  - Pass: live CLI probes:
+    - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth methods`
+    - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth methods openai`
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -596,10 +617,27 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 1. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 2. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
 3. Add initial MCP auth/login command surface parity for remote OAuth-capable servers.
-4. Add `auth methods --json` machine-readable output parity for automation flows.
+4. Extend JSON parity to `auth status` and `auth list` for scripting workflows.
 
 ## Update Log
 - 2026-02-17:
+  - Completed Milestone 31 auth-methods JSON contract:
+    - added `--json auth methods <provider>` and `--json auth methods` machine-readable outputs.
+    - kept text output behavior stable for existing scripts.
+    - added integration tests:
+      - `auth_methods_json_provider_detail_is_parseable`
+      - `auth_methods_json_without_provider_lists_available_rows`
+    - refactored provider-row resolution into a shared auth listing helper.
+  - Referenced parity sources before implementation:
+    - `opencode/packages/opencode/src/cli/cmd/auth.ts`
+    - `codex/codex-rs/cli/src/login.rs`
+  - Validation passed:
+    - `cargo fmt --all`
+    - `cargo test -p rustcode-cli`
+    - `./scripts/ci_matrix.sh`
+    - live probes:
+      - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth methods`
+      - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth methods openai`
   - Completed Milestone 30 providerless auth-method discovery:
     - `auth methods` now supports providerless mode and lists provider/method rows.
     - preserved provider-specific output for `auth methods <provider>`.

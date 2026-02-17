@@ -391,6 +391,98 @@ fn auth_methods_without_provider_lists_available_rows() {
 }
 
 #[test]
+fn auth_methods_json_provider_detail_is_parseable() {
+    let output = Command::new(rustcode_bin())
+        .args(["--json", "auth", "methods", "openai"])
+        .output()
+        .expect("must run rustcode auth methods");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let payload: Value = serde_json::from_str(stdout.trim()).expect("must parse json");
+    assert_eq!(payload["schema_version"].as_u64(), Some(1));
+    assert_eq!(payload["provider"].as_str(), Some("openai"));
+
+    let methods = payload["methods"]
+        .as_array()
+        .expect("methods should be array")
+        .iter()
+        .filter_map(|value| value.as_str())
+        .collect::<Vec<_>>();
+    assert!(methods.contains(&"oauth_device_code"));
+    assert!(methods.contains(&"oauth_browser"));
+    assert!(methods.contains(&"api_key"));
+}
+
+#[test]
+fn auth_methods_json_without_provider_lists_available_rows() {
+    let models_path = make_temp_file_path("auth-methods-json-models");
+    std::fs::write(
+        &models_path,
+        r#"{
+  "openai": { "name": "OpenAI", "models": { "gpt-5": {} } },
+  "openrouter": { "name": "OpenRouter", "models": { "openai/gpt-5": {} } }
+}"#,
+    )
+    .expect("must write models fixture");
+
+    let output = Command::new(rustcode_bin())
+        .args(["--json", "auth", "methods"])
+        .env("RUSTCODE_MODELS_PATH", &models_path)
+        .output()
+        .expect("must run rustcode auth methods");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let payload: Value = serde_json::from_str(stdout.trim()).expect("must parse json");
+    assert_eq!(payload["schema_version"].as_u64(), Some(1));
+    assert!(payload["warning"].is_null());
+
+    let providers = payload["providers"]
+        .as_array()
+        .expect("providers should be array");
+    assert_eq!(providers.len(), 2);
+
+    let openai = providers
+        .iter()
+        .find(|row| row["id"].as_str() == Some("openai"))
+        .expect("openai row should exist");
+    assert_eq!(openai["name"].as_str(), Some("OpenAI"));
+    assert!(openai["methods"]
+        .as_array()
+        .expect("methods should be array")
+        .iter()
+        .any(|value| value.as_str() == Some("oauth_browser")));
+
+    let openrouter = providers
+        .iter()
+        .find(|row| row["id"].as_str() == Some("openrouter"))
+        .expect("openrouter row should exist");
+    assert_eq!(openrouter["name"].as_str(), Some("OpenRouter"));
+    assert_eq!(
+        openrouter["methods"]
+            .as_array()
+            .expect("methods should be array")
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>(),
+        vec!["api_key"]
+    );
+}
+
+#[test]
 fn auth_login_gitlab_browser_no_wait_emits_authorize_url() {
     let output = Command::new(rustcode_bin())
         .args([

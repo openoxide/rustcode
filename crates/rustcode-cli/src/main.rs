@@ -41,7 +41,7 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
     if let TopCommand::Auth { command } = &cli.command {
-        return handle_auth_command(command.clone()).await;
+        return handle_auth_command(command.clone(), cli.json).await;
     }
     if let TopCommand::Models { provider } = &cli.command {
         let config = load_effective_config(&cli)?;
@@ -144,7 +144,7 @@ async fn main() -> Result<()> {
     }
 }
 
-async fn handle_auth_command(command: AuthCommand) -> Result<()> {
+async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<()> {
     let store = AuthStore::open_default();
     match command {
         AuthCommand::List => {
@@ -169,6 +169,23 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
         AuthCommand::Methods { provider } => {
             if let Some(provider) = provider {
                 let methods = methods_for_provider(&provider);
+                if json_output {
+                    let payload = serde_json::json!({
+                        "schema_version": 1,
+                        "provider": provider,
+                        "methods": methods
+                            .iter()
+                            .map(|method| method.as_str())
+                            .collect::<Vec<_>>(),
+                    });
+                    if !write_stdout_line(
+                        &serde_json::to_string(&payload)
+                            .context("failed to serialize auth methods json")?,
+                    )? {
+                        return Ok(());
+                    }
+                    return Ok(());
+                }
                 let rendered = methods
                     .into_iter()
                     .map(|method| method.as_str())
@@ -180,7 +197,7 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
                     return Ok(());
                 }
             } else {
-                list_auth_methods()?;
+                list_auth_methods(json_output)?;
             }
         }
         AuthCommand::Status { provider } => {
@@ -786,43 +803,59 @@ fn write_stdout_raw(text: &str) -> Result<bool> {
     }
 }
 
-fn list_auth_login_providers() -> Result<()> {
-    let index = load_models_index();
-    let mut rows: Vec<(String, String, String)> = match index {
+#[derive(Debug)]
+struct AuthMethodRow {
+    provider_id: String,
+    display_name: String,
+    methods: Vec<String>,
+}
+
+fn resolve_auth_method_rows() -> (Vec<AuthMethodRow>, Option<String>) {
+    match load_models_index() {
         Ok(index) => {
             let mut rows = index
                 .into_iter()
-                .map(|(provider_id, provider)| {
-                    let methods = render_auth_methods(&methods_for_provider(&provider_id));
-                    let display_name = provider.name.unwrap_or_else(|| provider_id.clone());
-                    (provider_id, display_name, methods)
+                .map(|(provider_id, provider)| AuthMethodRow {
+                    display_name: provider.name.unwrap_or_else(|| provider_id.clone()),
+                    methods: methods_for_provider(&provider_id)
+                        .into_iter()
+                        .map(|method| method.as_str().to_string())
+                        .collect(),
+                    provider_id,
                 })
                 .collect::<Vec<_>>();
             rows.sort_by(|a, b| {
-                auth_login_priority(&a.0)
-                    .cmp(&auth_login_priority(&b.0))
-                    .then_with(|| a.1.cmp(&b.1))
+                auth_login_priority(&a.provider_id)
+                    .cmp(&auth_login_priority(&b.provider_id))
+                    .then_with(|| a.display_name.cmp(&b.display_name))
             });
-            rows
+            (rows, None)
         }
         Err(err) => {
-            if !write_stdout_line(&format!("warning={err}"))? {
-                return Ok(());
-            }
             let mut rows = known_oauth_providers()
                 .iter()
-                .map(|provider| {
-                    (
-                        (*provider).to_string(),
-                        (*provider).to_string(),
-                        render_auth_methods(&methods_for_provider(provider)),
-                    )
+                .map(|provider| AuthMethodRow {
+                    provider_id: (*provider).to_string(),
+                    display_name: (*provider).to_string(),
+                    methods: methods_for_provider(provider)
+                        .into_iter()
+                        .map(|method| method.as_str().to_string())
+                        .collect(),
                 })
                 .collect::<Vec<_>>();
-            rows.sort_by(|a, b| a.0.cmp(&b.0));
-            rows
+            rows.sort_by(|a, b| a.provider_id.cmp(&b.provider_id));
+            (rows, Some(err.to_string()))
         }
-    };
+    }
+}
+
+fn list_auth_login_providers() -> Result<()> {
+    let (rows, warning) = resolve_auth_method_rows();
+    if let Some(warning) = warning {
+        if !write_stdout_line(&format!("warning={warning}"))? {
+            return Ok(());
+        }
+    }
 
     if !write_stdout_line("usage_api_key=rustcode auth login <provider> --from-env <ENV_VAR>")?
         || !write_stdout_line(
@@ -832,9 +865,12 @@ fn list_auth_login_providers() -> Result<()> {
     {
         return Ok(());
     }
-    for (provider_id, display_name, methods) in rows.drain(..) {
+    for row in rows {
         if !write_stdout_line(&format!(
-            "provider={provider_id}\tname={display_name}\tmethods={methods}"
+            "provider={}\tname={}\tmethods={}",
+            row.provider_id,
+            row.display_name,
+            row.methods.join("|")
         ))? {
             return Ok(());
         }
@@ -842,63 +878,49 @@ fn list_auth_login_providers() -> Result<()> {
     Ok(())
 }
 
-fn list_auth_methods() -> Result<()> {
-    let index = load_models_index();
-    let mut rows: Vec<(String, String, String)> = match index {
-        Ok(index) => {
-            let mut rows = index
-                .into_iter()
-                .map(|(provider_id, provider)| {
-                    let methods = render_auth_methods(&methods_for_provider(&provider_id));
-                    let display_name = provider.name.unwrap_or_else(|| provider_id.clone());
-                    (provider_id, display_name, methods)
-                })
-                .collect::<Vec<_>>();
-            rows.sort_by(|a, b| {
-                auth_login_priority(&a.0)
-                    .cmp(&auth_login_priority(&b.0))
-                    .then_with(|| a.1.cmp(&b.1))
-            });
-            rows
-        }
-        Err(err) => {
-            if !write_stdout_line(&format!("warning={err}"))? {
-                return Ok(());
-            }
-            let mut rows = known_oauth_providers()
+fn list_auth_methods(json_output: bool) -> Result<()> {
+    let (rows, warning) = resolve_auth_method_rows();
+    if json_output {
+        let payload = serde_json::json!({
+            "schema_version": 1,
+            "warning": warning,
+            "providers": rows
                 .iter()
-                .map(|provider| {
-                    (
-                        (*provider).to_string(),
-                        (*provider).to_string(),
-                        render_auth_methods(&methods_for_provider(provider)),
-                    )
-                })
-                .collect::<Vec<_>>();
-            rows.sort_by(|a, b| a.0.cmp(&b.0));
-            rows
+                .map(|row| serde_json::json!({
+                    "id": row.provider_id,
+                    "name": row.display_name,
+                    "methods": row.methods,
+                }))
+                .collect::<Vec<_>>(),
+        });
+        if !write_stdout_line(
+            &serde_json::to_string(&payload).context("failed to serialize auth methods json")?,
+        )? {
+            return Ok(());
         }
-    };
+        return Ok(());
+    }
+
+    if let Some(warning) = warning {
+        if !write_stdout_line(&format!("warning={warning}"))? {
+            return Ok(());
+        }
+    }
 
     if !write_stdout_line(&format!("providers={}", rows.len()))? {
         return Ok(());
     }
-    for (provider_id, display_name, methods) in rows.drain(..) {
+    for row in rows {
         if !write_stdout_line(&format!(
-            "provider={provider_id}\tname={display_name}\tmethods={methods}"
+            "provider={}\tname={}\tmethods={}",
+            row.provider_id,
+            row.display_name,
+            row.methods.join("|")
         ))? {
             return Ok(());
         }
     }
     Ok(())
-}
-
-fn render_auth_methods(methods: &[rustcode_auth::AuthMethod]) -> String {
-    methods
-        .iter()
-        .map(|method| method.as_str())
-        .collect::<Vec<_>>()
-        .join("|")
 }
 
 fn auth_login_priority(provider_id: &str) -> usize {
