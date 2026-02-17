@@ -29,6 +29,7 @@
 4. Preferred automation:
    - dry-run: `./scripts/release_with_gh.sh <version> --dry-run`
    - execute: `./scripts/release_with_gh.sh <version>`
+   - signed tags are required by default; use `--allow-unsigned-tag` only when signing is unavailable.
 5. Release PR checklist gate:
    - workflow: `.github/workflows/release-pr-checklist.yml`
    - validator: `./scripts/check_release_pr_checklist.sh`
