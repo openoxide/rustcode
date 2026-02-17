@@ -388,6 +388,36 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `rustcode models openai` reports `api_key_source=auth_store`
     - `rustcode --json models openai` reports `"api_key_source":"auth_store"`
 
+22. GitLab Browser OAuth Adapter
+- Status: completed
+- Deliverables:
+  - Added explicit auth method taxonomy:
+    - `api_key`
+    - `oauth_device_code`
+    - `oauth_browser`
+  - Corrected provider method mapping:
+    - `gitlab` now advertises `oauth_browser|api_key` (instead of incorrect device flow label).
+  - Implemented GitLab browser OAuth adapter in `rustcode-auth`:
+    - PKCE authorize URL generation (`code_challenge_method=S256`)
+    - local callback listener on configurable localhost port
+    - token exchange against `/oauth/token`
+    - structured credential return (`access`, `refresh`, `expires`)
+  - Wired CLI login method selection and GitLab browser flow controls:
+    - `rustcode auth login <provider> --method <...>`
+    - `--oauth-port <port>` for callback listener binding
+  - Added docs updates in `docs/PROVIDERS.md` for OAuth method usage.
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration tests:
+    - `auth_methods_gitlab_reports_browser_oauth`
+    - `auth_login_gitlab_browser_no_wait_emits_authorize_url`
+    - `auth_login_gitlab_browser_requires_client_id`
+  - Pass: live CLI probes:
+    - `rustcode auth methods gitlab`
+    - `GITLAB_OAUTH_CLIENT_ID=... rustcode auth login gitlab --method oauth_browser --no-wait`
+    - missing-client-id and api_key-without-env error paths.
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -421,7 +451,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Add streaming token output path for OpenAI-compatible and Anthropic adapters.
-2. Implement remaining OAuth adapters for GitLab/browser flows and complete browser-assisted login UX.
+2. Implement browser OAuth adapter for OpenAI (`oauth_browser`) to match opencode codex plugin parity.
 3. Wire backend selection policy into runtime provider-routing decisions and expose scoring diagnostics in CLI output.
 
 ## Update Log
@@ -660,6 +690,11 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `rustcode-llm` now resolves OAuth access tokens from auth store when env/config keys are absent.
     - added unit coverage for OAuth fallback (`resolves_oauth_access_from_auth_store_when_env_missing`).
     - live CLI probe confirmed `api_key_source=auth_store` for OpenAI after `auth set-oauth`.
+  - Completed Milestone 22 GitLab browser OAuth adapter:
+    - added auth method taxonomy (`api_key`, `oauth_device_code`, `oauth_browser`) and provider-specific mapping.
+    - implemented PKCE authorize URL + localhost callback + `/oauth/token` exchange for GitLab browser OAuth.
+    - added CLI method selection + `--oauth-port` and updated provider docs.
+    - validated via workspace tests, CI matrix, and live CLI probes for success and failure paths.
   - CI benchmark artifact publication enabled:
     - workflow now uploads `benchmarks/latest.json` via `actions/upload-artifact@v4`.
     - artifact name: `rustcode-benchmarks-latest`.

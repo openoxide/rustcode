@@ -103,8 +103,12 @@ pub enum AuthCommand {
         provider: Option<String>,
         #[arg(long = "from-env")]
         from_env: Option<String>,
+        #[arg(long = "method", value_parser = ["api_key", "oauth_device_code", "oauth_browser"])]
+        method: Option<String>,
         #[arg(long)]
         domain: Option<String>,
+        #[arg(long = "oauth-port", default_value_t = 8080)]
+        oauth_port: u16,
         #[arg(long, default_value_t = false)]
         no_wait: bool,
         #[arg(long, default_value_t = 300)]
@@ -325,8 +329,12 @@ mod tests {
             "auth",
             "login",
             "github-copilot-enterprise",
+            "--method",
+            "oauth_device_code",
             "--domain",
             "company.ghe.com",
+            "--oauth-port",
+            "1455",
             "--no-wait",
             "--timeout-secs",
             "15",
@@ -339,14 +347,18 @@ mod tests {
                     AuthCommand::Login {
                         provider,
                         from_env,
+                        method,
                         domain,
+                        oauth_port,
                         no_wait,
                         timeout_secs,
                     },
             } => {
                 assert_eq!(provider.as_deref(), Some("github-copilot-enterprise"));
                 assert!(from_env.is_none());
+                assert_eq!(method.as_deref(), Some("oauth_device_code"));
                 assert_eq!(domain.as_deref(), Some("company.ghe.com"));
+                assert_eq!(oauth_port, 1455);
                 assert!(no_wait);
                 assert_eq!(timeout_secs, 15);
             }
@@ -361,11 +373,15 @@ mod tests {
             TopCommand::Auth {
                 command:
                     AuthCommand::Login {
-                        provider, from_env, ..
+                        provider,
+                        from_env,
+                        method,
+                        ..
                     },
             } => {
                 assert!(provider.is_none());
                 assert!(from_env.is_none());
+                assert!(method.is_none());
             }
             _ => panic!("expected auth login command"),
         }

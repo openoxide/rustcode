@@ -175,7 +175,10 @@ fn auth_login_without_provider_lists_models_and_methods() {
     );
 
     let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
-    assert!(stdout.contains("usage=rustcode auth login <provider> --from-env <ENV_VAR>"));
+    assert!(stdout.contains("usage_api_key=rustcode auth login <provider> --from-env <ENV_VAR>"));
+    assert!(stdout.contains(
+        "usage_oauth=rustcode auth login <provider> --method <oauth_device_code|oauth_browser>"
+    ));
     assert!(stdout.contains("provider=anthropic\tname=Anthropic\tmethods=api_key"));
     assert!(stdout.contains("provider=openai\tname=OpenAI\tmethods=oauth_device_code|api_key"));
     assert!(stdout.contains("provider=openrouter\tname=OpenRouter\tmethods=api_key"));
@@ -233,6 +236,75 @@ fn auth_login_from_env_requires_provider() {
     assert!(!output.status.success(), "command should fail");
     let stderr = String::from_utf8(output.stderr).expect("stderr must be utf8");
     assert!(stderr.contains("`--from-env` requires a provider"));
+}
+
+#[test]
+fn auth_methods_gitlab_reports_browser_oauth() {
+    let output = Command::new(rustcode_bin())
+        .args(["auth", "methods", "gitlab"])
+        .output()
+        .expect("must run rustcode auth methods");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains("methods=oauth_browser, api_key"));
+}
+
+#[test]
+fn auth_login_gitlab_browser_no_wait_emits_authorize_url() {
+    let output = Command::new(rustcode_bin())
+        .args([
+            "auth",
+            "login",
+            "gitlab",
+            "--method",
+            "oauth_browser",
+            "--domain",
+            "gitlab.example.com",
+            "--oauth-port",
+            "19080",
+            "--no-wait",
+        ])
+        .env("GITLAB_OAUTH_CLIENT_ID", "gitlab-client-id")
+        .output()
+        .expect("must run rustcode auth login gitlab");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains("provider=gitlab"));
+    assert!(stdout.contains("method=oauth_browser"));
+    assert!(stdout.contains("authorize_url=https://gitlab.example.com/oauth/authorize"));
+    assert!(stdout.contains("redirect_uri=http://127.0.0.1:19080/callback"));
+    assert!(stdout.contains("status=awaiting_browser_callback"));
+}
+
+#[test]
+fn auth_login_gitlab_browser_requires_client_id() {
+    let output = Command::new(rustcode_bin())
+        .args([
+            "auth",
+            "login",
+            "gitlab",
+            "--method",
+            "oauth_browser",
+            "--no-wait",
+        ])
+        .output()
+        .expect("must run rustcode auth login gitlab");
+
+    assert!(!output.status.success(), "command should fail");
+    let stderr = String::from_utf8(output.stderr).expect("stderr must be utf8");
+    assert!(stderr.contains("GITLAB_OAUTH_CLIENT_ID"));
 }
 
 #[test]

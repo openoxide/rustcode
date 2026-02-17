@@ -3,8 +3,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+use rand::Rng;
 use serde::{Deserialize, Deserializer, Serialize};
+use sha2::Digest;
 use thiserror::Error;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
 use tokio::time::sleep;
 
 #[derive(Debug, Error)]
@@ -185,6 +191,7 @@ impl AuthStore {
 pub enum AuthMethod {
     ApiKey,
     OAuthDeviceCode,
+    OAuthBrowser,
 }
 
 impl AuthMethod {
@@ -192,6 +199,7 @@ impl AuthMethod {
         match self {
             Self::ApiKey => "api_key",
             Self::OAuthDeviceCode => "oauth_device_code",
+            Self::OAuthBrowser => "oauth_browser",
         }
     }
 }
@@ -204,10 +212,13 @@ pub struct OAuthLoginHint {
 
 pub fn methods_for_provider(provider_id: &str) -> Vec<AuthMethod> {
     let provider = provider_id.to_ascii_lowercase();
-    if OAUTH_PROVIDERS.contains(&provider.as_str()) {
-        vec![AuthMethod::OAuthDeviceCode, AuthMethod::ApiKey]
-    } else {
-        vec![AuthMethod::ApiKey]
+    match provider.as_str() {
+        "openai" => vec![AuthMethod::OAuthDeviceCode, AuthMethod::ApiKey],
+        "github-copilot" | "github-copilot-enterprise" => {
+            vec![AuthMethod::OAuthDeviceCode, AuthMethod::ApiKey]
+        }
+        "gitlab" => vec![AuthMethod::OAuthBrowser, AuthMethod::ApiKey],
+        _ => vec![AuthMethod::ApiKey],
     }
 }
 
@@ -216,7 +227,7 @@ pub fn oauth_login_hint(provider_id: &str) -> Option<OAuthLoginHint> {
     let (url, instructions) = match provider.as_str() {
         "openai" => (
             "https://chatgpt.com",
-            "Complete ChatGPT authorization flow, then store the resulting token with `rustcode auth login openai --from-env <ENV_VAR>`.",
+            "Use `rustcode auth login openai` for headless device flow, or `rustcode auth login openai --from-env <ENV_VAR>` for API-key mode.",
         ),
         "github-copilot" | "github-copilot-enterprise" => (
             "https://github.com/login/device",
@@ -224,7 +235,7 @@ pub fn oauth_login_hint(provider_id: &str) -> Option<OAuthLoginHint> {
         ),
         "gitlab" => (
             "https://gitlab.com/oauth/authorize",
-            "Complete GitLab OAuth login in browser, then store the resulting token with `rustcode auth login <provider> --from-env <ENV_VAR>`.",
+            "Use `rustcode auth login gitlab --method oauth_browser` for browser OAuth, or `rustcode auth login gitlab --from-env <ENV_VAR>` for personal access tokens.",
         ),
         _ => return None,
     };
@@ -281,6 +292,44 @@ pub struct DeviceCodeFlowCredential {
     pub account_id: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserOAuthFlowStart {
+    pub provider: String,
+    pub domain: String,
+    pub authorize_url: String,
+    pub redirect_uri: String,
+    client_id: String,
+    state: String,
+    code_verifier: String,
+}
+
+pub async fn start_browser_oauth_flow(
+    provider: &str,
+    domain: Option<&str>,
+    client_id: &str,
+    callback_port: u16,
+) -> Result<BrowserOAuthFlowStart, AuthError> {
+    match provider {
+        "gitlab" => start_gitlab_browser_oauth_flow(domain, client_id, callback_port),
+        other => Err(AuthError::Validation(format!(
+            "provider {other} does not support browser oauth flow"
+        ))),
+    }
+}
+
+pub async fn complete_browser_oauth_flow(
+    flow: &BrowserOAuthFlowStart,
+    timeout: Duration,
+    client_secret: Option<&str>,
+) -> Result<DeviceCodeFlowCredential, AuthError> {
+    match flow.provider.as_str() {
+        "gitlab" => complete_gitlab_browser_oauth_flow(flow, timeout, client_secret).await,
+        other => Err(AuthError::Validation(format!(
+            "provider {other} does not support browser oauth completion"
+        ))),
+    }
+}
+
 pub async fn poll_device_code_flow_for_credential(
     flow: &DeviceCodeFlowStart,
     timeout: Duration,
@@ -335,9 +384,20 @@ struct OpenAiTokenExchangeResponse {
     expires_in: Option<u64>,
 }
 
+#[derive(Debug, Deserialize)]
+struct GitlabTokenExchangeResponse {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    expires_in: Option<u64>,
+    error: Option<String>,
+    error_description: Option<String>,
+}
+
 const OPENAI_ISSUER: &str = "https://auth.openai.com";
 const OPENAI_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const GITHUB_CLIENT_ID: &str = "Ov23li8tweQw6odWQebz";
+const GITLAB_DEFAULT_SCOPES: &str = "api read_user read_repository";
+const OAUTH_CALLBACK_PATH: &str = "/callback";
 
 async fn start_github_device_code(
     provider: &str,
@@ -591,6 +651,260 @@ async fn poll_openai_device_code(
     Err(AuthError::OAuthTimeout)
 }
 
+fn start_gitlab_browser_oauth_flow(
+    domain: Option<&str>,
+    client_id: &str,
+    callback_port: u16,
+) -> Result<BrowserOAuthFlowStart, AuthError> {
+    if client_id.trim().is_empty() {
+        return Err(AuthError::Validation(
+            "gitlab oauth client id must not be empty".to_string(),
+        ));
+    }
+    if callback_port == 0 {
+        return Err(AuthError::Validation(
+            "oauth callback port must be between 1 and 65535".to_string(),
+        ));
+    }
+
+    let normalized_domain = normalize_domain(domain.unwrap_or("gitlab.com"))?;
+    let redirect_uri = format!("http://127.0.0.1:{callback_port}{OAUTH_CALLBACK_PATH}");
+    let state = generate_oauth_state();
+    let code_verifier = generate_code_verifier();
+    let code_challenge = generate_pkce_code_challenge(&code_verifier);
+
+    let mut authorize_url = reqwest::Url::parse(&format!(
+        "https://{normalized_domain}/oauth/authorize"
+    ))
+    .map_err(|err| AuthError::Validation(format!("invalid gitlab oauth authorize url: {err}")))?;
+
+    {
+        let mut query = authorize_url.query_pairs_mut();
+        query.append_pair("client_id", client_id);
+        query.append_pair("redirect_uri", &redirect_uri);
+        query.append_pair("response_type", "code");
+        query.append_pair("scope", GITLAB_DEFAULT_SCOPES);
+        query.append_pair("state", &state);
+        query.append_pair("code_challenge", &code_challenge);
+        query.append_pair("code_challenge_method", "S256");
+    }
+
+    Ok(BrowserOAuthFlowStart {
+        provider: "gitlab".to_string(),
+        domain: normalized_domain,
+        authorize_url: authorize_url.to_string(),
+        redirect_uri,
+        client_id: client_id.to_string(),
+        state,
+        code_verifier,
+    })
+}
+
+async fn complete_gitlab_browser_oauth_flow(
+    flow: &BrowserOAuthFlowStart,
+    timeout: Duration,
+    client_secret: Option<&str>,
+) -> Result<DeviceCodeFlowCredential, AuthError> {
+    let callback_port = callback_port_from_redirect_uri(&flow.redirect_uri)?;
+    let code = wait_for_oauth_callback(callback_port, &flow.state, timeout).await?;
+
+    let token_url = format!("https://{}/oauth/token", flow.domain);
+    let client = reqwest::Client::new();
+    let mut form_params = BTreeMap::new();
+    form_params.insert("client_id".to_string(), flow.client_id.clone());
+    form_params.insert("code".to_string(), code);
+    form_params.insert("grant_type".to_string(), "authorization_code".to_string());
+    form_params.insert("redirect_uri".to_string(), flow.redirect_uri.clone());
+    form_params.insert("code_verifier".to_string(), flow.code_verifier.clone());
+    if let Some(secret) = client_secret.filter(|value| !value.trim().is_empty()) {
+        form_params.insert("client_secret".to_string(), secret.to_string());
+    }
+
+    let response = client
+        .post(token_url)
+        .header("Accept", "application/json")
+        .form(&form_params)
+        .send()
+        .await
+        .map_err(|err| AuthError::Network(err.to_string()))?;
+
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|err| AuthError::Network(err.to_string()))?;
+    if !status.is_success() {
+        return Err(AuthError::OAuthFailed(format!(
+            "gitlab token exchange failed with {status}: {body}"
+        )));
+    }
+
+    let token: GitlabTokenExchangeResponse =
+        serde_json::from_str(&body).map_err(|err| AuthError::Parse(err.to_string()))?;
+    if let Some(error) = token.error.as_deref() {
+        let detail = token
+            .error_description
+            .as_deref()
+            .unwrap_or("gitlab oauth exchange failed");
+        return Err(AuthError::OAuthFailed(format!("{error}: {detail}")));
+    }
+    let access_token = token.access_token.ok_or_else(|| {
+        AuthError::Parse("missing access_token in gitlab oauth token response".to_string())
+    })?;
+
+    Ok(DeviceCodeFlowCredential {
+        access_token,
+        refresh_token: token.refresh_token,
+        expires_in_secs: token.expires_in,
+        account_id: None,
+    })
+}
+
+async fn wait_for_oauth_callback(
+    callback_port: u16,
+    expected_state: &str,
+    timeout: Duration,
+) -> Result<String, AuthError> {
+    let listener = TcpListener::bind(("127.0.0.1", callback_port))
+        .await
+        .map_err(|err| AuthError::Network(format!("failed to bind oauth callback port: {err}")))?;
+    let deadline = tokio::time::Instant::now() + timeout.max(Duration::from_secs(1));
+
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Err(AuthError::OAuthTimeout);
+        }
+        let remaining = deadline - now;
+        let accepted = tokio::time::timeout(remaining, listener.accept())
+            .await
+            .map_err(|_| AuthError::OAuthTimeout)?
+            .map_err(|err| AuthError::Network(format!("oauth callback accept failed: {err}")))?;
+        let (mut socket, _) = accepted;
+        if let Some(code) = handle_oauth_callback_connection(&mut socket, expected_state).await? {
+            return Ok(code);
+        }
+    }
+}
+
+async fn handle_oauth_callback_connection(
+    socket: &mut tokio::net::TcpStream,
+    expected_state: &str,
+) -> Result<Option<String>, AuthError> {
+    let mut buffer = [0_u8; 16 * 1024];
+    let read = tokio::time::timeout(Duration::from_secs(5), socket.read(&mut buffer))
+        .await
+        .map_err(|_| AuthError::Network("oauth callback read timed out".to_string()))?
+        .map_err(|err| AuthError::Network(format!("oauth callback read failed: {err}")))?;
+    if read == 0 {
+        return Ok(None);
+    }
+
+    let request = String::from_utf8_lossy(&buffer[..read]);
+    let first_line = request.lines().next().ok_or_else(|| {
+        AuthError::Parse("oauth callback request was missing request line".to_string())
+    })?;
+    let mut parts = first_line.split_whitespace();
+    let method = parts.next().unwrap_or_default();
+    let target = parts.next().unwrap_or("/");
+
+    if method != "GET" {
+        write_callback_response(socket, "405 Method Not Allowed", "method not allowed").await?;
+        return Ok(None);
+    }
+
+    let parsed_url = reqwest::Url::parse(&format!("http://localhost{target}"))
+        .map_err(|err| AuthError::Parse(format!("oauth callback url parse failed: {err}")))?;
+    if parsed_url.path() != OAUTH_CALLBACK_PATH {
+        write_callback_response(socket, "404 Not Found", "not found").await?;
+        return Ok(None);
+    }
+
+    let mut code: Option<String> = None;
+    let mut state: Option<String> = None;
+    let mut error: Option<String> = None;
+    let mut error_description: Option<String> = None;
+    for (key, value) in parsed_url.query_pairs() {
+        match key.as_ref() {
+            "code" => code = Some(value.into_owned()),
+            "state" => state = Some(value.into_owned()),
+            "error" => error = Some(value.into_owned()),
+            "error_description" => error_description = Some(value.into_owned()),
+            _ => {}
+        }
+    }
+
+    if let Some(reason) = error {
+        let detail = error_description.unwrap_or_else(|| "oauth authorization failed".to_string());
+        write_callback_response(socket, "400 Bad Request", "authorization failed").await?;
+        return Err(AuthError::OAuthFailed(format!("{reason}: {detail}")));
+    }
+
+    if state.as_deref() != Some(expected_state) {
+        write_callback_response(socket, "400 Bad Request", "invalid oauth state").await?;
+        return Err(AuthError::OAuthFailed(
+            "oauth callback contained invalid state".to_string(),
+        ));
+    }
+
+    let code = code.ok_or_else(|| {
+        AuthError::Parse("oauth callback did not include authorization code".to_string())
+    })?;
+    write_callback_response(
+        socket,
+        "200 OK",
+        "authorization complete; return to rustcode terminal",
+    )
+    .await?;
+    Ok(Some(code))
+}
+
+async fn write_callback_response(
+    socket: &mut tokio::net::TcpStream,
+    status: &str,
+    body: &str,
+) -> Result<(), AuthError> {
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    socket
+        .write_all(response.as_bytes())
+        .await
+        .map_err(|err| AuthError::Network(format!("oauth callback write failed: {err}")))?;
+    Ok(())
+}
+
+fn callback_port_from_redirect_uri(redirect_uri: &str) -> Result<u16, AuthError> {
+    let parsed = reqwest::Url::parse(redirect_uri)
+        .map_err(|err| AuthError::Validation(format!("invalid redirect uri: {err}")))?;
+    parsed.port_or_known_default().ok_or_else(|| {
+        AuthError::Validation("redirect uri does not contain a callback port".to_string())
+    })
+}
+
+fn generate_oauth_state() -> String {
+    let mut bytes = [0_u8; 32];
+    rand::rng().fill(&mut bytes);
+    URL_SAFE_NO_PAD.encode(bytes)
+}
+
+fn generate_code_verifier() -> String {
+    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    let mut rng = rand::rng();
+    (0..64)
+        .map(|_| {
+            let idx = rng.random_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect()
+}
+
+fn generate_pkce_code_challenge(verifier: &str) -> String {
+    let digest = sha2::Sha256::digest(verifier.as_bytes());
+    URL_SAFE_NO_PAD.encode(digest)
+}
+
 fn deserialize_u64_string_or_number<'de, D>(deserializer: D) -> Result<u64, D::Error>
 where
     D: Deserializer<'de>,
@@ -617,11 +931,26 @@ fn normalize_domain(raw: &str) -> Result<String, AuthError> {
             "domain must not be empty".to_string(),
         ));
     }
-    let without_scheme = raw
-        .trim()
-        .trim_start_matches("https://")
-        .trim_start_matches("http://");
-    Ok(without_scheme.trim_end_matches('/').to_string())
+    let trimmed = raw.trim();
+    if trimmed.contains("://") {
+        let parsed = reqwest::Url::parse(trimmed)
+            .map_err(|err| AuthError::Validation(format!("invalid domain url: {err}")))?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| AuthError::Validation("domain url is missing host".to_string()))?;
+        return Ok(match parsed.port() {
+            Some(port) => format!("{host}:{port}"),
+            None => host.to_string(),
+        });
+    }
+
+    let without_path = trimmed.split('/').next().unwrap_or_default();
+    if without_path.is_empty() {
+        return Err(AuthError::Validation(
+            "domain must include host".to_string(),
+        ));
+    }
+    Ok(without_path.to_string())
 }
 
 fn validate_provider(provider: &str) -> Result<(), AuthError> {
@@ -669,6 +998,10 @@ const OAUTH_PROVIDERS: &[&str] = &[
 
 #[cfg(test)]
 mod tests {
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use std::time::Duration;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
@@ -738,6 +1071,10 @@ mod tests {
             methods_for_provider("github-copilot"),
             vec![AuthMethod::OAuthDeviceCode, AuthMethod::ApiKey]
         );
+        assert_eq!(
+            methods_for_provider("gitlab"),
+            vec![AuthMethod::OAuthBrowser, AuthMethod::ApiKey]
+        );
         assert_eq!(methods_for_provider("openrouter"), vec![AuthMethod::ApiKey]);
     }
 
@@ -752,6 +1089,10 @@ mod tests {
         assert_eq!(
             normalize_domain("https://github.com/").expect("must normalize"),
             "github.com"
+        );
+        assert_eq!(
+            normalize_domain("https://gitlab.example.com:8443/root/path").expect("must normalize"),
+            "gitlab.example.com:8443"
         );
         assert_eq!(
             normalize_domain("company.ghe.com").expect("must normalize"),
@@ -776,6 +1117,61 @@ mod tests {
         assert_eq!(parsed_string.value, 7);
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn gitlab_browser_flow_round_trip_with_mock_token_exchange() {
+        let Some(callback_port) = allocate_port() else {
+            eprintln!("skipping test: callback port bind is not permitted in this environment");
+            return;
+        };
+        let Some(token_port) = allocate_port() else {
+            eprintln!("skipping test: token port bind is not permitted in this environment");
+            return;
+        };
+        let token_domain = format!("127.0.0.1:{token_port}");
+        let capture = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
+        let capture_clone = capture.clone();
+        let Some(server) = spawn_mock_gitlab_token_server(token_port, capture_clone) else {
+            eprintln!("skipping test: token server bind is not permitted in this environment");
+            return;
+        };
+
+        let flow =
+            start_browser_oauth_flow("gitlab", Some(&token_domain), "client-123", callback_port)
+                .await
+                .expect("flow should start");
+        let authorize_url =
+            reqwest::Url::parse(&flow.authorize_url).expect("authorize url should parse");
+        let state = authorize_url
+            .query_pairs()
+            .find_map(|(key, value)| (key == "state").then(|| value.into_owned()))
+            .expect("state query parameter should exist");
+        assert!(flow.authorize_url.contains("code_challenge="));
+
+        let redirect_uri = flow.redirect_uri.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(150)).await;
+            let callback_url = format!("{redirect_uri}?code=auth-code-1&state={state}");
+            let _ = reqwest::get(callback_url).await;
+        });
+
+        let credential = complete_browser_oauth_flow(&flow, Duration::from_secs(5), None)
+            .await
+            .expect("flow should complete");
+        assert_eq!(credential.access_token, "gitlab-access-token");
+        assert_eq!(
+            credential.refresh_token.as_deref(),
+            Some("gitlab-refresh-token")
+        );
+        assert_eq!(credential.expires_in_secs, Some(1800));
+
+        server.join().expect("mock gitlab server should join");
+        let body = capture.lock().expect("capture should lock").clone();
+        assert!(body.contains("grant_type=authorization_code"));
+        assert!(body.contains("client_id=client-123"));
+        assert!(body.contains("code=auth-code-1"));
+        assert!(body.contains("code_verifier="));
+    }
+
     fn make_temp_file_path(name: &str) -> PathBuf {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -783,5 +1179,82 @@ mod tests {
             .as_nanos();
         let pid = std::process::id();
         std::env::temp_dir().join(format!("rustcode-auth-{name}-{pid}-{now}.json"))
+    }
+
+    fn allocate_port() -> Option<u16> {
+        let listener = match TcpListener::bind(("127.0.0.1", 0)) {
+            Ok(listener) => listener,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return None,
+            Err(err) => panic!("must bind random port: {err}"),
+        };
+        let port = listener.local_addr().expect("must read local addr").port();
+        drop(listener);
+        Some(port)
+    }
+
+    fn spawn_mock_gitlab_token_server(
+        port: u16,
+        body_capture: std::sync::Arc<std::sync::Mutex<String>>,
+    ) -> Option<std::thread::JoinHandle<()>> {
+        let listener = match TcpListener::bind(("127.0.0.1", port)) {
+            Ok(listener) => listener,
+            Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return None,
+            Err(err) => panic!("must bind token port: {err}"),
+        };
+        Some(thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("must accept token request");
+            let request = read_http_request(&mut stream);
+            let body = request
+                .split("\r\n\r\n")
+                .nth(1)
+                .unwrap_or_default()
+                .to_string();
+            *body_capture
+                .lock()
+                .expect("body capture must lock for write") = body;
+            let response_body = r#"{"access_token":"gitlab-access-token","refresh_token":"gitlab-refresh-token","expires_in":1800}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("must write token response");
+        }))
+    }
+
+    fn read_http_request(stream: &mut TcpStream) -> String {
+        let mut buffer = [0_u8; 16 * 1024];
+        let mut request = Vec::new();
+        let mut content_length = 0_usize;
+        let mut header_end_index: Option<usize> = None;
+        loop {
+            let read = stream.read(&mut buffer).expect("must read request");
+            if read == 0 {
+                break;
+            }
+            request.extend_from_slice(&buffer[..read]);
+            if header_end_index.is_none() {
+                if let Some(index) = request.windows(4).position(|chunk| chunk == b"\r\n\r\n") {
+                    let end = index + 4;
+                    header_end_index = Some(end);
+                    let headers = String::from_utf8_lossy(&request[..end]);
+                    for line in headers.lines() {
+                        let lower = line.to_ascii_lowercase();
+                        if let Some(value) = lower.strip_prefix("content-length:") {
+                            content_length = value.trim().parse::<usize>().unwrap_or(0);
+                            break;
+                        }
+                    }
+                }
+            }
+            if let Some(end) = header_end_index {
+                if request.len() >= end + content_length {
+                    break;
+                }
+            }
+        }
+        String::from_utf8(request).expect("request must be utf8")
     }
 }

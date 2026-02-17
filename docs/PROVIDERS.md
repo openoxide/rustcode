@@ -84,12 +84,16 @@ provider = "ollama"
 rustcode run "summarize this directory"
 ```
 
-For providers with OAuth-style login (current hints: GitHub Copilot, GitLab):
+For OAuth-capable providers:
 
 ```bash
+rustcode auth login openai
 rustcode auth login github-copilot
+GITLAB_OAUTH_CLIENT_ID=... rustcode auth login gitlab --method oauth_browser
 ```
 
-Additional OAuth-hint provider currently mapped from opencode plugin references: `openai`.
+`auth login` supports method negotiation:
 
-This prints authorization URL + instructions; token exchange adapters are a separate milestone.
+- `oauth_device_code`: `openai`, `github-copilot`, `github-copilot-enterprise`
+- `oauth_browser`: `gitlab`
+- `api_key`: all providers via `--from-env`

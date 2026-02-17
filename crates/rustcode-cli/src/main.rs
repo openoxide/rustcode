@@ -7,8 +7,9 @@ use std::time::{Duration, SystemTime};
 use anyhow::{Context, Result};
 use clap::Parser;
 use rustcode_auth::{
-    known_oauth_providers, methods_for_provider, oauth_login_hint,
-    poll_device_code_flow_for_credential, start_device_code_flow, AuthStore, StoredCredential,
+    complete_browser_oauth_flow, known_oauth_providers, methods_for_provider, oauth_login_hint,
+    poll_device_code_flow_for_credential, start_browser_oauth_flow, start_device_code_flow,
+    AuthMethod, AuthStore, StoredCredential,
 };
 use serde::Deserialize;
 use serde_json::Value;
@@ -223,7 +224,9 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
         AuthCommand::Login {
             provider,
             from_env,
+            method,
             domain,
+            oauth_port,
             no_wait,
             timeout_secs,
         } => {
@@ -231,11 +234,23 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
                 if from_env.is_some() {
                     anyhow::bail!("`--from-env` requires a provider: `rustcode auth login <provider> --from-env <ENV_VAR>`");
                 }
+                if method.is_some() {
+                    anyhow::bail!("`--method` requires a provider: `rustcode auth login <provider> --method <method>`");
+                }
                 return list_auth_login_providers();
             }
             let provider = provider.expect("provider is checked").to_ascii_lowercase();
+            let methods = methods_for_provider(&provider);
+            let selected_method = resolve_login_method(method.as_deref(), &methods)
+                .with_context(|| format!("unsupported auth method for provider={provider}"))?;
 
             if let Some(env_name) = from_env {
+                if selected_method != AuthMethod::ApiKey {
+                    anyhow::bail!(
+                        "`--from-env` can only be used with method=api_key; received method={}",
+                        selected_method.as_str()
+                    );
+                }
                 let key = std::env::var(&env_name).with_context(|| {
                     format!("environment variable {env_name} is not set; cannot store key")
                 })?;
@@ -248,74 +263,104 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
                 return Ok(());
             }
 
-            let methods = methods_for_provider(&provider);
-            if !methods
-                .iter()
-                .any(|method| method.as_str() == "oauth_device_code")
-            {
-                anyhow::bail!(
-                    "provider={provider} does not advertise oauth device login; use `rustcode auth login {provider} --from-env <ENV_VAR>`"
-                );
-            }
-            if provider == "openai"
-                || provider == "github-copilot"
-                || provider == "github-copilot-enterprise"
-            {
-                let flow = start_device_code_flow(&provider, domain.as_deref()).await?;
-                if !write_stdout_line(&format!("provider={provider}"))?
-                    || !write_stdout_line(&format!("authorize_url={}", flow.verification_uri))?
-                    || !write_stdout_line(&format!("user_code={}", flow.user_code))?
-                    || !write_stdout_line(&format!("interval_secs={}", flow.interval_secs))?
-                    || !write_stdout_line(&format!("expires_in_secs={}", flow.expires_in_secs))?
-                {
-                    return Ok(());
+            match selected_method {
+                AuthMethod::ApiKey => {
+                    anyhow::bail!(
+                        "method=api_key requires --from-env: `rustcode auth login {provider} --from-env <ENV_VAR>`"
+                    );
                 }
-
-                if no_wait {
-                    if !write_stdout_line("status=awaiting_user_authorization")? {
+                AuthMethod::OAuthDeviceCode => {
+                    let flow = start_device_code_flow(&provider, domain.as_deref()).await?;
+                    if !write_stdout_line(&format!("provider={provider}"))?
+                        || !write_stdout_line(&format!("method={}", selected_method.as_str()))?
+                        || !write_stdout_line(&format!("authorize_url={}", flow.verification_uri))?
+                        || !write_stdout_line(&format!("user_code={}", flow.user_code))?
+                        || !write_stdout_line(&format!("interval_secs={}", flow.interval_secs))?
+                        || !write_stdout_line(&format!("expires_in_secs={}", flow.expires_in_secs))?
+                    {
                         return Ok(());
                     }
-                    return Ok(());
-                }
 
-                if !write_stdout_line("status=polling_for_token")? {
-                    return Ok(());
+                    if no_wait {
+                        if !write_stdout_line("status=awaiting_user_authorization")? {
+                            return Ok(());
+                        }
+                        return Ok(());
+                    }
+
+                    if !write_stdout_line("status=polling_for_token")? {
+                        return Ok(());
+                    }
+                    let timeout = Duration::from_secs(timeout_secs.max(1));
+                    let credential = poll_device_code_flow_for_credential(&flow, timeout).await?;
+                    persist_oauth_or_api_key(&store, &provider, credential)?;
+                    if !write_stdout_line("status=authorized")?
+                        || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+                    {
+                        return Ok(());
+                    }
                 }
-                let timeout = Duration::from_secs(timeout_secs.max(1));
-                let credential = poll_device_code_flow_for_credential(&flow, timeout).await?;
-                if credential.refresh_token.is_some() || credential.expires_in_secs.is_some() {
-                    let expires_at_unix = credential.expires_in_secs.map(|secs| {
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map(|now| now.as_secs().saturating_add(secs) as i64)
-                            .unwrap_or(secs as i64)
-                    });
-                    store.set_oauth(
+                AuthMethod::OAuthBrowser => {
+                    if provider != "gitlab" {
+                        let hint = oauth_login_hint(&provider).ok_or_else(|| {
+                            anyhow::anyhow!(
+                                "oauth login adapter for provider={provider} is not implemented yet"
+                            )
+                        })?;
+                        if !write_stdout_line(&format!("provider={provider}"))?
+                            || !write_stdout_line(&format!("method={}", selected_method.as_str()))?
+                            || !write_stdout_line(&format!("authorize_url={}", hint.authorize_url))?
+                            || !write_stdout_line(&format!("instructions={}", hint.instructions))?
+                        {
+                            return Ok(());
+                        }
+                        return Ok(());
+                    }
+
+                    let gitlab_domain = domain
+                        .or_else(|| std::env::var("GITLAB_INSTANCE_URL").ok())
+                        .unwrap_or_else(|| "gitlab.com".to_string());
+                    let client_id = std::env::var("GITLAB_OAUTH_CLIENT_ID").with_context(|| {
+                        "environment variable GITLAB_OAUTH_CLIENT_ID is required for gitlab browser oauth; set it from your GitLab OAuth app"
+                    })?;
+                    let client_secret = std::env::var("GITLAB_OAUTH_CLIENT_SECRET").ok();
+
+                    let flow = start_browser_oauth_flow(
                         &provider,
-                        &credential.access_token,
-                        credential.refresh_token.as_deref(),
-                        expires_at_unix,
-                        credential.account_id.as_deref(),
-                    )?;
-                } else {
-                    store.set_api_key(&provider, &credential.access_token)?;
-                }
-                if !write_stdout_line("status=authorized")?
-                    || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
-                {
-                    return Ok(());
-                }
-            } else {
-                let hint = oauth_login_hint(&provider).ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "oauth login adapter for provider={provider} is not implemented yet"
+                        Some(&gitlab_domain),
+                        &client_id,
+                        oauth_port,
                     )
-                })?;
-                if !write_stdout_line(&format!("provider={provider}"))?
-                    || !write_stdout_line(&format!("authorize_url={}", hint.authorize_url))?
-                    || !write_stdout_line(&format!("instructions={}", hint.instructions))?
-                {
-                    return Ok(());
+                    .await?;
+                    if !write_stdout_line(&format!("provider={provider}"))?
+                        || !write_stdout_line(&format!("method={}", selected_method.as_str()))?
+                        || !write_stdout_line(&format!("authorize_url={}", flow.authorize_url))?
+                        || !write_stdout_line(&format!("redirect_uri={}", flow.redirect_uri))?
+                        || !write_stdout_line(&format!("oauth_port={oauth_port}"))?
+                    {
+                        return Ok(());
+                    }
+
+                    if no_wait {
+                        if !write_stdout_line("status=awaiting_browser_callback")? {
+                            return Ok(());
+                        }
+                        return Ok(());
+                    }
+
+                    if !write_stdout_line("status=waiting_for_callback")? {
+                        return Ok(());
+                    }
+                    let timeout = Duration::from_secs(timeout_secs.max(1));
+                    let credential =
+                        complete_browser_oauth_flow(&flow, timeout, client_secret.as_deref())
+                            .await?;
+                    persist_oauth_or_api_key(&store, &provider, credential)?;
+                    if !write_stdout_line("status=authorized")?
+                        || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+                    {
+                        return Ok(());
+                    }
                 }
             }
         }
@@ -480,6 +525,58 @@ fn handle_models_command(
     Ok(())
 }
 
+fn resolve_login_method(method: Option<&str>, available: &[AuthMethod]) -> Result<AuthMethod> {
+    if let Some(raw) = method {
+        let requested = match raw {
+            "api_key" => AuthMethod::ApiKey,
+            "oauth_device_code" => AuthMethod::OAuthDeviceCode,
+            "oauth_browser" => AuthMethod::OAuthBrowser,
+            _ => anyhow::bail!("unknown auth method: {raw}"),
+        };
+        if available.iter().any(|item| item == &requested) {
+            return Ok(requested);
+        }
+        anyhow::bail!(
+            "requested method={raw} is unavailable; supported methods are: {}",
+            available
+                .iter()
+                .map(|item| item.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
+    available
+        .first()
+        .copied()
+        .ok_or_else(|| anyhow::anyhow!("provider does not advertise any authentication methods"))
+}
+
+fn persist_oauth_or_api_key(
+    store: &AuthStore,
+    provider: &str,
+    credential: rustcode_auth::DeviceCodeFlowCredential,
+) -> Result<()> {
+    if credential.refresh_token.is_some() || credential.expires_in_secs.is_some() {
+        let expires_at_unix = credential.expires_in_secs.map(|secs| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|now| now.as_secs().saturating_add(secs) as i64)
+                .unwrap_or(secs as i64)
+        });
+        store.set_oauth(
+            provider,
+            &credential.access_token,
+            credential.refresh_token.as_deref(),
+            expires_at_unix,
+            credential.account_id.as_deref(),
+        )?;
+    } else {
+        store.set_api_key(provider, &credential.access_token)?;
+    }
+    Ok(())
+}
+
 fn write_stdout_line(line: &str) -> Result<bool> {
     let mut stdout = std::io::stdout().lock();
     match writeln!(stdout, "{line}") {
@@ -527,7 +624,10 @@ fn list_auth_login_providers() -> Result<()> {
         }
     };
 
-    if !write_stdout_line("usage=rustcode auth login <provider> --from-env <ENV_VAR>")?
+    if !write_stdout_line("usage_api_key=rustcode auth login <provider> --from-env <ENV_VAR>")?
+        || !write_stdout_line(
+            "usage_oauth=rustcode auth login <provider> --method <oauth_device_code|oauth_browser>",
+        )?
         || !write_stdout_line(&format!("providers={}", rows.len()))?
     {
         return Ok(());
