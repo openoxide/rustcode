@@ -953,6 +953,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Update Log
 - 2026-02-17:
+  - Repo hygiene:
+    - stopped tracking generated `benchmarks/latest.json` and added it to `.gitignore` to keep `git status` clean after running `./scripts/ci_matrix.sh`.
   - Provider filter parity (OpenCode-style):
     - added `enabled_providers` / `disabled_providers` to layered config and enforced them in `models` and LLM provider selection (disabled wins over enabled).
     - references:
