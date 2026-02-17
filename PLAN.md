@@ -139,6 +139,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - stable memory in long-run idle sample
   - Pass (partial): benchmark harness script added (`scripts/benchmark.sh`) with startup and memory modes (2026-02-17)
   - Pass: elevated benchmark run captured timing and RSS metrics (`startup 5`, `memory "bench memory probe"`, 2026-02-17)
+  - Pass (partial): drift probe mode added and exercised (`drift 12 4`) with stable sampled RSS (2026-02-17)
 
 10. Documentation and Release Prep
 - Status: pending
@@ -181,9 +182,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Start long-running idle memory drift probe for benchmark hardening.
-2. Add benchmark result persistence (JSON artifact) for trend tracking.
-3. Prepare release-prep docs pass (operator/developer quickstart).
+1. Add benchmark result persistence (JSON artifact) for trend tracking.
+2. Prepare release-prep docs pass (operator/developer quickstart).
+3. Add `serve`-mode long-run benchmark once service path becomes persistent.
 
 ## Update Log
 - 2026-02-17:
@@ -255,3 +256,6 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - Added `UiInput` abstractions (`Domain`, `Resize`, `Shutdown`) and `UiSummary` counters.
     - Added domain-event adapter (`from_domain_receiver`) for TUI event consumption.
     - Added TUI unit tests for resize/shutdown semantics and maintained CLI TUI integration coverage.
+  - Extended benchmark harness with drift mode and captured sample stability run:
+    - `./scripts/benchmark.sh drift 12 4`
+    - RSS samples stabilized at `~5424 KB` over sampled window.

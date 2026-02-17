@@ -5,11 +5,13 @@
 - Modes:
   - `startup [runs]`
   - `memory [prompt]`
+  - `drift [seconds] [interval]`
 
 Examples:
 ```bash
 ./scripts/benchmark.sh startup 5
 ./scripts/benchmark.sh memory "benchmark memory"
+./scripts/benchmark.sh drift 20 5
 ```
 
 ## Notes
@@ -23,3 +25,6 @@ Examples:
 - `./scripts/benchmark.sh memory "bench memory probe"`:
   - `maximum resident set size: 5,242,880`
   - `peak memory footprint: 2,064,696`
+- `./scripts/benchmark.sh drift 12 4`:
+  - observed RSS samples: `32 KB -> 5,424 KB -> 5,424 KB`
+  - process remained stable and exited cleanly on cancellation.
