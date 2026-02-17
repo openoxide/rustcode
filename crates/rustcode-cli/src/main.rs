@@ -149,6 +149,28 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
     match command {
         AuthCommand::List => {
             let providers = store.providers()?;
+            if json_output {
+                let mut rows = Vec::with_capacity(providers.len());
+                for provider in providers {
+                    let credential = render_stored_credential(store.get(&provider)?);
+                    rows.push(serde_json::json!({
+                        "id": provider,
+                        "credential": credential,
+                    }));
+                }
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "auth_file": store.path().display().to_string(),
+                    "providers": rows,
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize auth list json")?,
+                )? {
+                    return Ok(());
+                }
+                return Ok(());
+            }
             if !write_stdout_line(&format!("providers={}", providers.len()))?
                 || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
             {
@@ -156,11 +178,7 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
             }
 
             for provider in providers {
-                let credential = match store.get(&provider)? {
-                    Some(StoredCredential::ApiKey { .. }) => "stored:api_key",
-                    Some(StoredCredential::OAuth { .. }) => "stored:oauth",
-                    None => "none",
-                };
+                let credential = render_stored_credential(store.get(&provider)?);
                 if !write_stdout_line(&format!("provider={provider}\tcredential={credential}"))? {
                     return Ok(());
                 }
@@ -202,16 +220,29 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
         }
         AuthCommand::Status { provider } => {
             let methods = methods_for_provider(&provider);
-            let rendered_methods = methods
+            let method_names = methods
                 .into_iter()
-                .map(|method| method.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            let credential = match store.get(&provider)? {
-                Some(StoredCredential::ApiKey { .. }) => "stored:api_key",
-                Some(StoredCredential::OAuth { .. }) => "stored:oauth",
-                None => "none",
-            };
+                .map(|method| method.as_str().to_string())
+                .collect::<Vec<_>>();
+            let credential = render_stored_credential(store.get(&provider)?);
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "provider": provider,
+                    "methods": method_names,
+                    "credential": credential,
+                    "auth_file": store.path().display().to_string(),
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize auth status json")?,
+                )? {
+                    return Ok(());
+                }
+                return Ok(());
+            }
+
+            let rendered_methods = method_names.join(", ");
             if !write_stdout_line(&format!("provider={provider}"))?
                 || !write_stdout_line(&format!("methods={rendered_methods}"))?
                 || !write_stdout_line(&format!("credential={credential}"))?
@@ -445,6 +476,14 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
         }
     }
     Ok(())
+}
+
+fn render_stored_credential(credential: Option<StoredCredential>) -> &'static str {
+    match credential {
+        Some(StoredCredential::ApiKey { .. }) => "stored:api_key",
+        Some(StoredCredential::OAuth { .. }) => "stored:oauth",
+        None => "none",
+    }
 }
 
 #[derive(Debug, Deserialize)]

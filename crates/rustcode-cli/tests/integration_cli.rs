@@ -143,6 +143,49 @@ fn auth_set_key_and_status_round_trip() {
 }
 
 #[test]
+fn auth_status_json_is_parseable() {
+    let auth_path = make_temp_file_path("auth-status-json-store");
+
+    let set_output = Command::new(rustcode_bin())
+        .args([
+            "auth",
+            "set-key",
+            "openrouter",
+            "--from-env",
+            "RUSTCODE_TEST_KEY",
+        ])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_TEST_KEY", "integration-secret")
+        .output()
+        .expect("must run rustcode auth set-key");
+    assert!(set_output.status.success(), "set-key should succeed");
+
+    let status_output = Command::new(rustcode_bin())
+        .args(["--json", "auth", "status", "openrouter"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode auth status");
+
+    assert!(
+        status_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&status_output.stdout),
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+
+    let stdout = String::from_utf8(status_output.stdout).expect("stdout must be utf8");
+    let payload: Value = serde_json::from_str(stdout.trim()).expect("must parse json");
+    assert_eq!(payload["schema_version"].as_u64(), Some(1));
+    assert_eq!(payload["provider"].as_str(), Some("openrouter"));
+    assert_eq!(payload["credential"].as_str(), Some("stored:api_key"));
+    assert!(payload["methods"]
+        .as_array()
+        .expect("methods should be array")
+        .iter()
+        .any(|value| value.as_str() == Some("api_key")));
+}
+
+#[test]
 fn auth_set_oauth_and_status_round_trip() {
     let auth_path = make_temp_file_path("auth-oauth-store");
 
@@ -266,6 +309,50 @@ fn auth_login_from_env_stores_key() {
     );
     let status_stdout = String::from_utf8(status_output.stdout).expect("stdout must be utf8");
     assert!(status_stdout.contains("credential=stored:api_key"));
+}
+
+#[test]
+fn auth_list_json_includes_stored_provider_rows() {
+    let auth_path = make_temp_file_path("auth-list-json-store");
+
+    let set_output = Command::new(rustcode_bin())
+        .args([
+            "auth",
+            "set-key",
+            "openrouter",
+            "--from-env",
+            "RUSTCODE_TEST_KEY",
+        ])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_TEST_KEY", "integration-secret")
+        .output()
+        .expect("must run rustcode auth set-key");
+    assert!(set_output.status.success(), "set-key should succeed");
+
+    let list_output = Command::new(rustcode_bin())
+        .args(["--json", "auth", "list"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode auth list");
+
+    assert!(
+        list_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&list_output.stdout),
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+
+    let stdout = String::from_utf8(list_output.stdout).expect("stdout must be utf8");
+    let payload: Value = serde_json::from_str(stdout.trim()).expect("must parse json");
+    assert_eq!(payload["schema_version"].as_u64(), Some(1));
+    let providers = payload["providers"]
+        .as_array()
+        .expect("providers should be array");
+    assert_eq!(providers.len(), 1);
+
+    let row = providers.first().expect("provider row should exist");
+    assert_eq!(row["id"].as_str(), Some("openrouter"));
+    assert_eq!(row["credential"].as_str(), Some("stored:api_key"));
 }
 
 #[test]

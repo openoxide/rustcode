@@ -581,6 +581,27 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth methods`
     - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth methods openai`
 
+32. Auth Status/List JSON Contract
+- Status: completed
+- Deliverables:
+  - Added machine-readable status payload:
+    - `rustcode --json auth status <provider>`
+  - Added machine-readable credential listing payload:
+    - `rustcode --json auth list`
+  - Preserved existing text output contract for non-JSON paths.
+  - Added reusable credential-label helper to keep string and JSON status/list consistent.
+  - Added integration tests for both JSON command contracts.
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration tests:
+    - `auth_status_json_is_parseable`
+    - `auth_list_json_includes_stored_provider_rows`
+  - Pass: live CLI probes:
+    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth status openrouter`
+    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth list`
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -617,10 +638,26 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 1. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 2. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
 3. Add initial MCP auth/login command surface parity for remote OAuth-capable servers.
-4. Extend JSON parity to `auth status` and `auth list` for scripting workflows.
+4. Extend JSON parity to mutating auth commands (`set-key`, `set-oauth`, `remove`) with stable result envelopes.
 
 ## Update Log
 - 2026-02-17:
+  - Completed Milestone 32 auth status/list JSON contract:
+    - added `--json auth status <provider>` and `--json auth list` payloads.
+    - preserved text output behavior for non-JSON invocations.
+    - added integration tests:
+      - `auth_status_json_is_parseable`
+      - `auth_list_json_includes_stored_provider_rows`
+  - Referenced parity sources before implementation:
+    - `opencode/packages/opencode/src/cli/cmd/auth.ts`
+    - `codex/codex-rs/cli/src/login.rs`
+  - Validation passed:
+    - `cargo fmt --all`
+    - `cargo test -p rustcode-cli`
+    - `./scripts/ci_matrix.sh`
+    - live probes:
+      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth status openrouter`
+      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth list`
   - Completed Milestone 31 auth-methods JSON contract:
     - added `--json auth methods <provider>` and `--json auth methods` machine-readable outputs.
     - kept text output behavior stable for existing scripts.
