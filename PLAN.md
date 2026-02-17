@@ -116,7 +116,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: engine test verifies plugin `on_event` hook receives emitted events (2026-02-17)
 
 8. TUI Integration
-- Status: pending
+- Status: in_progress
 - Deliverables:
   - Event-consumer-only TUI
   - Dedicated UI loop
@@ -124,6 +124,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - TUI smoke tests
   - manual interaction checklist
+  - Pass (partial): event-consumer TUI loop wired in CLI path (`rustcode-cli tui`) with integration + unit tests (2026-02-17)
 
 9. Hardening and Benchmarks
 - Status: pending
@@ -176,7 +177,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Start TUI integration work with event-consumer loop contracts.
+1. Complete TUI signal/resize handling contracts and smoke checklist.
 2. Expand plugin boundary with fixture plugin crate integration tests.
 3. Add benchmark harness for startup and memory tracking.
 
@@ -231,3 +232,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added event schema compatibility tests in `rustcode-core`:
     - legacy event JSON without `schema_version` deserializes to schema `1`
     - newly emitted events retain schema `1`.
+  - Started Milestone 8:
+    - Wired `tui` command path to `rustcode-tui` event consumer.
+    - Added `UiSummary` contract and TUI loop consumption test.
+    - Added CLI integration test asserting `tui` route uses TUI path and exits cleanly.

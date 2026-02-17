@@ -15,7 +15,12 @@ fn json_stream_includes_schema_version_and_completion_event() {
         .output()
         .expect("must run rustcode binary");
 
-    assert!(output.status.success(), "stdout: {}\nstderr: {}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
     let lines: Vec<&str> = stdout.lines().collect();
@@ -66,4 +71,25 @@ fn sigint_cancels_long_running_command_gracefully() {
 
     let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
     assert!(stdout.contains("execution cancelled"));
+}
+
+#[test]
+fn tui_command_routes_to_tui_consumer_loop() {
+    let output = Command::new(rustcode_bin())
+        .arg("tui")
+        .output()
+        .expect("must run rustcode binary");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    assert!(
+        stdout.trim().is_empty(),
+        "tui mode should not print CLI renderer output"
+    );
 }

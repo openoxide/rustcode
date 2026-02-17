@@ -103,6 +103,7 @@ Rules:
 - Engine emits all observable behavior as events.
 - Renderers are pure projections (`Event -> terminal bytes`).
 - JSON mode and TUI consume the same canonical event stream.
+- TUI loop returns a `UiSummary` contract so event-consumption behavior is testable.
 
 ## 5. Concurrency Model
 Runtime model is structured concurrency on Tokio:

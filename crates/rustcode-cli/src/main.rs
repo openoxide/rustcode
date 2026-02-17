@@ -15,11 +15,12 @@ use rustcode_engine::{ChannelPublisher, Engine, WorkspacePermissionPolicy};
 use rustcode_io::LocalIo;
 use rustcode_llm::NullLlmClient;
 use rustcode_plugins::PluginRegistry;
+use rustcode_tui::TuiApp;
 
 mod cli;
 mod render;
 
-use cli::{map_command, Cli};
+use cli::{map_command, Cli, TopCommand};
 use render::{render_event, OutputFormat};
 
 #[tokio::main]
@@ -27,6 +28,7 @@ async fn main() -> Result<()> {
     init_tracing()?;
 
     let cli = Cli::parse();
+    let launch_tui = matches!(&cli.command, TopCommand::Tui);
     let cwd = std::env::current_dir().context("failed to resolve current directory")?;
     let output_format = OutputFormat::from_json_flag(cli.json);
 
@@ -75,8 +77,15 @@ async fn main() -> Result<()> {
 
     drop(publisher);
 
-    while let Some(event) = event_rx.recv().await {
-        println!("{}", render_event(&event, output_format)?);
+    if launch_tui {
+        let _summary = TuiApp::new(event_rx)
+            .run()
+            .await
+            .context("tui event loop failed")?;
+    } else {
+        while let Some(event) = event_rx.recv().await {
+            println!("{}", render_event(&event, output_format)?);
+        }
     }
 
     match execution_result {
