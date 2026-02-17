@@ -81,6 +81,9 @@ Examples:
 - GitHub Actions release branches (`release/*`) execute:
   - `./scripts/benchmark_release_gate.sh benchmarks/release-baseline.json benchmarks/latest.json`
   - release gate uses a tracked baseline artifact: `benchmarks/release-baseline.json`.
+- GitHub Actions `ci` also supports manual `workflow_dispatch` release-gate runs:
+  - `run_release_gate=true`
+  - optional `baseline_path` override
 - `./scripts/refresh_release_baseline.sh [--from-latest]`:
   - regenerates/validates benchmark artifact and promotes it to `benchmarks/release-baseline.json`.
 - `./scripts/benchmark_snapshot.sh <latest> <history_dir>`:

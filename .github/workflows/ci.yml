@@ -3,6 +3,18 @@ name: ci
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      run_release_gate:
+        description: "Run benchmark release gate in this workflow run"
+        required: false
+        type: boolean
+        default: false
+      baseline_path:
+        description: "Override baseline artifact path"
+        required: false
+        type: string
+        default: "benchmarks/release-baseline.json"
 
 jobs:
   test:
@@ -22,5 +34,10 @@ jobs:
           path: benchmarks/latest.json
           if-no-files-found: error
       - name: Release benchmark gate
-        if: startsWith(github.ref_name, 'release/') || startsWith(github.base_ref, 'release/')
-        run: ./scripts/benchmark_release_gate.sh benchmarks/release-baseline.json benchmarks/latest.json
+        if: startsWith(github.ref_name, 'release/') || startsWith(github.base_ref, 'release/') || github.event.inputs.run_release_gate == 'true'
+        run: |
+          baseline="${{ github.event.inputs.baseline_path }}"
+          if [[ -z "$baseline" ]]; then
+            baseline="benchmarks/release-baseline.json"
+          fi
+          ./scripts/benchmark_release_gate.sh "$baseline" benchmarks/latest.json

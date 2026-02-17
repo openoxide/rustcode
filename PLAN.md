@@ -191,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add optional CI mode that runs release gate on manual dispatch.
-2. Add CI baseline-drift report comment for release PRs.
-3. Add nightly benchmark drift job with threshold alerts.
+1. Add CI baseline-drift report comment for release PRs.
+2. Add nightly benchmark drift job with threshold alerts.
+3. Add release-candidate artifact bundle workflow.
 
 ## Update Log
 - 2026-02-17:
@@ -357,6 +357,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - added release PR template (`.github/PULL_REQUEST_TEMPLATE/release.md`).
     - added validator script (`scripts/check_release_pr_checklist.sh`).
     - added workflow gate (`.github/workflows/release-pr-checklist.yml`) for release branch PRs.
+  - Optional manual release gate CI mode:
+    - extended `.github/workflows/ci.yml` with `workflow_dispatch` inputs.
+    - supports on-demand release gate runs with optional baseline path override.
   - Added structured serve telemetry:
     - introduced `EventPayload::ServeRequest { method, path, status }`.
     - `serve` now emits route-level events for each handled request.
