@@ -58,6 +58,7 @@ enum ProviderProtocol {
     Null,
     OpenAiCompatible,
     AnthropicMessages,
+    VercelAiGateway,
 }
 
 #[derive(Debug, Clone)]
@@ -92,6 +93,7 @@ pub enum ProviderProtocolName {
     Null,
     OpenAiCompatible,
     AnthropicMessages,
+    VercelAiGateway,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,6 +195,29 @@ pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmEr
                 ))
             })?;
             Ok(Arc::new(AnthropicClient::new(
+                provider.provider_id,
+                base_url,
+                api_key,
+            )))
+        }
+        ProviderProtocol::VercelAiGateway => {
+            if !config.allow_network {
+                return Err(LlmError::Config(
+                    "network access is disabled; set allow_network=true to use remote LLM providers"
+                        .to_string(),
+                ));
+            }
+
+            let base_url = provider
+                .base_url
+                .unwrap_or_else(|| "https://ai-gateway.vercel.sh/v1/ai".to_string());
+            let api_key = provider.api_key.ok_or_else(|| {
+                LlmError::Config(missing_api_key_message(
+                    &provider.provider_id,
+                    &provider.api_key_env_candidates,
+                ))
+            })?;
+            Ok(Arc::new(VercelAiGatewayClient::new(
                 provider.provider_id,
                 base_url,
                 api_key,
@@ -419,6 +444,7 @@ fn protocol_name(protocol: ProviderProtocol) -> ProviderProtocolName {
         ProviderProtocol::Null => ProviderProtocolName::Null,
         ProviderProtocol::OpenAiCompatible => ProviderProtocolName::OpenAiCompatible,
         ProviderProtocol::AnthropicMessages => ProviderProtocolName::AnthropicMessages,
+        ProviderProtocol::VercelAiGateway => ProviderProtocolName::VercelAiGateway,
     }
 }
 
@@ -427,6 +453,7 @@ fn normalize_endpoint(protocol: ProviderProtocol, base_url: &str) -> String {
         ProviderProtocol::Null => base_url.to_string(),
         ProviderProtocol::OpenAiCompatible => normalize_openai_chat_endpoint(base_url),
         ProviderProtocol::AnthropicMessages => normalize_anthropic_messages_endpoint(base_url),
+        ProviderProtocol::VercelAiGateway => normalize_vercel_gateway_endpoint(base_url),
     }
 }
 
@@ -477,6 +504,12 @@ fn provider_preset(provider_id: &str) -> ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
             default_base_url: Some("https://api.openai.com/v1".to_string()),
             default_api_key_envs: vec!["OPENAI_API_KEY".to_string()],
+            requires_api_key: true,
+        },
+        "v0" => ProviderPreset {
+            protocol: ProviderProtocol::OpenAiCompatible,
+            default_base_url: Some("https://api.v0.dev/v1".to_string()),
+            default_api_key_envs: vec!["V0_API_KEY".to_string()],
             requires_api_key: true,
         },
         "openrouter" => ProviderPreset {
@@ -557,13 +590,18 @@ fn provider_preset(provider_id: &str) -> ProviderPreset {
             ],
             requires_api_key: true,
         },
+        "vercel" => ProviderPreset {
+            protocol: ProviderProtocol::VercelAiGateway,
+            default_base_url: Some("https://ai-gateway.vercel.sh/v1/ai".to_string()),
+            default_api_key_envs: vec!["AI_GATEWAY_API_KEY".to_string()],
+            requires_api_key: true,
+        },
         "google-vertex"
         | "google-vertex-anthropic"
         | "amazon-bedrock"
         | "gitlab"
         | "opencode"
         | "sap-ai-core"
-        | "vercel"
         | "zenmux"
         | "fetch" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
@@ -684,6 +722,8 @@ impl LlmClient for OpenAiCompatibleClient {
                 .map_err(|err| LlmError::Config(format!("invalid auth header: {err}")))?;
             headers.insert(AUTHORIZATION, value);
         }
+        apply_provider_default_headers(&self.provider_id, &mut headers)
+            .map_err(|err| LlmError::Config(err))?;
 
         let response = self
             .http
@@ -795,6 +835,13 @@ impl LlmClient for AnthropicClient {
             HeaderName::from_static("anthropic-version"),
             HeaderValue::from_static("2023-06-01"),
         );
+        // Align with OpenCode's default Anthropic headers for Claude Code compatibility.
+        headers.insert(
+            HeaderName::from_static("anthropic-beta"),
+            HeaderValue::from_static(
+                "claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
+            ),
+        );
 
         let response = self
             .http
@@ -869,6 +916,132 @@ impl LlmClient for AnthropicClient {
     }
 }
 
+#[derive(Debug)]
+struct VercelAiGatewayClient {
+    provider_id: String,
+    endpoint: String,
+    api_key: String,
+    http: reqwest::Client,
+}
+
+impl VercelAiGatewayClient {
+    fn new(provider_id: String, base_url: String, api_key: String) -> Self {
+        Self {
+            provider_id,
+            endpoint: normalize_vercel_gateway_endpoint(&base_url),
+            api_key,
+            http: reqwest::Client::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl LlmClient for VercelAiGatewayClient {
+    async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        let model = model_for_provider(&self.provider_id, &request.model);
+
+        let mut headers = HeaderMap::new();
+        let bearer = format!("Bearer {}", self.api_key);
+        let value = HeaderValue::from_str(&bearer)
+            .map_err(|err| LlmError::Config(format!("invalid auth header: {err}")))?;
+        headers.insert(AUTHORIZATION, value);
+        headers.insert(
+            HeaderName::from_static("ai-gateway-protocol-version"),
+            HeaderValue::from_static("0.0.1"),
+        );
+        headers.insert(
+            HeaderName::from_static("ai-gateway-auth-method"),
+            HeaderValue::from_static("api-key"),
+        );
+        headers.insert(
+            HeaderName::from_static("ai-language-model-specification-version"),
+            HeaderValue::from_static("2"),
+        );
+        headers.insert(
+            HeaderName::from_static("ai-language-model-id"),
+            HeaderValue::from_str(&model)
+                .map_err(|err| LlmError::Config(format!("invalid model header: {err}")))?,
+        );
+        headers.insert(
+            HeaderName::from_static("ai-language-model-streaming"),
+            HeaderValue::from_static("true"),
+        );
+        apply_provider_default_headers("vercel", &mut headers)
+            .map_err(|err| LlmError::Config(err))?;
+
+        let response = self
+            .http
+            .post(&self.endpoint)
+            .headers(headers)
+            .json(&json!({
+                "prompt": [{
+                    "role": "user",
+                    "content": [{"type": "text", "text": request.prompt}],
+                }],
+            }))
+            .send()
+            .await
+            .map_err(|err| LlmError::Transport(err.to_string()))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .map_err(|err| LlmError::Transport(err.to_string()))?;
+            return Err(LlmError::Transport(format!(
+                "provider returned {}: {}",
+                status,
+                truncate_for_error(&body)
+            )));
+        }
+
+        match read_sse_or_body(response).await? {
+            StreamedProviderBody::Body(body) => {
+                let parsed: Value = serde_json::from_str(&body).map_err(|err| {
+                    LlmError::Invalid(format!("response is not valid JSON: {err}"))
+                })?;
+                let text = extract_gateway_text(&parsed).ok_or_else(|| {
+                    LlmError::Invalid("gateway response did not include text".to_string())
+                })?;
+                Ok(LlmResponse {
+                    text,
+                    chunks: Vec::new(),
+                })
+            }
+            StreamedProviderBody::SseEvents(events) => {
+                let mut chunks = Vec::new();
+                let mut combined = String::new();
+                for event in events {
+                    let Ok(parsed) = serde_json::from_str::<Value>(&event) else {
+                        continue;
+                    };
+                    if let Some(error_message) = extract_stream_error_message(&parsed) {
+                        return Err(LlmError::Transport(format!(
+                            "provider stream error: {error_message}"
+                        )));
+                    }
+                    if let Some(delta) = extract_gateway_stream_delta(&parsed) {
+                        if !delta.is_empty() {
+                            combined.push_str(&delta);
+                            chunks.push(delta);
+                        }
+                    }
+                }
+                if combined.is_empty() {
+                    return Err(LlmError::Invalid(
+                        "gateway stream did not include text deltas".to_string(),
+                    ));
+                }
+                Ok(LlmResponse {
+                    text: combined,
+                    chunks,
+                })
+            }
+        }
+    }
+}
+
 fn model_for_provider(provider_id: &str, requested_model: &str) -> String {
     if let Some((candidate_provider, candidate_model)) = parse_model_prefix(requested_model) {
         if candidate_provider.eq_ignore_ascii_case(provider_id)
@@ -878,6 +1051,38 @@ fn model_for_provider(provider_id: &str, requested_model: &str) -> String {
         }
     }
     requested_model.to_string()
+}
+
+fn apply_provider_default_headers(
+    provider_id: &str,
+    headers: &mut HeaderMap,
+) -> Result<(), String> {
+    // These headers are not required by the OpenAI-compatible spec, but several providers
+    // use them for attribution / routing. Align with OpenCode defaults.
+    match provider_id {
+        "openrouter" => {
+            headers.insert(
+                HeaderName::from_static("http-referer"),
+                HeaderValue::from_static("https://opencode.ai/"),
+            );
+            headers.insert(
+                HeaderName::from_static("x-title"),
+                HeaderValue::from_static("opencode"),
+            );
+        }
+        "vercel" => {
+            headers.insert(
+                HeaderName::from_static("http-referer"),
+                HeaderValue::from_static("https://opencode.ai/"),
+            );
+            headers.insert(
+                HeaderName::from_static("x-title"),
+                HeaderValue::from_static("opencode"),
+            );
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn normalize_openai_chat_endpoint(base_url: &str) -> String {
@@ -899,6 +1104,15 @@ fn normalize_anthropic_messages_endpoint(base_url: &str) -> String {
         format!("{trimmed}/messages")
     } else {
         format!("{trimmed}/v1/messages")
+    }
+}
+
+fn normalize_vercel_gateway_endpoint(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    if trimmed.ends_with("/language-model") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/language-model")
     }
 }
 
@@ -1079,6 +1293,34 @@ fn truncate_for_error(body: &str) -> String {
     }
 }
 
+fn extract_gateway_text(value: &Value) -> Option<String> {
+    if let Some(text) = extract_openai_text(value) {
+        return Some(text);
+    }
+    if let Some(text) = value.get("text").and_then(Value::as_str) {
+        return Some(text.to_string());
+    }
+    if let Some(text) = value.get("output").and_then(Value::as_str) {
+        return Some(text.to_string());
+    }
+    None
+}
+
+fn extract_gateway_stream_delta(value: &Value) -> Option<String> {
+    let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
+    let candidates = ["textDelta", "delta", "text"];
+
+    if kind.contains("delta") || kind.contains("text") {
+        for key in candidates {
+            if let Some(text) = value.get(key).and_then(Value::as_str) {
+                return Some(text.to_string());
+            }
+        }
+    }
+
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1139,6 +1381,58 @@ mod tests {
         assert_eq!(
             normalize_anthropic_messages_endpoint("https://api.anthropic.com/v1"),
             "https://api.anthropic.com/v1/messages"
+        );
+    }
+
+    #[test]
+    fn vercel_gateway_endpoint_normalization_appends_language_model_path() {
+        assert_eq!(
+            normalize_vercel_gateway_endpoint("https://ai-gateway.vercel.sh/v1/ai"),
+            "https://ai-gateway.vercel.sh/v1/ai/language-model"
+        );
+        assert_eq!(
+            normalize_vercel_gateway_endpoint("https://ai-gateway.vercel.sh/v1/ai/"),
+            "https://ai-gateway.vercel.sh/v1/ai/language-model"
+        );
+        assert_eq!(
+            normalize_vercel_gateway_endpoint("https://ai-gateway.vercel.sh/v1/ai/language-model"),
+            "https://ai-gateway.vercel.sh/v1/ai/language-model"
+        );
+    }
+
+    #[test]
+    fn gateway_stream_delta_extracts_text_delta() {
+        let payload = json!({
+            "type": "text-delta",
+            "textDelta": "hello"
+        });
+        assert_eq!(
+            extract_gateway_stream_delta(&payload).as_deref(),
+            Some("hello")
+        );
+        let metadata = json!({
+            "type": "response-metadata",
+            "timestamp": "2026-02-17T00:00:00Z"
+        });
+        assert!(extract_gateway_stream_delta(&metadata).is_none());
+    }
+
+    #[test]
+    fn vercel_provider_resolves_as_gateway_protocol_and_requires_key() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        std::env::remove_var("AI_GATEWAY_API_KEY");
+        let cfg = ResolvedConfig {
+            allow_network: true,
+            llm_provider: "vercel".to_string(),
+            ..ResolvedConfig::default()
+        };
+        let diag = diagnose_provider(&cfg, Some("vercel")).expect("diagnostic should resolve");
+        assert_eq!(diag.protocol, ProviderProtocolName::VercelAiGateway);
+        assert!(diag.requires_api_key);
+        assert!(diag.missing.iter().any(|item| item == "api_key"));
+        assert_eq!(
+            diag.endpoint.as_deref(),
+            Some("https://ai-gateway.vercel.sh/v1/ai/language-model")
         );
     }
 

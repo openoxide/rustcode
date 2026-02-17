@@ -13,6 +13,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Do not consider a feature complete with tests alone; run live CLI usage paths for that feature and record observed output.
 - Ask the user immediately when external credentials, account context, or provider-specific access is required for end-to-end validation.
 - Maintain `docs/CREDENTIAL_REQUIREMENTS.md` as the canonical credential/env-var matrix; update it in the same commit as any auth flow change.
+- Environment constraint: the default sandbox may not have working DNS/networking even when the host machine does. For any live provider validation, run the command outside the sandbox (escalated exec) and record that in the milestone validation notes.
 
 ## Current Mode
 - Active mode: Slow Deep Research
@@ -911,9 +912,50 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `RUSTCODE_AUTH_FILE=/tmp/rustcode-auth-live.json cargo run -q -p rustcode-cli -- auth login` (provider picker + api key prompt)
     - `RUSTCODE_AUTH_FILE=/tmp/rustcode-auth-live.json cargo run -q -p rustcode-cli -- auth status opencode`
 
+45. Provider Parity Slice A (Headers + V0 + Vercel AI Gateway)
+- Status: completed
+- Scope:
+  - OpenCode parity for provider-specific headers:
+    - OpenRouter referer/title headers.
+    - Anthropic beta header bundle for Claude Code compatibility.
+  - Add `v0` provider defaults (base URL + env var).
+  - Implement Vercel AI Gateway protocol (`@ai-sdk/gateway` parity subset) to support `vercel` provider without custom base URL.
+- Milestone 45 start references (code + docs):
+  - `opencode/packages/opencode/src/provider/provider.ts` (custom headers + provider SDK mapping)
+  - `opencode/node_modules/.bun/@ai-sdk+vercel@*/node_modules/@ai-sdk/vercel/dist/index.mjs` (v0 default base URL)
+  - `opencode/node_modules/.bun/@ai-sdk+gateway@*/node_modules/@ai-sdk/gateway/dist/index.mjs` (AI Gateway base URL + headers + stream contract)
+  - `https://opencode.ai/docs`
+- Deliverables:
+  - OpenAI-compatible provider header defaults aligned with OpenCode:
+    - `openrouter`: `http-referer=https://opencode.ai/`, `x-title=opencode`.
+  - Anthropic defaults aligned with OpenCode:
+    - adds `anthropic-beta` bundle used by Claude Code flows.
+  - Added `v0` provider preset:
+    - base URL `https://api.v0.dev/v1`
+    - env var `V0_API_KEY`
+  - Added `vercel` provider preset backed by a new protocol implementation:
+    - Vercel AI Gateway base URL `https://ai-gateway.vercel.sh/v1/ai`
+    - endpoint `/language-model`
+    - required env var `AI_GATEWAY_API_KEY`
+    - headers parity: `ai-gateway-protocol-version=0.0.1`, `ai-gateway-auth-method=api-key`, `ai-language-model-*` headers.
+  - Added unit coverage for:
+    - Vercel gateway endpoint normalization
+    - gateway stream delta parsing
+    - vercel provider diagnostics (protocol + endpoint + missing api key)
+  - Environment note:
+    - sandboxed command execution in this environment has DNS disabled; live provider validation must run with escalated exec (non-sandbox) to reach external hosts.
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/provider_matrix.sh` shows `v0`/`vercel` as `needs_api_key` (2026-02-17)
+  - Pass (live OpenRouter run, escalated/non-sandbox DNS):
+    - `OPENROUTER_API_KEY=... cargo run -q -p rustcode-cli -- --event-debug --llm-provider openrouter --model openrouter/deepseek/deepseek-chat-v3-0324 run ...` (2026-02-17)
+
 
 ## Update Log
 - 2026-02-17:
+  - Environment reality check:
+    - confirmed sandboxed commands cannot resolve external hosts (DNS disabled), even though the host network is functional.
+    - rule updated: run live provider probes outside sandbox (escalated exec) and record outputs; keep unit/integration tests in sandbox.
   - Completed Milestone 44 interactive `auth login` provider picker:
     - added TTY-only provider selection for `rustcode auth login` when provider omitted.
     - added provider hints for common providers (OpenCode, Vercel AI Gateway).

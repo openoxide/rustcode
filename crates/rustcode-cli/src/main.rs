@@ -2339,6 +2339,7 @@ fn render_protocol(protocol: &ProviderProtocolName) -> &'static str {
         ProviderProtocolName::Null => "null",
         ProviderProtocolName::OpenAiCompatible => "openai_compatible",
         ProviderProtocolName::AnthropicMessages => "anthropic_messages",
+        ProviderProtocolName::VercelAiGateway => "vercel_ai_gateway",
     }
 }
 
