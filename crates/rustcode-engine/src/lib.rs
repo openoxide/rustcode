@@ -224,12 +224,14 @@ When you are done, respond with a final plain-text answer."
                         .to_string(),
                 ),
                 tool_call_id: None,
+                tool_name: None,
                 tool_calls: Vec::new(),
             },
             ChatMessage {
                 role: ChatRole::User,
                 content: Value::String(prompt),
                 tool_call_id: None,
+                tool_name: None,
                 tool_calls: Vec::new(),
             },
         ];
@@ -260,6 +262,7 @@ When you are done, respond with a final plain-text answer."
                     Value::String(response.text.clone())
                 },
                 tool_call_id: None,
+                tool_name: None,
                 tool_calls: response.tool_calls.clone(),
             });
 
@@ -330,6 +333,7 @@ When you are done, respond with a final plain-text answer."
                     role: ChatRole::Tool,
                     content: Value::String(result_payload),
                     tool_call_id: Some(call.id.clone()),
+                    tool_name: Some(call.name.clone()),
                     tool_calls: Vec::new(),
                 });
             }

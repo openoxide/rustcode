@@ -33,6 +33,8 @@ pub struct ChatMessage {
     // Tool result messages use `tool_call_id`. Assistant messages that trigger tools should
     // populate `tool_calls` so the next turn can reference them.
     pub tool_call_id: Option<String>,
+    // Some provider protocols require the tool name when returning a tool result (e.g., Gemini).
+    pub tool_name: Option<String>,
     pub tool_calls: Vec<ToolCall>,
 }
 
@@ -1330,6 +1332,11 @@ fn openai_message_value(message: &ChatMessage) -> Value {
                 "tool_call_id".to_string(),
                 Value::String(tool_call_id.clone()),
             );
+        }
+        // OpenAI-style tool results do not require tool name, but keep it if present
+        // for interoperability with proxies that validate the field.
+        if let Some(tool_name) = message.tool_name.as_ref() {
+            obj.insert("name".to_string(), Value::String(tool_name.clone()));
         }
     }
     if message.role == ChatRole::Assistant && !message.tool_calls.is_empty() {

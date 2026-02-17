@@ -13,6 +13,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Do not consider a feature complete with tests alone; run live CLI usage paths for that feature and record observed output.
 - Ask the user immediately when external credentials, account context, or provider-specific access is required for end-to-end validation.
 - Maintain `docs/CREDENTIAL_REQUIREMENTS.md` as the canonical credential/env-var matrix; update it in the same commit as any auth flow change.
+- You are allowed to install additional tools/dependencies (system packages, language toolchains, CLIs) when needed to validate behavior; record any such installs and why in the relevant milestone validation notes.
 - Environment constraint: the default sandbox may not have working DNS/networking even when the host machine does. For any live provider validation, run the command outside the sandbox (escalated exec) and record that in the milestone validation notes.
 
 ## Current Mode
@@ -1100,6 +1101,16 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `parses_anthropic_tool_use_blocks`
 - Validation:
   - Pass: `cargo test -p rustcode-llm` (2026-02-17)
+  - Pass: `cargo test --workspace` (2026-02-17)
+
+53. Tool Result Metadata (Tool Name)
+- Status: completed
+- Scope:
+  - Extend tool result messages with optional tool name to support provider protocols that require it.
+- Deliverables:
+  - `ChatMessage` includes `tool_name: Option<String>`.
+  - OpenAI-compatible chat payload includes `name` for tool result messages when present.
+- Validation:
   - Pass: `cargo test --workspace` (2026-02-17)
 
 
