@@ -953,6 +953,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Update Log
 - 2026-02-17:
+  - Docs alignment:
+    - updated `docs/CREDENTIAL_REQUIREMENTS.md` with first-class provider API key env vars (`opencode`, `openrouter`, `anthropic`, `vercel`, `v0`) and added an explicit sandbox vs escalated network execution rule for live validation.
+    - updated `docs/PROVIDERS.md` to reflect the `vercel_ai_gateway` protocol and added runnable examples for `vercel`, `v0`, and `opencode`.
   - Environment reality check:
     - confirmed sandboxed commands cannot resolve external hosts (DNS disabled), even though the host network is functional.
     - rule updated: run live provider probes outside sandbox (escalated exec) and record outputs; keep unit/integration tests in sandbox.

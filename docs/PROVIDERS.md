@@ -24,6 +24,7 @@ If `llm.provider` is `null`, `rustcode` derives provider from `model` when it is
 - `null` provider: offline deterministic response.
 - OpenAI-compatible: `POST /v1/chat/completions`
 - Anthropic: `POST /v1/messages`
+- Vercel AI Gateway: `POST /language-model` (AI SDK v2 protocol headers + SSE deltas)
 
 ## Provider Presets
 
@@ -42,6 +43,9 @@ Preset defaults include:
 - Azure (`azure`, `azure-cognitive-services`)
 - GitHub Copilot (`github-copilot`, `github-copilot-enterprise`)
 - Cloudflare (`cloudflare-workers-ai`, `cloudflare-ai-gateway`)
+- Vercel AI Gateway (`vercel`)
+- Vercel v0 (`v0`)
+- OpenCode Zen (`opencode`)
 
 Additional IDs from opencode provider references are accepted through generic OpenAI-compatible mode when `base_url` is provided.
 
@@ -68,6 +72,27 @@ Or store once in the local auth store:
 ```bash
 OPENROUTER_API_KEY=... rustcode auth set-key openrouter --from-env OPENROUTER_API_KEY
 rustcode auth status openrouter
+```
+
+Vercel AI Gateway:
+
+```bash
+AI_GATEWAY_API_KEY=... rustcode auth set-key vercel --from-env AI_GATEWAY_API_KEY
+rustcode run "hello via vercel gateway"
+```
+
+Vercel v0:
+
+```bash
+V0_API_KEY=... rustcode auth set-key v0 --from-env V0_API_KEY
+rustcode run "hello via v0"
+```
+
+OpenCode Zen:
+
+```bash
+OPENCODE_API_KEY=... rustcode auth set-key opencode --from-env OPENCODE_API_KEY
+rustcode run "hello via opencode zen"
 ```
 
 Ollama local example:

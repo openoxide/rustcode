@@ -7,6 +7,11 @@ This document is the single source of truth for runtime credentials required by 
 - Any auth/login feature change must update this file in the same commit.
 - Before attempting live OAuth/API validation that requires user-specific secrets, ask the user for the missing values explicitly.
 - Never commit user-provided secrets, tokens, or API keys.
+- In this repo environment, live network validation must be run **out of sandbox** (see "Network Execution Rule").
+
+## Network Execution Rule
+
+Some sandboxed executions do not have working DNS/network. For any live provider validation (OAuth metadata, token exchange, LLM calls), run commands out-of-sandbox (escalated execution) and record that in `PLAN.md` for the milestone.
 
 ## Provider Matrix
 
@@ -20,6 +25,11 @@ This document is the single source of truth for runtime credentials required by 
 | `github-copilot` / `github-copilot-enterprise` | `api_key` | `--from-env <ENV_VAR>` value | none | Manual token mode. |
 | `gitlab` | `oauth_browser` | none for `gitlab.com`; `GITLAB_OAUTH_CLIENT_ID` for self-hosted instances | `GITLAB_OAUTH_CLIENT_SECRET`, `GITLAB_INSTANCE_URL` | Uses PKCE + localhost callback + `/oauth/token`; defaults to bundled OpenCode-compatible client ID on `gitlab.com`. |
 | `gitlab` | `api_key` | `--from-env <ENV_VAR>` value | none | Personal Access Token mode. |
+| `opencode` | `api_key` | `--from-env OPENCODE_API_KEY` value | none | API key can be created at `https://opencode.ai/auth`. |
+| `openrouter` | `api_key` | `--from-env OPENROUTER_API_KEY` value | none | OpenRouter recommends attribution headers (`http-referer`, `x-title`) which `rustcode` sets by default. |
+| `anthropic` | `api_key` | `--from-env ANTHROPIC_API_KEY` value | none | Required for `anthropic_messages` protocol. |
+| `vercel` | `api_key` | `--from-env AI_GATEWAY_API_KEY` value | none | API key can be created at `https://vercel.link/ai-gateway-token`. |
+| `v0` | `api_key` | `--from-env V0_API_KEY` value | none | Vercel v0 uses OpenAI-compatible protocol at `https://api.v0.dev/v1`. |
 | `mcp:<name>` | `oauth_browser` | one of: `--client-id`, configured `oauth.client_id`, or `RUSTCODE_MCP_OAUTH_CLIENT_ID`; OAuth-capable MCP metadata | `--client-secret-env <ENV_VAR>`, configured `oauth.client_secret_env`, `RUSTCODE_MCP_OAUTH_CLIENT_SECRET`, `--oauth-port` | Uses MCP-discovered OAuth endpoints + PKCE + localhost callback; stores OAuth token in auth store under `mcp:<name>`. |
 | `mcp:<name>` | `api_key` import | `--from-env <ENV_VAR>` value | none | Manual token import fallback for MCP servers without browser OAuth support. |
 | any provider | `api_key` | `--from-env <ENV_VAR>` value | none | Generic fallback. |
