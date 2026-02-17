@@ -1642,6 +1642,72 @@ fn mcp_add_writes_project_config_and_list_sees_server_when_trusted() {
 }
 
 #[test]
+fn mcp_status_reports_oauth_supported_for_discoverable_server() {
+    let Some((port, handle)) = spawn_mcp_discovery_server() else {
+        return;
+    };
+    let root = std::env::temp_dir().join(format!(
+        "rustcode-mcp-status-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).expect("must create project root");
+    std::fs::write(
+        root.join("rustcode.toml"),
+        format!(
+            r#"
+[mcp.servers.github]
+url = "http://127.0.0.1:{port}/mcp"
+oauth = true
+"#
+        ),
+    )
+    .expect("must write project config");
+
+    let output = Command::new(rustcode_bin())
+        .args(["--trust-project-config", "--json", "mcp", "status"])
+        .current_dir(&root)
+        .output()
+        .expect("must run rustcode mcp status");
+
+    handle.join().expect("discovery server should join");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let payload: Value = serde_json::from_str(
+        String::from_utf8(output.stdout)
+            .expect("stdout must be utf8")
+            .trim(),
+    )
+    .expect("must parse json");
+    assert_eq!(payload["command"].as_str(), Some("mcp.status"));
+    let servers = payload["servers"]
+        .as_array()
+        .expect("servers should be array");
+    let row = servers
+        .iter()
+        .find(|row| row["name"].as_str() == Some("github"))
+        .expect("github row should exist");
+    assert_eq!(row["oauth_enabled"].as_bool(), Some(true));
+    assert_eq!(row["oauth_supported"].as_bool(), Some(true));
+    assert_eq!(
+        row["discovery"]["authorization_endpoint"].as_str(),
+        Some("https://mcp.example.com/authorize")
+    );
+    assert_eq!(
+        row["discovery"]["token_endpoint"].as_str(),
+        Some("https://mcp.example.com/token")
+    );
+}
+
+#[test]
 fn models_command_reads_custom_models_index() {
     let models_path = make_temp_file_path("models-index");
     std::fs::write(

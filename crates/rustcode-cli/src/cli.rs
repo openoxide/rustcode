@@ -127,6 +127,9 @@ pub enum AuthCommand {
 pub enum McpCommand {
     #[command(alias = "ls")]
     List,
+    Status {
+        name: Option<String>,
+    },
     Get {
         name: String,
     },
@@ -585,6 +588,30 @@ mod tests {
                 assert_eq!(scope, "project");
             }
             _ => panic!("expected mcp add command"),
+        }
+    }
+
+    #[test]
+    fn mcp_status_parses_with_optional_name() {
+        let cli = Cli::try_parse_from(["rustcode", "mcp", "status"]).expect("cli should parse");
+        match cli.command {
+            TopCommand::Mcp {
+                command: McpCommand::Status { name },
+            } => {
+                assert!(name.is_none());
+            }
+            _ => panic!("expected mcp status command"),
+        }
+
+        let cli =
+            Cli::try_parse_from(["rustcode", "mcp", "status", "github"]).expect("cli should parse");
+        match cli.command {
+            TopCommand::Mcp {
+                command: McpCommand::Status { name },
+            } => {
+                assert_eq!(name.as_deref(), Some("github"));
+            }
+            _ => panic!("expected mcp status command"),
         }
     }
 }

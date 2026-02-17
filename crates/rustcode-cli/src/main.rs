@@ -844,6 +844,105 @@ async fn handle_mcp_command(
                 }
             }
         }
+        McpCommand::Status { name } => {
+            let mut names: Vec<String> = if let Some(name) = name {
+                vec![name]
+            } else {
+                configured_servers.keys().cloned().collect()
+            };
+            names.sort();
+
+            let mut statuses = Vec::with_capacity(names.len());
+            for name in names {
+                let configured = configured_servers.get(&name).cloned();
+                let key = mcp_store_key(&name);
+                let credential = store.get(&key)?;
+                let expires_at_unix = match credential.as_ref() {
+                    Some(StoredCredential::OAuth {
+                        expires_at_unix, ..
+                    }) => *expires_at_unix,
+                    _ => None,
+                };
+                let now_unix = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|now| now.as_secs() as i64)
+                    .unwrap_or(0);
+                let expired = expires_at_unix
+                    .and_then(|value| (value > 0).then_some(value))
+                    .map(|value| value <= now_unix)
+                    .unwrap_or(false);
+
+                let (oauth_supported, metadata) = if let Some(configured) = configured.as_ref() {
+                    if configured.oauth_enabled() {
+                        if let Some(url) = configured.url.clone() {
+                            let discovery = discover_mcp_oauth(&url).await?;
+                            (
+                                discovery.supported,
+                                Some(serde_json::json!({
+                                    "metadata_url": discovery.metadata_url,
+                                    "authorization_endpoint": discovery.authorization_endpoint,
+                                    "token_endpoint": discovery.token_endpoint,
+                                })),
+                            )
+                        } else {
+                            (false, None)
+                        }
+                    } else {
+                        (false, None)
+                    }
+                } else {
+                    (false, None)
+                };
+
+                statuses.push(serde_json::json!({
+                    "name": name,
+                    "configured": configured.is_some(),
+                    "url": configured.as_ref().and_then(|entry| entry.url.clone()),
+                    "oauth_enabled": configured.as_ref().map(|entry| entry.oauth_enabled()).unwrap_or(false),
+                    "oauth_supported": oauth_supported,
+                    "credential": render_stored_credential(credential),
+                    "expired": expired,
+                    "discovery": metadata,
+                }));
+            }
+
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "command": "mcp.status",
+                    "auth_file": store.path().display().to_string(),
+                    "servers": statuses,
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize mcp status json")?,
+                )? {
+                    return Ok(());
+                }
+                return Ok(());
+            }
+
+            if !write_stdout_line(&format!("servers={}", statuses.len()))?
+                || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+            {
+                return Ok(());
+            }
+            for row in statuses {
+                let name = row["name"].as_str().unwrap_or("<unknown>");
+                let cred = row["credential"].as_str().unwrap_or("none");
+                let configured = row["configured"].as_bool().unwrap_or(false);
+                let url = row["url"].as_str().unwrap_or("-");
+                let oauth_enabled = row["oauth_enabled"].as_bool().unwrap_or(false);
+                let oauth_supported = row["oauth_supported"].as_bool().unwrap_or(false);
+                let expired = row["expired"].as_bool().unwrap_or(false);
+                let line = format!(
+                    "name={name}\tconfigured={configured}\turl={url}\toauth_enabled={oauth_enabled}\toauth_supported={oauth_supported}\tcredential={cred}\texpired={expired}",
+                );
+                if !write_stdout_line(&line)? {
+                    return Ok(());
+                }
+            }
+        }
         McpCommand::Get { name } => {
             let key = mcp_store_key(&name);
             let configured = configured_servers.get(&name);

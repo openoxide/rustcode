@@ -861,9 +861,36 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: integration test:
     - `mcp_add_writes_project_config_and_list_sees_server_when_trusted`
 
+43. MCP Status (Discovery + Credential Snapshot)
+- Status: completed
+- Deliverables:
+  - Added `mcp status [name]`:
+    - Human output includes: configured/url/oauth_enabled/oauth_supported/credential/expired.
+    - JSON contract: `command=mcp.status` with `servers[]` rows including optional discovery endpoints.
+  - `mcp status` performs OAuth discovery only when:
+    - server is configured,
+    - oauth is enabled in config,
+    - and a url exists.
+  - Behavior parity note:
+    - OpenCode `mcp status` includes live connectivity/auth-needed assessment; rustcode `mcp status` is currently a config + credential + discovery snapshot and will be upgraded once MCP runtime connections exist.
+- Milestone 43 references (code + docs):
+  - `opencode/packages/opencode/src/cli/cmd/mcp.ts`
+  - `codex/codex-rs/cli/src/mcp_cmd.rs`
+  - `https://opencode.ai/docs`
+  - `https://developers.openai.com/codex/`
+- Validation:
+  - Pass: `cargo test -p rustcode-cli mcp_status` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration test:
+    - `mcp_status_reports_oauth_supported_for_discoverable_server`
+
 
 ## Update Log
 - 2026-02-17:
+  - Completed Milestone 43 `mcp status`:
+    - added `mcp status [name]` and JSON contract.
+    - added OAuth discovery snapshot emission for configured OAuth-enabled servers.
+    - added integration coverage for discoverable server metadata.
   - Completed Milestone 41 layered MCP config integration:
     - added `[mcp.servers.<name>]` to layered TOML config via `rustcode-config`.
     - updated `rustcode-cli` MCP commands to consume `ResolvedConfig.mcp_servers` (preferred) with JSON sidecar fallback.
