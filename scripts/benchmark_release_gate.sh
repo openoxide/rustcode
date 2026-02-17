@@ -12,6 +12,7 @@ max_rss_delta_limit="${MAX_RSS_DELTA_LIMIT:-1048576}"
 peak_delta_limit="${PEAK_DELTA_LIMIT:-524288}"
 p95_delta_limit="${P95_DELTA_LIMIT:-0.100}"
 allow_missing="${ALLOW_MISSING_RELEASE_METRICS:-0}"
+source "$(dirname "$0")/benchmark_metrics.sh"
 
 if [[ ! -f "$baseline_file" ]]; then
   echo "missing baseline artifact: $baseline_file" >&2
@@ -23,65 +24,12 @@ if [[ ! -f "$candidate_file" ]]; then
   exit 1
 fi
 
-extract_int() {
-  local file="$1"
-  local pattern="$2"
-  local value
-  value=$(grep -oE "$pattern" "$file" | head -n1 | grep -oE '[0-9]+' || true)
-  if [[ -z "$value" ]]; then
-    echo 0
-  else
-    echo "$value"
-  fi
-}
-
-extract_float() {
-  local file="$1"
-  local pattern="$2"
-  local value
-  value=$(grep -oE "$pattern" "$file" | head -n1 | sed -E 's/.*=([0-9.]+)/\1/' || true)
-  if [[ -z "$value" ]]; then
-    echo 0
-  else
-    echo "$value"
-  fi
-}
-
-extract_sampled_rss() {
-  local file="$1"
-  local sampled
-  sampled=$(grep -oE '[0-9]+[[:space:]]+[0-9]+[[:space:]]+[0-9]+\.[0-9]' "$file" | awk '{print $2}' | sort -nr | head -n1 || true)
-  if [[ -z "$sampled" ]]; then
-    echo 0
-  else
-    echo "$sampled"
-  fi
-}
-
-normalize_rss_and_peak() {
-  local file="$1"
-  local rss
-  local peak
-  local sampled
-
-  rss=$(extract_int "$file" '[0-9]+  maximum resident set size')
-  peak=$(extract_int "$file" '[0-9]+  peak memory footprint')
-  sampled=$(extract_sampled_rss "$file")
-
-  if (( rss == 0 && sampled > 0 )); then
-    rss="$sampled"
-  fi
-  if (( peak == 0 && rss > 0 )); then
-    peak="$rss"
-  fi
-
-  printf '%s %s\n' "$rss" "$peak"
-}
-
-read -r baseline_rss baseline_peak < <(normalize_rss_and_peak "$baseline_file")
-read -r candidate_rss candidate_peak < <(normalize_rss_and_peak "$candidate_file")
-baseline_p95=$(extract_float "$baseline_file" 'latency_p95_s=[0-9]+(\.[0-9]+)?')
-candidate_p95=$(extract_float "$candidate_file" 'latency_p95_s=[0-9]+(\.[0-9]+)?')
+baseline_rss=$(benchmark_extract_max_rss_bytes "$baseline_file")
+candidate_rss=$(benchmark_extract_max_rss_bytes "$candidate_file")
+baseline_peak=$(benchmark_extract_peak_bytes "$baseline_file")
+candidate_peak=$(benchmark_extract_peak_bytes "$candidate_file")
+baseline_p95=$(benchmark_extract_latency_p95_seconds "$baseline_file")
+candidate_p95=$(benchmark_extract_latency_p95_seconds "$candidate_file")
 
 rss_delta=$((candidate_rss - baseline_rss))
 peak_delta=$((candidate_peak - baseline_peak))

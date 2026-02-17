@@ -191,9 +191,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Mitigation: small trait surface and explicit versioning.
 
 ## Next Action Queue
-1. Add platform-specific benchmark parser to reduce `ALLOW_MISSING_METRICS` use.
-2. Add serve telemetry assertion script for CI artifacts.
-3. Add baseline refresh workflow for `benchmarks/release-baseline.json`.
+1. Add serve telemetry assertion script for CI artifacts.
+2. Add baseline refresh workflow for `benchmarks/release-baseline.json`.
+3. Define GitHub release automation flow (`tag -> artifact -> release notes -> gh release`).
 
 ## Update Log
 - 2026-02-17:
@@ -336,6 +336,13 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - added warmup support to `scripts/benchmark.sh load` (`[warmup]` arg).
     - increased recorder sampling to `load 20 2 2` in `scripts/benchmark_record.sh`.
     - refreshed baseline artifact so release gate compares like-for-like load telemetry.
+  - Platform-aware metrics parsing added:
+    - introduced shared parser `scripts/benchmark_metrics.sh` (BSD/GNU time + sampled RSS fallback).
+    - wired parser into `benchmark_assert.sh`, `benchmark_compare.sh`, and `benchmark_release_gate.sh`.
+    - normalized memory metrics to bytes across scripts.
+  - CI stability hardening:
+    - de-flaked `sigint_cancels_long_running_command_gracefully` integration test with explicit child-running precondition.
+    - improved failure diagnostics by including child exit status in assertion output.
   - Added structured serve telemetry:
     - introduced `EventPayload::ServeRequest { method, path, status }`.
     - `serve` now emits route-level events for each handled request.

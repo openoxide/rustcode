@@ -6,6 +6,7 @@
 - Comparator: `scripts/benchmark_compare.sh`
 - Assertions: `scripts/benchmark_assert.sh`
 - Release Gate: `scripts/benchmark_release_gate.sh`
+- Metrics Parser: `scripts/benchmark_metrics.sh`
 - Snapshot/Rotation: `scripts/benchmark_snapshot.sh`
 - Modes:
   - `startup [runs]`
@@ -32,13 +33,14 @@ Examples:
 - The harness builds `rustcode-cli` before running probes.
 - On restricted environments, `/usr/bin/time -l` may be unavailable or blocked; the script falls back to portable timing output.
 - For full RSS metrics on macOS, run outside sandbox restrictions with `/usr/bin/time -l` enabled.
+- Memory metrics in compare/assert/release-gate scripts are normalized to bytes (BSD + GNU time formats).
 
 ## Latest Sample (2026-02-17)
 - `./scripts/benchmark.sh startup 5`:
   - `real 0.00` reported across runs on host timer granularity.
 - `./scripts/benchmark.sh memory "bench memory probe"`:
-  - `maximum resident set size: 5,652,480`
-  - `peak memory footprint: 2,228,536`
+  - `maximum resident set size: 5,537,792`
+  - `peak memory footprint: 2,113,848`
 - `./scripts/benchmark.sh drift 12 4`:
   - observed RSS samples: `32 KB -> 5,392 KB`
   - process remained stable and exited cleanly on cancellation.
@@ -48,7 +50,7 @@ Examples:
 - `./scripts/benchmark.sh load 20 2 2`:
   - completed concurrent batch probes successfully (`20` measured batches x `2` workers, `2` warmup batches).
   - emitted latency summary (`latency_p50_s`, `latency_p95_s`, `latency_max_s`).
-  - latest sample: `p50=0.005s`, `p95=0.007s`, `max=0.008s`.
+  - latest sample: `p50=0.005s`, `p95=0.007s`, `max=0.007s`.
 - `./scripts/benchmark_record.sh benchmarks/latest.json`:
   - persists startup/memory/drift/serve/load output in JSON artifact format.
 - `./scripts/benchmark_compare.sh <old> <new>`:

@@ -53,14 +53,28 @@ fn json_stream_includes_schema_version_and_completion_event() {
 #[cfg(unix)]
 #[test]
 fn sigint_cancels_long_running_command_gracefully() {
-    let child = Command::new(rustcode_bin())
+    let mut child = Command::new(rustcode_bin())
         .args(["exec", "sleep", "30"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("must spawn rustcode process");
 
-    thread::sleep(Duration::from_millis(500));
+    // Avoid signal race by ensuring process remains alive briefly before SIGINT.
+    let mut saw_running = false;
+    for _ in 0..20 {
+        match child.try_wait().expect("must query child state") {
+            None => {
+                saw_running = true;
+                break;
+            }
+            Some(status) => {
+                panic!("child exited before signal with status: {status}");
+            }
+        }
+    }
+    assert!(saw_running, "child never reached running state");
+    thread::sleep(Duration::from_millis(1000));
 
     let pid = child.id().to_string();
     let kill_status = Command::new("kill")
@@ -75,7 +89,8 @@ fn sigint_cancels_long_running_command_gracefully() {
 
     assert!(
         output.status.success(),
-        "stdout: {}\nstderr: {}",
+        "status: {:?}\nstdout: {}\nstderr: {}",
+        output.status,
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );

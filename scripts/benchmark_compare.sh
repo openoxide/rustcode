@@ -8,28 +8,20 @@ fi
 
 old_file="$1"
 new_file="$2"
+source "$(dirname "$0")/benchmark_metrics.sh"
 
-extract_value() {
-  local file="$1"
-  local pattern="$2"
-  local fallback="$3"
-  local value
-  value=$(grep -oE "$pattern" "$file" | head -n1 | grep -oE '[0-9]+' || true)
-  if [[ -z "$value" ]]; then
-    echo "$fallback"
-  else
-    echo "$value"
-  fi
-}
-
-old_rss=$(extract_value "$old_file" '[0-9]+  maximum resident set size' 0)
-new_rss=$(extract_value "$new_file" '[0-9]+  maximum resident set size' 0)
-old_peak=$(extract_value "$old_file" '[0-9]+  peak memory footprint' 0)
-new_peak=$(extract_value "$new_file" '[0-9]+  peak memory footprint' 0)
+old_rss=$(benchmark_extract_max_rss_bytes "$old_file")
+new_rss=$(benchmark_extract_max_rss_bytes "$new_file")
+old_peak=$(benchmark_extract_peak_bytes "$old_file")
+new_peak=$(benchmark_extract_peak_bytes "$new_file")
+old_p95=$(benchmark_extract_latency_p95_seconds "$old_file")
+new_p95=$(benchmark_extract_latency_p95_seconds "$new_file")
 
 rss_delta=$((new_rss - old_rss))
 peak_delta=$((new_peak - old_peak))
+p95_delta=$(awk -v old="$old_p95" -v new="$new_p95" 'BEGIN { printf "%.6f", new - old }')
 
 printf "compare old=%s new=%s\n" "$old_file" "$new_file"
 printf "max_rss old=%s new=%s delta=%+d\n" "$old_rss" "$new_rss" "$rss_delta"
 printf "peak_footprint old=%s new=%s delta=%+d\n" "$old_peak" "$new_peak" "$peak_delta"
+printf "latency_p95_s old=%s new=%s delta=%s\n" "$old_p95" "$new_p95" "$p95_delta"
