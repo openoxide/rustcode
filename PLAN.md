@@ -1082,6 +1082,26 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `rustcode-cli agent --help` shows safety flags and limits (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
 
+52. Anthropic Tool-Calling Chat Support
+- Status: completed
+- Scope:
+  - Implement `chat()` for the Anthropic Messages protocol so `agent` works when `--llm-provider anthropic`.
+  - Translate OpenAI-style tool transcript into Anthropic `tool_use` / `tool_result` blocks.
+- Milestone 52 references (code + docs):
+  - `opencode/packages/opencode/src/session/message-v2.ts` (tool_use/tool_result completion requirement notes)
+  - `opencode/packages/opencode/src/session/llm.ts` (Anthropic proxy behavior around tools presence)
+  - `https://opencode.ai/docs`
+- Deliverables:
+  - `rustcode-llm`:
+    - `AnthropicClient::chat()` builds `system`, `messages`, and `tools` payload for `/v1/messages`.
+    - parses `tool_use` blocks into `ChatResponse.tool_calls`.
+    - preserves text blocks as `ChatResponse.text`.
+  - Unit tests:
+    - `parses_anthropic_tool_use_blocks`
+- Validation:
+  - Pass: `cargo test -p rustcode-llm` (2026-02-17)
+  - Pass: `cargo test --workspace` (2026-02-17)
+
 
 ## Update Log
 - 2026-02-17:

@@ -1073,6 +1073,85 @@ impl LlmClient for AnthropicClient {
             }
         }
     }
+
+    async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, LlmError> {
+        let model = model_for_provider(&self.provider_id, &request.model);
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            HeaderName::from_static("x-api-key"),
+            HeaderValue::from_str(&self.api_key)
+                .map_err(|err| LlmError::Config(format!("invalid anthropic key header: {err}")))?,
+        );
+        headers.insert(
+            HeaderName::from_static("anthropic-version"),
+            HeaderValue::from_static("2023-06-01"),
+        );
+        // Align with OpenCode's default Anthropic headers for Claude Code compatibility.
+        headers.insert(
+            HeaderName::from_static("anthropic-beta"),
+            HeaderValue::from_static(
+                "claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14",
+            ),
+        );
+
+        let (system, messages) = anthropic_messages_from_chat(&request)?;
+        let tools: Vec<Value> = request
+            .tools
+            .iter()
+            .map(|tool| {
+                json!({
+                    "name": tool.name,
+                    "description": tool.description,
+                    "input_schema": tool.parameters,
+                })
+            })
+            .collect();
+
+        let response = self
+            .http
+            .post(&self.endpoint)
+            .headers(headers)
+            .json(&json!({
+                "model": model,
+                "max_tokens": 1024,
+                "system": system,
+                "messages": messages,
+                "tools": tools,
+                "stream": false,
+            }))
+            .send();
+        let response = timeout(HTTP_RESPONSE_HEADER_TIMEOUT, response)
+            .await
+            .map_err(|_| {
+                LlmError::Transport("timed out waiting for provider response headers".to_string())
+            })?
+            .map_err(|err| LlmError::Transport(err.to_string()))?;
+
+        let status = response.status();
+        let body = timeout(HTTP_RESPONSE_BODY_TIMEOUT, response.text())
+            .await
+            .map_err(|_| LlmError::Transport("timed out reading provider body".to_string()))?
+            .map_err(|err| LlmError::Transport(err.to_string()))?;
+        if !status.is_success() {
+            return Err(LlmError::Transport(format!(
+                "provider returned {}: {}",
+                status,
+                truncate_for_error(&body)
+            )));
+        }
+
+        let parsed: Value = serde_json::from_str(&body)
+            .map_err(|err| LlmError::Invalid(format!("response is not valid JSON: {err}")))?;
+        let tool_calls = extract_anthropic_tool_calls(&parsed);
+        let text = extract_anthropic_text(&parsed).unwrap_or_default();
+        if text.is_empty() && tool_calls.is_empty() {
+            return Err(LlmError::Invalid(
+                "provider response did not include content or tool calls".to_string(),
+            ));
+        }
+
+        Ok(ChatResponse { text, tool_calls })
+    }
 }
 
 #[derive(Debug)]
@@ -1540,6 +1619,32 @@ fn extract_anthropic_text(value: &Value) -> Option<String> {
     }
 }
 
+fn extract_anthropic_tool_calls(value: &Value) -> Vec<ToolCall> {
+    let Some(content) = value.get("content").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    let mut calls = Vec::new();
+    for item in content {
+        if item.get("type").and_then(Value::as_str) != Some("tool_use") {
+            continue;
+        }
+        let Some(id) = item.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(name) = item.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let input = item.get("input").cloned().unwrap_or(Value::Null);
+        calls.push(ToolCall {
+            id: id.to_string(),
+            name: name.to_string(),
+            arguments: input.to_string(),
+        });
+    }
+    calls
+}
+
 fn extract_anthropic_stream_delta(value: &Value) -> Option<String> {
     let event_type = value.get("type").and_then(Value::as_str)?;
     match event_type {
@@ -1555,6 +1660,99 @@ fn extract_anthropic_stream_delta(value: &Value) -> Option<String> {
             .map(ToOwned::to_owned),
         _ => None,
     }
+}
+
+fn anthropic_messages_from_chat(request: &ChatRequest) -> Result<(String, Vec<Value>), LlmError> {
+    let mut system = String::new();
+    let mut messages: Vec<Value> = Vec::new();
+
+    for message in &request.messages {
+        match message.role {
+            ChatRole::System => {
+                if let Some(text) = message.content.as_str() {
+                    if !system.is_empty() {
+                        system.push_str("\n\n");
+                    }
+                    system.push_str(text);
+                }
+            }
+            ChatRole::User => {
+                let blocks = anthropic_content_blocks_from_value(&message.content);
+                if !blocks.is_empty() {
+                    messages.push(json!({"role":"user","content": blocks}));
+                }
+            }
+            ChatRole::Assistant => {
+                let mut blocks: Vec<Value> = Vec::new();
+                if let Some(text) = message.content.as_str() {
+                    if !text.is_empty() {
+                        blocks.push(json!({"type":"text","text": text}));
+                    }
+                }
+                for call in &message.tool_calls {
+                    let input: Value = serde_json::from_str(&call.arguments).unwrap_or(Value::Null);
+                    blocks.push(json!({
+                        "type": "tool_use",
+                        "id": call.id,
+                        "name": call.name,
+                        "input": input,
+                    }));
+                }
+                if !blocks.is_empty() {
+                    messages.push(json!({"role":"assistant","content": blocks}));
+                }
+            }
+            ChatRole::Tool => {
+                let Some(call_id) = message.tool_call_id.as_deref() else {
+                    continue;
+                };
+                let (content, is_error) = anthropic_tool_result_from_value(&message.content);
+                messages.push(json!({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": call_id,
+                        "content": content,
+                        "is_error": is_error
+                    }]
+                }));
+            }
+        }
+    }
+
+    Ok((system, messages))
+}
+
+fn anthropic_content_blocks_from_value(value: &Value) -> Vec<Value> {
+    if let Some(text) = value.as_str() {
+        if text.is_empty() {
+            return Vec::new();
+        }
+        return vec![json!({"type":"text","text": text})];
+    }
+    if value.is_null() {
+        return Vec::new();
+    }
+    vec![json!({"type":"text","text": value.to_string()})]
+}
+
+fn anthropic_tool_result_from_value(value: &Value) -> (String, bool) {
+    let content = if let Some(text) = value.as_str() {
+        text.to_string()
+    } else {
+        value.to_string()
+    };
+
+    let is_error = match serde_json::from_str::<Value>(&content) {
+        Ok(parsed) => parsed
+            .get("ok")
+            .and_then(Value::as_bool)
+            .map(|ok| !ok)
+            .unwrap_or(false),
+        Err(_) => false,
+    };
+
+    (content, is_error)
 }
 
 fn truncate_for_error(body: &str) -> String {
@@ -1742,6 +1940,22 @@ mod tests {
             extract_anthropic_text(&payload).as_deref(),
             Some("hello world")
         );
+    }
+
+    #[test]
+    fn parses_anthropic_tool_use_blocks() {
+        let payload = json!({
+            "content": [
+                {"type":"tool_use","id":"toolu_1","name":"read","input":{"path":"README.md"}},
+                {"type":"text","text":"ok"}
+            ]
+        });
+
+        let calls = extract_anthropic_tool_calls(&payload);
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].id, "toolu_1");
+        assert_eq!(calls[0].name, "read");
+        assert!(calls[0].arguments.contains("README.md"));
     }
 
     #[test]
