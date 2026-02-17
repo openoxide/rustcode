@@ -1113,6 +1113,45 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - Pass: `cargo test --workspace` (2026-02-17)
 
+54. Google Gemini Provider (Generative Language API)
+- Status: in_progress
+- Scope:
+  - Implement `google` provider parity aligned with OpenCode’s `@ai-sdk/google` usage:
+    - text completion (`run`)
+    - tool-calling chat (`agent`)
+    - SSE streaming deltas for `run` where available
+  - Keep `google-vertex` out of scope for this slice (requires ADC/service account plumbing).
+- Milestone 54 start references (code + docs):
+  - `opencode/packages/opencode/src/provider/provider.ts` (maps `@ai-sdk/google` to Google provider implementation)
+  - `opencode/packages/opencode/src/provider/transform.ts` (Google request/response transforms)
+  - `opencode/packages/opencode/test/session/llm.test.ts` (Gemini stream endpoint path suffix contract)
+  - `opencode/packages/opencode/test/provider/transform.test.ts` (Google base URL expectations)
+  - `opencode/packages/console/app/src/routes/zen/util/provider/google.ts` (generateContent vs streamGenerateContent URL builder)
+  - OpenCode models index (`~/.cache/opencode/models.json`): provider id `google`, env keys `GOOGLE_GENERATIVE_AI_API_KEY|GEMINI_API_KEY`, npm `@ai-sdk/google`
+  - `https://opencode.ai/docs`
+- Deliverables:
+  - `rustcode-llm`:
+    - detect Google protocol from models index (`npm == "@ai-sdk/google"`) and select a dedicated client.
+    - base URL default: `https://generativelanguage.googleapis.com` (unless overridden).
+    - endpoints:
+      - non-stream: `/v1beta/models/{model}:generateContent`
+      - stream: `/v1beta/models/{model}:streamGenerateContent?alt=sse`
+    - request mapping for:
+      - system/user/assistant messages
+      - tool declarations (JSON schema mapped to Gemini function declarations)
+      - tool results (include tool name and call id when required by protocol)
+    - response parsing for:
+      - text deltas (SSE)
+      - tool call requests (functionCall / toolCall equivalents)
+  - Config/docs:
+    - update `docs/CREDENTIAL_REQUIREMENTS.md` if new env key rules are introduced.
+- Validation (must be recorded on completion):
+  - `cargo test -p rustcode-llm` (unit parsing + endpoint normalization)
+  - `cargo test --workspace`
+  - Live unsandboxed probe (requires user-provided key; do not commit):
+    - `GEMINI_API_KEY=... rustcode-cli --llm-provider google --model google/gemini-... run "hello"`
+    - `GEMINI_API_KEY=... rustcode-cli --llm-provider google --model google/gemini-... agent "list then read Cargo.toml"`
+
 
 ## Update Log
 - 2026-02-17:
