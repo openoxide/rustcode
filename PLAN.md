@@ -625,6 +625,32 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth set-oauth openai --access-env ...`
     - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth remove openrouter`
 
+34. Auth Login JSON Stage Contract
+- Status: completed
+- Deliverables:
+  - Added machine-readable login stage envelopes for provider-scoped login:
+    - `challenge`
+    - `awaiting_user_authorization` / `awaiting_browser_callback`
+    - `polling_for_token` / `waiting_for_callback`
+    - `authorized`
+  - Added machine-readable providerless login discovery payload:
+    - `rustcode --json auth login`
+  - Added JSON stage output for API-key login paths (`source=env` and `source=prompt`).
+  - Preserved existing text login UX/output for non-JSON paths.
+  - Added integration coverage for JSON login listing, env-authorized path, and browser no-wait stage sequence.
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration tests:
+    - `auth_login_without_provider_json_lists_models_and_methods`
+    - `auth_login_from_env_json_emits_authorized_stage`
+    - `auth_login_openai_browser_no_wait_json_emits_stage_sequence`
+  - Pass: live CLI probes:
+    - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth login`
+    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth login openrouter --from-env ...`
+    - `cargo run -q -p rustcode-cli -- --json auth login openai --method oauth_browser --no-wait`
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -661,10 +687,29 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 1. Expand live provider validation matrix (GitLab full browser callback exchange once user app credentials are provided).
 2. Validate successful live streamed completion path with a non-quota provider key and record output contract sample.
 3. Add initial MCP auth/login command surface parity for remote OAuth-capable servers.
-4. Define and implement JSON contract for `auth login` flow stages (`no-wait`, polling, completion/failure).
+4. Add JSON stage envelopes for login failure/error paths so automation can classify transport vs provider failures.
 
 ## Update Log
 - 2026-02-17:
+  - Completed Milestone 34 auth login JSON stage contract:
+    - added JSON stage envelopes for login challenge/wait/poll/authorized phases.
+    - added providerless `--json auth login` discovery payload.
+    - kept text login output behavior unchanged for non-JSON invocation paths.
+    - added integration tests:
+      - `auth_login_without_provider_json_lists_models_and_methods`
+      - `auth_login_from_env_json_emits_authorized_stage`
+      - `auth_login_openai_browser_no_wait_json_emits_stage_sequence`
+  - Referenced parity sources before implementation:
+    - `opencode/packages/opencode/src/cli/cmd/auth.ts`
+    - `codex/codex-rs/cli/src/login.rs`
+  - Validation passed:
+    - `cargo fmt --all`
+    - `cargo test -p rustcode-cli`
+    - `./scripts/ci_matrix.sh`
+    - live probes:
+      - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth login`
+      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth login openrouter --from-env ...`
+      - `cargo run -q -p rustcode-cli -- --json auth login openai --method oauth_browser --no-wait`
   - Completed Milestone 33 auth mutation JSON contract:
     - added JSON envelopes for `auth set-key`, `auth set-oauth`, and `auth remove`.
     - preserved text output behavior for non-JSON mutation commands.

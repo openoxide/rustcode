@@ -339,6 +339,49 @@ fn auth_login_without_provider_lists_models_and_methods() {
 }
 
 #[test]
+fn auth_login_without_provider_json_lists_models_and_methods() {
+    let models_path = make_temp_file_path("auth-login-json-models");
+    std::fs::write(
+        &models_path,
+        r#"{
+  "openai": { "name": "OpenAI", "models": { "gpt-5": {} } },
+  "openrouter": { "name": "OpenRouter", "models": { "openai/gpt-5": {} } }
+}"#,
+    )
+    .expect("must write models fixture");
+
+    let output = Command::new(rustcode_bin())
+        .args(["--json", "auth", "login"])
+        .env("RUSTCODE_MODELS_PATH", &models_path)
+        .output()
+        .expect("must run rustcode auth login");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let payload: Value = serde_json::from_str(stdout.trim()).expect("must parse json");
+    assert_eq!(payload["schema_version"].as_u64(), Some(1));
+    assert_eq!(
+        payload["usage"]["api_key"].as_str(),
+        Some("rustcode auth login <provider> --from-env <ENV_VAR>")
+    );
+    let providers = payload["providers"]
+        .as_array()
+        .expect("providers should be array");
+    assert!(providers
+        .iter()
+        .any(|row| row["id"].as_str() == Some("openai")));
+    assert!(providers
+        .iter()
+        .any(|row| row["id"].as_str() == Some("openrouter")));
+}
+
+#[test]
 fn auth_login_from_env_stores_key() {
     let auth_path = make_temp_file_path("auth-login-set-key");
 
@@ -378,6 +421,41 @@ fn auth_login_from_env_stores_key() {
     );
     let status_stdout = String::from_utf8(status_output.stdout).expect("stdout must be utf8");
     assert!(status_stdout.contains("credential=stored:api_key"));
+}
+
+#[test]
+fn auth_login_from_env_json_emits_authorized_stage() {
+    let auth_path = make_temp_file_path("auth-login-json-set-key");
+
+    let output = Command::new(rustcode_bin())
+        .args([
+            "--json",
+            "auth",
+            "login",
+            "openrouter",
+            "--from-env",
+            "RUSTCODE_TEST_KEY",
+        ])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_TEST_KEY", "integration-login-secret")
+        .output()
+        .expect("must run rustcode auth login from env");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let payload: Value = serde_json::from_str(stdout.trim()).expect("must parse json");
+    assert_eq!(payload["schema_version"].as_u64(), Some(1));
+    assert_eq!(payload["provider"].as_str(), Some("openrouter"));
+    assert_eq!(payload["method"].as_str(), Some("api_key"));
+    assert_eq!(payload["stage"].as_str(), Some("authorized"));
+    assert_eq!(payload["source"].as_str(), Some("env"));
+    assert_eq!(payload["credential"].as_str(), Some("stored:api_key"));
 }
 
 #[test]
@@ -751,6 +829,53 @@ fn auth_login_openai_browser_no_wait_emits_authorize_url() {
     assert!(stdout.contains("authorize_url=https://auth.openai.com/oauth/authorize"));
     assert!(stdout.contains("redirect_uri=http://127.0.0.1:19455/auth/callback"));
     assert!(stdout.contains("status=awaiting_browser_callback"));
+}
+
+#[test]
+fn auth_login_openai_browser_no_wait_json_emits_stage_sequence() {
+    let output = Command::new(rustcode_bin())
+        .args([
+            "--json",
+            "auth",
+            "login",
+            "openai",
+            "--method",
+            "oauth_browser",
+            "--oauth-port",
+            "19456",
+            "--no-wait",
+        ])
+        .output()
+        .expect("must run rustcode auth login openai");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let lines = stdout.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2, "stdout: {stdout}");
+
+    let challenge: Value = serde_json::from_str(lines[0]).expect("challenge must parse");
+    assert_eq!(challenge["schema_version"].as_u64(), Some(1));
+    assert_eq!(challenge["provider"].as_str(), Some("openai"));
+    assert_eq!(challenge["method"].as_str(), Some("oauth_browser"));
+    assert_eq!(challenge["stage"].as_str(), Some("challenge"));
+    assert!(challenge["authorize_url"]
+        .as_str()
+        .expect("authorize_url should be string")
+        .contains("https://auth.openai.com/oauth/authorize"));
+
+    let awaiting: Value = serde_json::from_str(lines[1]).expect("awaiting must parse");
+    assert_eq!(awaiting["schema_version"].as_u64(), Some(1));
+    assert_eq!(awaiting["provider"].as_str(), Some("openai"));
+    assert_eq!(awaiting["method"].as_str(), Some("oauth_browser"));
+    assert_eq!(
+        awaiting["stage"].as_str(),
+        Some("awaiting_browser_callback")
+    );
 }
 
 #[test]

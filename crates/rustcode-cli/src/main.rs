@@ -190,7 +190,7 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                 if json_output {
                     let payload = serde_json::json!({
                         "schema_version": 1,
-                        "provider": provider,
+                        "provider": &provider,
                         "methods": methods
                             .iter()
                             .map(|method| method.as_str())
@@ -228,7 +228,7 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
             if json_output {
                 let payload = serde_json::json!({
                     "schema_version": 1,
-                    "provider": provider,
+                    "provider": &provider,
                     "methods": method_names,
                     "credential": credential,
                     "auth_file": store.path().display().to_string(),
@@ -259,7 +259,7 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
             if json_output {
                 let payload = serde_json::json!({
                     "schema_version": 1,
-                    "provider": provider,
+                    "provider": &provider,
                     "action": "set_key",
                     "credential": "stored:api_key",
                     "auth_file": store.path().display().to_string(),
@@ -310,7 +310,7 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
             if json_output {
                 let payload = serde_json::json!({
                     "schema_version": 1,
-                    "provider": provider,
+                    "provider": &provider,
                     "action": "set_oauth",
                     "credential": "stored:oauth",
                     "auth_file": store.path().display().to_string(),
@@ -334,7 +334,7 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
             if json_output {
                 let payload = serde_json::json!({
                     "schema_version": 1,
-                    "provider": provider,
+                    "provider": &provider,
                     "action": "remove",
                     "removed": removed,
                     "auth_file": store.path().display().to_string(),
@@ -371,7 +371,7 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                 if method.is_some() {
                     anyhow::bail!("`--method` requires a provider: `rustcode auth login <provider> --method <method>`");
                 }
-                return list_auth_login_providers();
+                return list_auth_login_providers(json_output);
             }
             let provider = provider.expect("provider is checked").to_ascii_lowercase();
             let methods = methods_for_provider(&provider);
@@ -394,6 +394,24 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                     format!("environment variable {env_name} is not set; cannot store key")
                 })?;
                 store.set_api_key(&provider, &key)?;
+                if json_output {
+                    let payload = serde_json::json!({
+                        "schema_version": 1,
+                        "provider": &provider,
+                        "method": selected_method.as_str(),
+                        "stage": "authorized",
+                        "source": "env",
+                        "credential": "stored:api_key",
+                        "auth_file": store.path().display().to_string(),
+                    });
+                    if !write_stdout_line(
+                        &serde_json::to_string(&payload)
+                            .context("failed to serialize auth login json")?,
+                    )? {
+                        return Ok(());
+                    }
+                    return Ok(());
+                }
                 if !write_stdout_line(&format!("stored api key for provider={provider}"))?
                     || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
                 {
@@ -406,6 +424,24 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                 AuthMethod::ApiKey => {
                     let key = prompt_for_api_key(&provider)?;
                     store.set_api_key(&provider, &key)?;
+                    if json_output {
+                        let payload = serde_json::json!({
+                            "schema_version": 1,
+                            "provider": &provider,
+                            "method": selected_method.as_str(),
+                            "stage": "authorized",
+                            "source": "prompt",
+                            "credential": "stored:api_key",
+                            "auth_file": store.path().display().to_string(),
+                        });
+                        if !write_stdout_line(
+                            &serde_json::to_string(&payload)
+                                .context("failed to serialize auth login json")?,
+                        )? {
+                            return Ok(());
+                        }
+                        return Ok(());
+                    }
                     if !write_stdout_line(&format!("stored api key for provider={provider}"))?
                         || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
                     {
@@ -414,7 +450,24 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                 }
                 AuthMethod::OAuthDeviceCode => {
                     let flow = start_device_code_flow(&provider, domain.as_deref()).await?;
-                    if !write_stdout_line(&format!("provider={provider}"))?
+                    if json_output {
+                        let challenge_payload = serde_json::json!({
+                            "schema_version": 1,
+                            "provider": &provider,
+                            "method": selected_method.as_str(),
+                            "stage": "challenge",
+                            "authorize_url": flow.verification_uri,
+                            "user_code": flow.user_code,
+                            "interval_secs": flow.interval_secs,
+                            "expires_in_secs": flow.expires_in_secs,
+                        });
+                        if !write_stdout_line(
+                            &serde_json::to_string(&challenge_payload)
+                                .context("failed to serialize auth login json")?,
+                        )? {
+                            return Ok(());
+                        }
+                    } else if !write_stdout_line(&format!("provider={provider}"))?
                         || !write_stdout_line(&format!("method={}", selected_method.as_str()))?
                         || !write_stdout_line(&format!("authorize_url={}", flow.verification_uri))?
                         || !write_stdout_line(&format!("user_code={}", flow.user_code))?
@@ -425,19 +478,61 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                     }
 
                     if no_wait {
-                        if !write_stdout_line("status=awaiting_user_authorization")? {
+                        if json_output {
+                            let payload = serde_json::json!({
+                                "schema_version": 1,
+                                "provider": &provider,
+                                "method": selected_method.as_str(),
+                                "stage": "awaiting_user_authorization",
+                            });
+                            if !write_stdout_line(
+                                &serde_json::to_string(&payload)
+                                    .context("failed to serialize auth login json")?,
+                            )? {
+                                return Ok(());
+                            }
+                        } else if !write_stdout_line("status=awaiting_user_authorization")? {
                             return Ok(());
                         }
                         return Ok(());
                     }
 
-                    if !write_stdout_line("status=polling_for_token")? {
+                    if json_output {
+                        let payload = serde_json::json!({
+                            "schema_version": 1,
+                            "provider": &provider,
+                            "method": selected_method.as_str(),
+                            "stage": "polling_for_token",
+                        });
+                        if !write_stdout_line(
+                            &serde_json::to_string(&payload)
+                                .context("failed to serialize auth login json")?,
+                        )? {
+                            return Ok(());
+                        }
+                    } else if !write_stdout_line("status=polling_for_token")? {
                         return Ok(());
                     }
                     let timeout = Duration::from_secs(timeout_secs.max(1));
                     let credential = poll_device_code_flow_for_credential(&flow, timeout).await?;
+                    let credential_kind = login_credential_kind(&credential);
                     persist_oauth_or_api_key(&store, &provider, credential)?;
-                    if !write_stdout_line("status=authorized")?
+                    if json_output {
+                        let payload = serde_json::json!({
+                            "schema_version": 1,
+                            "provider": &provider,
+                            "method": selected_method.as_str(),
+                            "stage": "authorized",
+                            "credential": credential_kind,
+                            "auth_file": store.path().display().to_string(),
+                        });
+                        if !write_stdout_line(
+                            &serde_json::to_string(&payload)
+                                .context("failed to serialize auth login json")?,
+                        )? {
+                            return Ok(());
+                        }
+                    } else if !write_stdout_line("status=authorized")?
                         || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
                     {
                         return Ok(());
@@ -463,7 +558,22 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                                     "oauth login adapter for provider={provider} is not implemented yet"
                                 )
                             })?;
-                            if !write_stdout_line(&format!("provider={provider}"))?
+                            if json_output {
+                                let payload = serde_json::json!({
+                                    "schema_version": 1,
+                                    "provider": &provider,
+                                    "method": selected_method.as_str(),
+                                    "stage": "hint",
+                                    "authorize_url": hint.authorize_url,
+                                    "instructions": hint.instructions,
+                                });
+                                if !write_stdout_line(
+                                    &serde_json::to_string(&payload)
+                                        .context("failed to serialize auth login json")?,
+                                )? {
+                                    return Ok(());
+                                }
+                            } else if !write_stdout_line(&format!("provider={provider}"))?
                                 || !write_stdout_line(&format!(
                                     "method={}",
                                     selected_method.as_str()
@@ -490,7 +600,23 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                         oauth_port,
                     )
                     .await?;
-                    if !write_stdout_line(&format!("provider={provider}"))?
+                    if json_output {
+                        let payload = serde_json::json!({
+                            "schema_version": 1,
+                            "provider": &provider,
+                            "method": selected_method.as_str(),
+                            "stage": "challenge",
+                            "authorize_url": flow.authorize_url,
+                            "redirect_uri": flow.redirect_uri,
+                            "oauth_port": oauth_port,
+                        });
+                        if !write_stdout_line(
+                            &serde_json::to_string(&payload)
+                                .context("failed to serialize auth login json")?,
+                        )? {
+                            return Ok(());
+                        }
+                    } else if !write_stdout_line(&format!("provider={provider}"))?
                         || !write_stdout_line(&format!("method={}", selected_method.as_str()))?
                         || !write_stdout_line(&format!("authorize_url={}", flow.authorize_url))?
                         || !write_stdout_line(&format!("redirect_uri={}", flow.redirect_uri))?
@@ -500,21 +626,63 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                     }
 
                     if no_wait {
-                        if !write_stdout_line("status=awaiting_browser_callback")? {
+                        if json_output {
+                            let payload = serde_json::json!({
+                                "schema_version": 1,
+                                "provider": &provider,
+                                "method": selected_method.as_str(),
+                                "stage": "awaiting_browser_callback",
+                            });
+                            if !write_stdout_line(
+                                &serde_json::to_string(&payload)
+                                    .context("failed to serialize auth login json")?,
+                            )? {
+                                return Ok(());
+                            }
+                        } else if !write_stdout_line("status=awaiting_browser_callback")? {
                             return Ok(());
                         }
                         return Ok(());
                     }
 
-                    if !write_stdout_line("status=waiting_for_callback")? {
+                    if json_output {
+                        let payload = serde_json::json!({
+                            "schema_version": 1,
+                            "provider": &provider,
+                            "method": selected_method.as_str(),
+                            "stage": "waiting_for_callback",
+                        });
+                        if !write_stdout_line(
+                            &serde_json::to_string(&payload)
+                                .context("failed to serialize auth login json")?,
+                        )? {
+                            return Ok(());
+                        }
+                    } else if !write_stdout_line("status=waiting_for_callback")? {
                         return Ok(());
                     }
                     let timeout = Duration::from_secs(timeout_secs.max(1));
                     let credential =
                         complete_browser_oauth_flow(&flow, timeout, client_secret.as_deref())
                             .await?;
+                    let credential_kind = login_credential_kind(&credential);
                     persist_oauth_or_api_key(&store, &provider, credential)?;
-                    if !write_stdout_line("status=authorized")?
+                    if json_output {
+                        let payload = serde_json::json!({
+                            "schema_version": 1,
+                            "provider": &provider,
+                            "method": selected_method.as_str(),
+                            "stage": "authorized",
+                            "credential": credential_kind,
+                            "auth_file": store.path().display().to_string(),
+                        });
+                        if !write_stdout_line(
+                            &serde_json::to_string(&payload)
+                                .context("failed to serialize auth login json")?,
+                        )? {
+                            return Ok(());
+                        }
+                    } else if !write_stdout_line("status=authorized")?
                         || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
                     {
                         return Ok(());
@@ -531,6 +699,14 @@ fn render_stored_credential(credential: Option<StoredCredential>) -> &'static st
         Some(StoredCredential::ApiKey { .. }) => "stored:api_key",
         Some(StoredCredential::OAuth { .. }) => "stored:oauth",
         None => "none",
+    }
+}
+
+fn login_credential_kind(credential: &rustcode_auth::DeviceCodeFlowCredential) -> &'static str {
+    if credential.refresh_token.is_some() || credential.expires_in_secs.is_some() {
+        "stored:oauth"
+    } else {
+        "stored:api_key"
     }
 }
 
@@ -936,8 +1112,33 @@ fn resolve_auth_method_rows() -> (Vec<AuthMethodRow>, Option<String>) {
     }
 }
 
-fn list_auth_login_providers() -> Result<()> {
+fn list_auth_login_providers(json_output: bool) -> Result<()> {
     let (rows, warning) = resolve_auth_method_rows();
+    if json_output {
+        let payload = serde_json::json!({
+            "schema_version": 1,
+            "warning": warning,
+            "usage": {
+                "api_key": "rustcode auth login <provider> --from-env <ENV_VAR>",
+                "oauth": "rustcode auth login <provider> --method <oauth_device_code|oauth_browser>",
+            },
+            "providers": rows
+                .iter()
+                .map(|row| serde_json::json!({
+                    "id": row.provider_id,
+                    "name": row.display_name,
+                    "methods": row.methods,
+                }))
+                .collect::<Vec<_>>(),
+        });
+        if !write_stdout_line(
+            &serde_json::to_string(&payload).context("failed to serialize auth login json")?,
+        )? {
+            return Ok(());
+        }
+        return Ok(());
+    }
+
     if let Some(warning) = warning {
         if !write_stdout_line(&format!("warning={warning}"))? {
             return Ok(());
