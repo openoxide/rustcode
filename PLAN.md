@@ -953,6 +953,11 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Update Log
 - 2026-02-17:
+  - Provider filter parity (OpenCode-style):
+    - added `enabled_providers` / `disabled_providers` to layered config and enforced them in `models` and LLM provider selection (disabled wins over enabled).
+    - references:
+      - `opencode/packages/opencode/src/cli/cmd/auth.ts` (provider filtering with enabled/disabled)
+      - `opencode/packages/opencode/src/provider/provider.ts` (provider registry filtered by enabled/disabled)
   - Docs alignment:
     - updated `docs/CREDENTIAL_REQUIREMENTS.md` with first-class provider API key env vars (`opencode`, `openrouter`, `anthropic`, `vercel`, `v0`) and added an explicit sandbox vs escalated network execution rule for live validation.
     - updated `docs/PROVIDERS.md` to reflect the `vercel_ai_gateway` protocol and added runnable examples for `vercel`, `v0`, and `opencode`.

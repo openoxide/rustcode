@@ -16,6 +16,8 @@
    - `[llm] provider`
    - `[llm] base_url` (alias: `baseURL`)
    - `[llm] api_key_env` (alias: `apiKeyEnv`)
+   - `enabled_providers` (optional allow-list)
+   - `disabled_providers` (optional deny-list; wins over allow-list)
 
 If `llm.provider` is `null`, `rustcode` derives provider from `model` when it is in `provider/model` format.
 
@@ -50,6 +52,13 @@ Preset defaults include:
 Additional IDs from opencode provider references are accepted through generic OpenAI-compatible mode when `base_url` is provided.
 
 `rustcode` also reads provider metadata from `RUSTCODE_MODELS_PATH` (or `~/.cache/opencode/models.json`) to inherit provider env-key names and advertised endpoints where available.
+
+## Provider Filtering
+
+`rustcode` supports OpenCode-style provider filtering:
+
+- `enabled_providers = ["openrouter", "openai"]`: only these providers are considered available.
+- `disabled_providers = ["openai"]`: always disables a provider (even if it is in `enabled_providers`).
 
 ## Examples
 

@@ -1689,6 +1689,9 @@ fn handle_models_command(
     let index = load_models_index()?;
 
     if let Some(provider) = provider_filter {
+        if !config.provider_allowed(provider) {
+            anyhow::bail!("provider is disabled by config: {provider}");
+        }
         let Some(entry) = index.get(provider) else {
             anyhow::bail!("provider not found in models index: {provider}");
         };
@@ -1796,7 +1799,10 @@ fn handle_models_command(
         return Ok(());
     }
 
-    let mut providers: Vec<_> = index.into_iter().collect();
+    let mut providers: Vec<_> = index
+        .into_iter()
+        .filter(|(provider_id, _)| config.provider_allowed(provider_id))
+        .collect();
     providers.sort_by(|a, b| a.0.cmp(&b.0));
 
     if json_output {

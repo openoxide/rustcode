@@ -292,6 +292,12 @@ fn resolve_provider(config: &ResolvedConfig) -> Result<ResolvedProvider, LlmErro
             "null".to_string()
         };
 
+    if !config.provider_allowed(&provider_id) && provider_id != "null" {
+        return Err(LlmError::Config(format!(
+            "provider '{provider_id}' is disabled by config"
+        )));
+    }
+
     let preset = provider_preset(&provider_id);
     let base_url = config
         .llm_base_url
@@ -352,6 +358,9 @@ fn select_provider_by_policy(config: &ResolvedConfig) -> Option<&'static str> {
     BACKEND_POLICY_CANDIDATES
         .iter()
         .filter_map(|candidate| {
+            if !config.provider_allowed(candidate.provider_id) {
+                return None;
+            }
             evaluate_backend_policy(config, candidate.provider_id).map(|evaluation| {
                 (
                     candidate.provider_id,
@@ -402,7 +411,8 @@ fn evaluate_backend_policy(
     let env_candidates = collect_provider_api_key_envs(candidate.provider_id, &preset);
     let (api_key, _) = resolve_api_key(config, &env_candidates, candidate.provider_id);
     let requires_api_key = preset.requires_api_key || !env_candidates.is_empty();
-    let available = !requires_api_key || api_key.is_some();
+    let allowed = config.provider_allowed(candidate.provider_id);
+    let available = allowed && (!requires_api_key || api_key.is_some());
     if !available {
         score -= 1000;
     }

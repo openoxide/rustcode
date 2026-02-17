@@ -47,6 +47,8 @@ struct FileConfig {
     profile: Option<String>,
     model: Option<String>,
     llm: Option<LlmConfig>,
+    enabled_providers: Option<Vec<String>>,
+    disabled_providers: Option<Vec<String>>,
     mcp: Option<McpConfig>,
     allow_network: Option<bool>,
     plugins: Option<Vec<String>>,
@@ -425,6 +427,22 @@ fn apply_file(cfg: &mut ResolvedConfig, file_cfg: &FileConfig) {
             cfg.llm_api_key_env = Some(api_key_env.clone());
         }
     }
+    if let Some(enabled) = &file_cfg.enabled_providers {
+        cfg.enabled_providers = Some(
+            enabled
+                .iter()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .collect(),
+        );
+    }
+    if let Some(disabled) = &file_cfg.disabled_providers {
+        cfg.disabled_providers = disabled
+            .iter()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .collect();
+    }
     if let Some(mcp) = &file_cfg.mcp {
         if let Some(servers) = &mcp.servers {
             merge_mcp_servers(&mut cfg.mcp_servers, servers);
@@ -575,6 +593,14 @@ fn validate(cfg: &ResolvedConfig) -> Result<(), ConfigError> {
             ));
         }
     }
+    if let Some(enabled) = cfg.enabled_providers.as_ref() {
+        for provider in enabled {
+            validate_provider_id("enabled_providers", provider)?;
+        }
+    }
+    for provider in &cfg.disabled_providers {
+        validate_provider_id("disabled_providers", provider)?;
+    }
     for (name, server) in &cfg.mcp_servers {
         if name.trim().is_empty() {
             return Err(ConfigError::Validation(
@@ -634,6 +660,23 @@ fn validate_non_negative(field: &str, value: i32) -> Result<(), ConfigError> {
     if value < 0 {
         return Err(ConfigError::Validation(format!(
             "{field} must not be negative"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_provider_id(field: &str, value: &str) -> Result<(), ConfigError> {
+    if value.trim().is_empty() {
+        return Err(ConfigError::Validation(format!(
+            "{field} entries must not be empty"
+        )));
+    }
+    if !value
+        .chars()
+        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
+    {
+        return Err(ConfigError::Validation(format!(
+            "{field} provider id must match [a-z0-9-]+: {value}"
         )));
     }
     Ok(())
@@ -730,6 +773,65 @@ A = "project-a"
         assert_eq!(cfg.env.get("C").expect("C must exist"), "user-c");
         assert_eq!(cfg.project_config_path, Some(project));
         assert!(cfg.project_config_trusted);
+    }
+
+    #[test]
+    fn provider_filters_layer_and_enforce_allow_list() {
+        let temp_root = make_temp_dir("provider-filters");
+        let cwd = temp_root.join("project");
+        fs::create_dir_all(&cwd).expect("must create cwd");
+
+        let global = temp_root.join("global.toml");
+        let user = temp_root.join("user.toml");
+
+        write_config(
+            &global,
+            r#"
+enabled_providers = ["openrouter", "openai"]
+"#,
+        );
+
+        write_config(
+            &user,
+            r#"
+disabled_providers = ["openai"]
+"#,
+        );
+
+        let mut sources = ConfigSources::new(cwd);
+        sources.read_process_env = false;
+        sources.global_config_path = Some(global);
+        sources.user_config_path = Some(user);
+
+        let cfg = ConfigLoader::load(&sources).expect("config should load");
+        assert!(cfg.provider_allowed("openrouter"));
+        assert!(!cfg.provider_allowed("openai"));
+        assert!(
+            !cfg.provider_allowed("anthropic"),
+            "enabled_providers allow-list should exclude non-listed providers"
+        );
+    }
+
+    #[test]
+    fn provider_filter_rejects_invalid_id() {
+        let temp_root = make_temp_dir("provider-filter-invalid");
+        let cwd = temp_root.join("project");
+        fs::create_dir_all(&cwd).expect("must create cwd");
+
+        let user = temp_root.join("user.toml");
+        write_config(
+            &user,
+            r#"
+enabled_providers = ["OpenAI"]
+"#,
+        );
+
+        let mut sources = ConfigSources::new(cwd);
+        sources.read_process_env = false;
+        sources.user_config_path = Some(user);
+
+        let err = ConfigLoader::load(&sources).expect_err("invalid provider id should fail");
+        assert!(err.to_string().contains("[a-z0-9-]+"), "err={err}");
     }
 
     #[test]

@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,6 +10,11 @@ pub struct ResolvedConfig {
     pub llm_provider: String,
     pub llm_base_url: Option<String>,
     pub llm_api_key_env: Option<String>,
+    // Provider filtering aligns with OpenCode semantics:
+    // - if `enabled_providers` is set, only those providers are considered available
+    // - `disabled_providers` always excludes providers
+    pub enabled_providers: Option<BTreeSet<String>>,
+    pub disabled_providers: BTreeSet<String>,
     pub mcp_servers: BTreeMap<String, McpServerConfig>,
     pub plugins: Vec<String>,
     pub env: BTreeMap<String, String>,
@@ -74,12 +79,35 @@ impl Default for ResolvedConfig {
             llm_provider: "null".to_string(),
             llm_base_url: None,
             llm_api_key_env: None,
+            enabled_providers: None,
+            disabled_providers: BTreeSet::new(),
             mcp_servers: BTreeMap::new(),
             plugins: Vec::new(),
             env: BTreeMap::new(),
             backend_selection: BackendSelectionPolicy::default(),
             project_config_path: None,
             project_config_trusted: false,
+        }
+    }
+}
+
+impl ResolvedConfig {
+    pub fn provider_allowed(&self, provider_id: &str) -> bool {
+        if provider_id.eq_ignore_ascii_case("null") {
+            return true;
+        }
+        if self
+            .disabled_providers
+            .iter()
+            .any(|value| value.eq_ignore_ascii_case(provider_id))
+        {
+            return false;
+        }
+        match self.enabled_providers.as_ref() {
+            None => true,
+            Some(enabled) => enabled
+                .iter()
+                .any(|value| value.eq_ignore_ascii_case(provider_id)),
         }
     }
 }
