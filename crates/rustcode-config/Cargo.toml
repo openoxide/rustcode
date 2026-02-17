@@ -10,6 +10,7 @@ rustcode-core = { path = "../rustcode-core" }
 serde.workspace = true
 thiserror.workspace = true
 toml.workspace = true
+toml_edit.workspace = true
 
 [lints]
 workspace = true

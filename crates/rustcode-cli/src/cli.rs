@@ -127,6 +127,27 @@ pub enum AuthCommand {
 pub enum McpCommand {
     #[command(alias = "ls")]
     List,
+    Get {
+        name: String,
+    },
+    Add {
+        name: String,
+        #[arg(long)]
+        url: String,
+        #[arg(long = "oauth", value_parser = ["on", "off"])]
+        oauth: Option<String>,
+        #[arg(long = "client-id")]
+        client_id: Option<String>,
+        #[arg(long = "client-secret-env")]
+        client_secret_env: Option<String>,
+        #[arg(long = "scope", value_parser = ["user", "project"], default_value = "user")]
+        scope: String,
+    },
+    Remove {
+        name: String,
+        #[arg(long = "scope", value_parser = ["user", "project"], default_value = "user")]
+        scope: String,
+    },
     Login {
         name: String,
         #[arg(long = "from-env")]
@@ -521,6 +542,49 @@ mod tests {
                 command: McpCommand::List,
             } => {}
             _ => panic!("expected mcp list command"),
+        }
+    }
+
+    #[test]
+    fn mcp_add_parses_with_scope_and_oauth_settings() {
+        let cli = Cli::try_parse_from([
+            "rustcode",
+            "mcp",
+            "add",
+            "github",
+            "--url",
+            "https://example.com/mcp",
+            "--oauth",
+            "on",
+            "--client-id",
+            "client-123",
+            "--client-secret-env",
+            "MCP_SECRET",
+            "--scope",
+            "project",
+        ])
+        .expect("cli should parse");
+
+        match cli.command {
+            TopCommand::Mcp {
+                command:
+                    McpCommand::Add {
+                        name,
+                        url,
+                        oauth,
+                        client_id,
+                        client_secret_env,
+                        scope,
+                    },
+            } => {
+                assert_eq!(name, "github");
+                assert_eq!(url, "https://example.com/mcp");
+                assert_eq!(oauth.as_deref(), Some("on"));
+                assert_eq!(client_id.as_deref(), Some("client-123"));
+                assert_eq!(client_secret_env.as_deref(), Some("MCP_SECRET"));
+                assert_eq!(scope, "project");
+            }
+            _ => panic!("expected mcp add command"),
         }
     }
 }

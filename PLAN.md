@@ -844,6 +844,24 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 3. Run a full live MCP OAuth callback completion against a user-provided OAuth-capable MCP app/client registration.
 4. Fold MCP server definitions into layered `rustcode-config` TOML resolution (global/user/project trust model) so MCP config is not JSON-sidecar-only.
 
+42. MCP Config Management Commands (Add/Get/Remove)
+- Status: completed
+- Deliverables:
+  - Added config-editing MCP commands:
+    - `mcp add <name> --url <url> [--oauth on|off] [--client-id ...] [--client-secret-env ...] [--scope user|project]`
+    - `mcp get <name>`
+    - `mcp remove <name> [--scope user|project]`
+  - Implemented TOML edits in `rustcode-config` (adapter) using `toml_edit`:
+    - edits `mcp.servers.<name>` in user/project config file with atomic replace.
+  - Added JSON output contracts for new commands.
+- Validation:
+  - Pass: `cargo fmt --all` (2026-02-17)
+  - Pass: `cargo test -p rustcode-config -p rustcode-cli` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration test:
+    - `mcp_add_writes_project_config_and_list_sees_server_when_trusted`
+
+
 ## Update Log
 - 2026-02-17:
   - Completed Milestone 41 layered MCP config integration:

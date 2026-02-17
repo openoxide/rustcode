@@ -18,7 +18,9 @@ use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
-use rustcode_config::{ConfigLoader, ConfigSources};
+use rustcode_config::{
+    edit_mcp_server, remove_mcp_server, ConfigEditScope, ConfigLoader, ConfigSources,
+};
 use rustcode_core::config::{McpServerConfig as CoreMcpServerConfig, ResolvedConfig};
 use rustcode_core::context::{CommandContext, SessionMeta};
 use rustcode_core::error::ExecutionError;
@@ -842,6 +844,135 @@ async fn handle_mcp_command(
                 }
             }
         }
+        McpCommand::Get { name } => {
+            let key = mcp_store_key(&name);
+            let configured = configured_servers.get(&name);
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "command": "mcp.get",
+                    "name": name,
+                    "configured": configured.is_some(),
+                    "url": configured.and_then(|entry| entry.url.clone()),
+                    "oauth_enabled": configured.map(|entry| entry.oauth_enabled()).unwrap_or(false),
+                    "credential": render_stored_credential(store.get(&key)?),
+                    "auth_file": store.path().display().to_string(),
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&payload).context("failed to serialize mcp get json")?,
+                )? {
+                    return Ok(());
+                }
+                return Ok(());
+            }
+
+            if !write_stdout_line(&format!("name={name}"))?
+                || !write_stdout_line(&format!(
+                    "credential={}",
+                    render_stored_credential(store.get(&key)?)
+                ))?
+            {
+                return Ok(());
+            }
+            if let Some(configured) = configured {
+                if let Some(url) = &configured.url {
+                    if !write_stdout_line(&format!("url={url}"))? {
+                        return Ok(());
+                    }
+                }
+                if !write_stdout_line(&format!("oauth_enabled={}", configured.oauth_enabled()))? {
+                    return Ok(());
+                }
+            } else if !write_stdout_line("configured=false")? {
+                return Ok(());
+            }
+        }
+        McpCommand::Add {
+            name,
+            url,
+            oauth,
+            client_id,
+            client_secret_env,
+            scope,
+        } => {
+            let cwd = std::env::current_dir().context("failed to resolve current directory")?;
+            let scope = parse_mcp_edit_scope(&scope)?;
+            let oauth_enabled = match oauth.as_deref() {
+                None => true,
+                Some("on") => true,
+                Some("off") => false,
+                Some(other) => anyhow::bail!("invalid oauth toggle: {other}"),
+            };
+            let server = rustcode_core::config::McpServerConfig {
+                url: Some(url.clone()),
+                oauth: rustcode_core::config::McpOAuthConfig {
+                    enabled: oauth_enabled,
+                    client_id: client_id.clone(),
+                    client_secret_env: client_secret_env.clone(),
+                },
+            };
+            let path = edit_mcp_server(scope, &cwd, &name, &server)
+                .map_err(|err| anyhow::anyhow!(err.to_string()))
+                .context("failed to write MCP server config")?;
+
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "command": "mcp.add",
+                    "name": name,
+                    "scope": render_mcp_edit_scope(scope),
+                    "config_file": path.display().to_string(),
+                    "url": url,
+                    "oauth_enabled": oauth_enabled,
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&payload).context("failed to serialize mcp add json")?,
+                )? {
+                    return Ok(());
+                }
+                return Ok(());
+            }
+
+            if !write_stdout_line(&format!("added mcp server name={name}"))?
+                || !write_stdout_line(&format!("scope={}", render_mcp_edit_scope(scope)))?
+                || !write_stdout_line(&format!("config_file={}", path.display()))?
+            {
+                return Ok(());
+            }
+        }
+        McpCommand::Remove { name, scope } => {
+            let cwd = std::env::current_dir().context("failed to resolve current directory")?;
+            let scope = parse_mcp_edit_scope(&scope)?;
+            let (path, removed) = remove_mcp_server(scope, &cwd, &name)
+                .map_err(|err| anyhow::anyhow!(err.to_string()))
+                .context("failed to remove MCP server config")?;
+
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "command": "mcp.remove",
+                    "name": name,
+                    "scope": render_mcp_edit_scope(scope),
+                    "config_file": path.display().to_string(),
+                    "removed": removed,
+                });
+                if !write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize mcp remove json")?,
+                )? {
+                    return Ok(());
+                }
+                return Ok(());
+            }
+
+            if !write_stdout_line(&format!(
+                "{} mcp server name={name}",
+                if removed { "removed" } else { "no configured" }
+            ))? || !write_stdout_line(&format!("config_file={}", path.display()))?
+            {
+                return Ok(());
+            }
+        }
         McpCommand::Login {
             name,
             from_env,
@@ -1320,6 +1451,21 @@ fn load_mcp_servers_config() -> Result<BTreeMap<String, McpConfigEntry>> {
         .with_context(|| format!("failed to read MCP servers config {}", path.display()))?;
     serde_json::from_str::<BTreeMap<String, McpConfigEntry>>(&raw)
         .with_context(|| format!("failed to parse MCP servers config {}", path.display()))
+}
+
+fn parse_mcp_edit_scope(raw: &str) -> Result<ConfigEditScope> {
+    match raw {
+        "user" => Ok(ConfigEditScope::User),
+        "project" => Ok(ConfigEditScope::Project),
+        other => anyhow::bail!("invalid scope: {other} (expected user|project)"),
+    }
+}
+
+fn render_mcp_edit_scope(scope: ConfigEditScope) -> &'static str {
+    match scope {
+        ConfigEditScope::User => "user",
+        ConfigEditScope::Project => "project",
+    }
 }
 
 fn resolve_configured_mcp_servers(
