@@ -144,7 +144,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass (partial): benchmark JSON artifact persistence via `scripts/benchmark_record.sh` (2026-02-17)
 
 10. Documentation and Release Prep
-- Status: in_progress
+- Status: completed
 - Deliverables:
   - architecture doc
   - operator/developer docs
@@ -153,6 +153,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - docs build + command examples verified
   - Pass (partial): added `docs/QUICKSTART.md` and `docs/CHANGELOG_POLICY.md` (2026-02-17)
   - Pass (partial): quickstart command set executed and verified on local workspace (2026-02-17)
+  - Pass: release notes draft created from validated plan + changelog policy (`docs/RELEASE_NOTES_DRAFT.md`, 2026-02-17)
 
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
@@ -187,8 +188,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 ## Next Action Queue
 1. Add trend-comparison utility on top of `benchmarks/latest.json`.
-2. Draft first release note from `PLAN.md` + changelog policy.
-3. Add automated benchmark assertions with conservative thresholds.
+2. Add automated benchmark assertions with conservative thresholds.
+3. Begin release packaging checklist (versioning, tagging, artifact naming).
 
 ## Update Log
 - 2026-02-17:
@@ -267,6 +268,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added benchmark JSON persistence tooling:
     - `scripts/benchmark_record.sh benchmarks/latest.json`
     - generated artifact snapshot under `benchmarks/latest.json` including `startup`, `memory`, `drift`, and `serve` sections.
+  - Completed Milestone 10:
+    - Added release-prep docs (`QUICKSTART`, `CHANGELOG_POLICY`, `RELEASE_NOTES_DRAFT`).
+    - Verified quickstart command matrix aligns with current CLI behavior.
   - Extended benchmark harness with drift mode and captured sample stability run:
     - `./scripts/benchmark.sh drift 12 4`
     - RSS samples stabilized at `~5424 KB` over sampled window.
