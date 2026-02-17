@@ -102,6 +102,53 @@ fn auth_set_key_and_status_round_trip() {
 }
 
 #[test]
+fn auth_set_oauth_and_status_round_trip() {
+    let auth_path = make_temp_file_path("auth-oauth-store");
+
+    let set_output = Command::new(rustcode_bin())
+        .args([
+            "auth",
+            "set-oauth",
+            "openai",
+            "--access-env",
+            "RUSTCODE_TEST_ACCESS",
+            "--refresh-env",
+            "RUSTCODE_TEST_REFRESH",
+            "--expires-unix",
+            "1234567890",
+            "--account-id",
+            "acct_123",
+        ])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .env("RUSTCODE_TEST_ACCESS", "oauth-access-secret")
+        .env("RUSTCODE_TEST_REFRESH", "oauth-refresh-secret")
+        .output()
+        .expect("must run rustcode auth set-oauth");
+
+    assert!(
+        set_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&set_output.stdout),
+        String::from_utf8_lossy(&set_output.stderr)
+    );
+
+    let status_output = Command::new(rustcode_bin())
+        .args(["auth", "status", "openai"])
+        .env("RUSTCODE_AUTH_FILE", &auth_path)
+        .output()
+        .expect("must run rustcode auth status");
+
+    assert!(
+        status_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&status_output.stdout),
+        String::from_utf8_lossy(&status_output.stderr)
+    );
+    let status_stdout = String::from_utf8(status_output.stdout).expect("stdout must be utf8");
+    assert!(status_stdout.contains("credential=stored:oauth"));
+}
+
+#[test]
 fn auth_login_without_provider_lists_models_and_methods() {
     let models_path = make_temp_file_path("auth-login-models");
     std::fs::write(

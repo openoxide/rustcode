@@ -84,6 +84,17 @@ pub enum AuthCommand {
         #[arg(long = "from-env")]
         from_env: String,
     },
+    SetOauth {
+        provider: String,
+        #[arg(long = "access-env")]
+        access_env: String,
+        #[arg(long = "refresh-env")]
+        refresh_env: Option<String>,
+        #[arg(long = "expires-unix")]
+        expires_unix: Option<i64>,
+        #[arg(long = "account-id")]
+        account_id: Option<String>,
+    },
     #[command(alias = "logout")]
     Remove {
         provider: String,
@@ -228,6 +239,45 @@ mod tests {
                 assert_eq!(from_env, "OPENROUTER_API_KEY");
             }
             _ => panic!("expected auth set-key command"),
+        }
+    }
+
+    #[test]
+    fn auth_set_oauth_parses_env_sources() {
+        let cli = Cli::try_parse_from([
+            "rustcode",
+            "auth",
+            "set-oauth",
+            "openai",
+            "--access-env",
+            "OPENAI_ACCESS_TOKEN",
+            "--refresh-env",
+            "OPENAI_REFRESH_TOKEN",
+            "--expires-unix",
+            "1234567890",
+            "--account-id",
+            "acct_123",
+        ])
+        .expect("cli should parse");
+
+        match cli.command {
+            TopCommand::Auth {
+                command:
+                    AuthCommand::SetOauth {
+                        provider,
+                        access_env,
+                        refresh_env,
+                        expires_unix,
+                        account_id,
+                    },
+            } => {
+                assert_eq!(provider, "openai");
+                assert_eq!(access_env, "OPENAI_ACCESS_TOKEN");
+                assert_eq!(refresh_env.as_deref(), Some("OPENAI_REFRESH_TOKEN"));
+                assert_eq!(expires_unix, Some(1234567890));
+                assert_eq!(account_id.as_deref(), Some("acct_123"));
+            }
+            _ => panic!("expected auth set-oauth command"),
         }
     }
 

@@ -175,6 +175,41 @@ async fn handle_auth_command(command: AuthCommand) -> Result<()> {
                 return Ok(());
             }
         }
+        AuthCommand::SetOauth {
+            provider,
+            access_env,
+            refresh_env,
+            expires_unix,
+            account_id,
+        } => {
+            let access_token = std::env::var(&access_env).with_context(|| {
+                format!(
+                    "environment variable {access_env} is not set; cannot store oauth access token"
+                )
+            })?;
+            let refresh_token = refresh_env
+                .as_ref()
+                .map(|name| {
+                    std::env::var(name).with_context(|| {
+                        format!(
+                            "environment variable {name} is not set; cannot store oauth refresh token"
+                        )
+                    })
+                })
+                .transpose()?;
+            store.set_oauth(
+                &provider,
+                &access_token,
+                refresh_token.as_deref(),
+                expires_unix,
+                account_id.as_deref(),
+            )?;
+            if !write_stdout_line(&format!("stored oauth credential for provider={provider}"))?
+                || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
+            {
+                return Ok(());
+            }
+        }
         AuthCommand::Remove { provider } => {
             let removed = store.remove(&provider)?;
             if !write_stdout_line(&format!(

@@ -352,6 +352,25 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: benchmark assertion path executes with configured limits and no threshold failure in local run.
 
+20. Manual OAuth Credential Path
+- Status: completed
+- Deliverables:
+  - Added `auth set-oauth <provider>` command for browser/OAuth flows that return tokens outside CLI:
+    - `--access-env <ENV_VAR>` (required)
+    - `--refresh-env <ENV_VAR>` (optional)
+    - `--expires-unix <ts>` (optional)
+    - `--account-id <id>` (optional)
+  - Added `AuthStore::set_oauth` persistence API and OAuth round-trip test coverage.
+  - Device-code auth polling now emits structured credential payloads; CLI stores OAuth metadata when refresh/expiry data exists.
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Pass: integration test `auth_set_oauth_and_status_round_trip`
+  - Pass: live CLI probes:
+    - `rustcode auth set-oauth openai ...` stores OAuth credential.
+    - `rustcode auth status openai` reports `credential=stored:oauth`.
+    - auth file snapshot confirms persisted `type=o_auth` with access/refresh/expiry/account metadata.
+
 ## Testing Matrix
 - Unit tests: core logic, config merge/validation, event transformation
 - Integration tests: CLI parse/dispatch, execution loop, permission flow
@@ -578,6 +597,14 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - set Linux CI benchmark gates to 14MB in `scripts/ci_matrix.sh` to absorb auth dependency baseline while retaining hard limits.
     - kept benchmark assertion logic centralized in `scripts/benchmark_assert.sh` with env-driven overrides.
     - validated with a full `./scripts/ci_matrix.sh` pass.
+  - Completed Milestone 20 manual OAuth credential path:
+    - added CLI `auth set-oauth` with env-driven access/refresh token ingestion.
+    - added auth-store OAuth write API and tests.
+    - upgraded device-flow credential handling to preserve OAuth metadata when available.
+    - validated via:
+      - `cargo test --workspace`
+      - `./scripts/ci_matrix.sh`
+      - integration + live CLI probes for `set-oauth` and `status` behavior.
     - enforces conservative memory thresholds with environment overrides.
   - Extended benchmark harness with drift mode and captured sample stability run:
     - `./scripts/benchmark.sh drift 12 4`
