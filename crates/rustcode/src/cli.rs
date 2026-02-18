@@ -124,6 +124,8 @@ pub enum AuthCommand {
         provider: String,
         #[arg(long = "from-env")]
         from_env: String,
+        #[arg(long)]
+        domain: Option<String>,
     },
     SetOauth {
         provider: String,
@@ -376,10 +378,47 @@ mod tests {
 
         match cli.command {
             TopCommand::Auth {
-                command: AuthCommand::SetKey { provider, from_env },
+                command:
+                    AuthCommand::SetKey {
+                        provider,
+                        from_env,
+                        domain,
+                    },
             } => {
                 assert_eq!(provider, "openrouter");
                 assert_eq!(from_env, "OPENROUTER_API_KEY");
+                assert!(domain.is_none());
+            }
+            _ => panic!("expected auth set-key command"),
+        }
+    }
+
+    #[test]
+    fn auth_set_key_accepts_domain() {
+        let cli = Cli::try_parse_from([
+            "rustcode",
+            "auth",
+            "set-key",
+            "github-copilot-enterprise",
+            "--from-env",
+            "GITHUB_COPILOT_TOKEN",
+            "--domain",
+            "github.example.com",
+        ])
+        .expect("cli should parse");
+
+        match cli.command {
+            TopCommand::Auth {
+                command:
+                    AuthCommand::SetKey {
+                        provider,
+                        from_env,
+                        domain,
+                    },
+            } => {
+                assert_eq!(provider, "github-copilot-enterprise");
+                assert_eq!(from_env, "GITHUB_COPILOT_TOKEN");
+                assert_eq!(domain.as_deref(), Some("github.example.com"));
             }
             _ => panic!("expected auth set-key command"),
         }

@@ -162,6 +162,9 @@ rustcode auth login github-copilot
 rustcode auth login gitlab --method oauth_browser
 # self-hosted GitLab:
 GITLAB_OAUTH_CLIENT_ID=... rustcode auth login gitlab --method oauth_browser --domain gitlab.example.com
+
+# Copilot enterprise (stores domain for base URL inference):
+rustcode auth login github-copilot-enterprise --method oauth_device_code --domain github.example.com
 ```
 
 `auth login` supports method negotiation:

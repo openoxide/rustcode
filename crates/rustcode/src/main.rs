@@ -353,16 +353,36 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                 return Ok(());
             }
         }
-        AuthCommand::SetKey { provider, from_env } => {
+        AuthCommand::SetKey {
+            provider,
+            from_env,
+            domain,
+        } => {
             let key = std::env::var(&from_env).with_context(|| {
                 format!("environment variable {from_env} is not set; cannot store key")
             })?;
-            store.set_api_key(&provider, &key)?;
+
+            let normalized_domain = if let Some(domain) = domain.as_deref() {
+                if provider != "github-copilot-enterprise" {
+                    anyhow::bail!(
+                        "--domain is only supported for provider=github-copilot-enterprise; received provider={provider}"
+                    );
+                }
+                Some(
+                    rustcode_auth::normalize_domain(domain)
+                        .context("failed to normalize domain")?,
+                )
+            } else {
+                None
+            };
+
+            store.set_api_key_with_domain(&provider, &key, normalized_domain.as_deref())?;
             if json_output {
                 let payload = serde_json::json!({
                     "schema_version": 1,
                     "provider": &provider,
                     "action": "set_key",
+                    "domain": normalized_domain,
                     "credential": "stored:api_key",
                     "auth_file": store.path().display().to_string(),
                 });
@@ -375,6 +395,10 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                 return Ok(());
             }
             if !write_stdout_line(&format!("stored api key for provider={provider}"))?
+                || !write_stdout_line(&format!(
+                    "domain={}",
+                    normalized_domain.as_deref().unwrap_or("<unset>")
+                ))?
                 || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
             {
                 return Ok(());
@@ -503,7 +527,16 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                 let key = std::env::var(&env_name).with_context(|| {
                     format!("environment variable {env_name} is not set; cannot store key")
                 })?;
-                store.set_api_key(&provider, &key)?;
+                let normalized_domain = if provider == "github-copilot-enterprise" {
+                    domain
+                        .as_deref()
+                        .map(rustcode_auth::normalize_domain)
+                        .transpose()
+                        .context("failed to normalize domain")?
+                } else {
+                    None
+                };
+                store.set_api_key_with_domain(&provider, &key, normalized_domain.as_deref())?;
                 if json_output {
                     let payload = serde_json::json!({
                         "schema_version": 1,
@@ -512,6 +545,7 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                         "stage": "authorized",
                         "source": "env",
                         "credential": "stored:api_key",
+                        "domain": normalized_domain,
                         "auth_file": store.path().display().to_string(),
                     });
                     if !write_stdout_line(
@@ -523,6 +557,10 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                     return Ok(());
                 }
                 if !write_stdout_line(&format!("stored api key for provider={provider}"))?
+                    || !write_stdout_line(&format!(
+                        "domain={}",
+                        normalized_domain.as_deref().unwrap_or("<unset>")
+                    ))?
                     || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
                 {
                     return Ok(());
@@ -534,7 +572,16 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                 AuthMethod::ApiKey => {
                     print_provider_api_key_hint(&provider)?;
                     let key = prompt_for_api_key(&provider)?;
-                    store.set_api_key(&provider, &key)?;
+                    let normalized_domain = if provider == "github-copilot-enterprise" {
+                        domain
+                            .as_deref()
+                            .map(rustcode_auth::normalize_domain)
+                            .transpose()
+                            .context("failed to normalize domain")?
+                    } else {
+                        None
+                    };
+                    store.set_api_key_with_domain(&provider, &key, normalized_domain.as_deref())?;
                     if json_output {
                         let payload = serde_json::json!({
                             "schema_version": 1,
@@ -543,6 +590,7 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                             "stage": "authorized",
                             "source": "prompt",
                             "credential": "stored:api_key",
+                            "domain": normalized_domain,
                             "auth_file": store.path().display().to_string(),
                         });
                         if !write_stdout_line(
@@ -554,6 +602,10 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                         return Ok(());
                     }
                     if !write_stdout_line(&format!("stored api key for provider={provider}"))?
+                        || !write_stdout_line(&format!(
+                            "domain={}",
+                            normalized_domain.as_deref().unwrap_or("<unset>")
+                        ))?
                         || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
                     {
                         return Ok(());

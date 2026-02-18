@@ -22,7 +22,7 @@ Some sandboxed executions do not have working DNS/network. For any live provider
 | `openai` | `api_key` | `--from-env <ENV_VAR>` value | none | Stored as API key credential. |
 | `github-copilot` | `oauth_device_code` | none | none | Uses built-in Copilot client ID `Ov23li8tweQw6odWQebz`. Default base URL `https://api.githubcopilot.com`; required headers (`Openai-Intent`, `x-initiator`, `User-Agent`) are applied automatically (`x-initiator=user` for `run`, `agent` for `agent`). |
 | `github-copilot-enterprise` | `oauth_device_code` | none | `--domain` recommended | Domain should target enterprise host for OAuth. If `--domain` is provided, rustcode stores it alongside the token and infers LLM base URL as `https://copilot-api.<domain>` automatically; you can also override via `--llm-base-url` or `GITHUB_COPILOT_ENTERPRISE_DOMAIN`. |
-| `github-copilot` / `github-copilot-enterprise` | `api_key` | `--from-env <ENV_VAR>` value | none | Manual token mode. |
+| `github-copilot` / `github-copilot-enterprise` | `api_key` | `--from-env <ENV_VAR>` value | `--domain` for enterprise | Manual token mode. For `github-copilot-enterprise`, pass `--domain <host>` to store the domain and infer `https://copilot-api.<host>` automatically. |
 | `gitlab` | `oauth_browser` | none for `gitlab.com`; `GITLAB_OAUTH_CLIENT_ID` for self-hosted instances | `GITLAB_OAUTH_CLIENT_SECRET`, `GITLAB_INSTANCE_URL` | Uses PKCE + localhost callback + `/oauth/token`; defaults to bundled OpenCode-compatible client ID on `gitlab.com`. |
 | `gitlab` | `api_key` | `--from-env <ENV_VAR>` value | none | Personal Access Token mode. |
 | `opencode` | `api_key` | `--from-env OPENCODE_API_KEY` value | none | API key can be created at `https://opencode.ai/auth`. |

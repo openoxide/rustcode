@@ -1376,7 +1376,7 @@ where
     }
 }
 
-fn normalize_domain(raw: &str) -> Result<String, AuthError> {
+pub fn normalize_domain(raw: &str) -> Result<String, AuthError> {
     if raw.trim().is_empty() {
         return Err(AuthError::Validation(
             "domain must not be empty".to_string(),
