@@ -23,7 +23,9 @@ use rustcode_core::error::{ExecutionError, PublishError};
 use rustcode_core::event::{Event, EventPayload, EventScope};
 use rustcode_core::ports::{CommandExecutor, EventPublisher, PathOperation, PermissionPolicy};
 use rustcode_io::{FileSystemPort, IoError, ProcessOutput, ProcessPort};
-use rustcode_llm::{ChatMessage, ChatRequest, ChatRole, LlmClient, LlmRequest, ToolSpec};
+use rustcode_llm::{
+    ChatMessage, ChatRequest, ChatRole, LlmClient, LlmRequest, RequestInitiator, ToolSpec,
+};
 use rustcode_plugins::PluginRegistry;
 
 #[derive(Clone)]
@@ -241,6 +243,7 @@ When you are done, respond with a final plain-text answer."
                 model: context.config.model.clone(),
                 messages: messages.clone(),
                 tools: tools.clone(),
+                initiator: RequestInitiator::Agent,
             };
 
             let response = tokio::select! {

@@ -1959,6 +1959,34 @@ fn models_provider_detail_works_for_known_provider_missing_from_models_index() {
     assert!(payload["provider"]["warning"].is_string());
 }
 
+#[test]
+fn models_provider_detail_succeeds_without_models_index() {
+    let missing_path = make_temp_file_path("models-index-missing");
+    std::fs::write(&missing_path, "not-json").expect("must write broken models file");
+
+    let output = Command::new(rustcode_bin())
+        .args(["--json", "models", "github-copilot-enterprise"])
+        .env("RUSTCODE_MODELS_PATH", &missing_path)
+        .output()
+        .expect("must run models provider detail");
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let payload: serde_json::Value = serde_json::from_str(stdout.trim()).expect("valid json");
+    assert_eq!(payload["schema_version"], 1);
+    assert_eq!(payload["provider"]["id"], "github-copilot-enterprise");
+    assert!(payload["provider"]["models"].as_array().is_some());
+    assert_eq!(
+        payload["provider"]["warning"].as_str(),
+        Some("models index unavailable; diagnostics only")
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn sigint_cancels_long_running_command_gracefully() {

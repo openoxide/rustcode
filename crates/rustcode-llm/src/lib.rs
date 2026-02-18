@@ -43,6 +43,13 @@ pub struct ChatRequest {
     pub model: String,
     pub messages: Vec<ChatMessage>,
     pub tools: Vec<ToolSpec>,
+    pub initiator: RequestInitiator,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestInitiator {
+    User,
+    Agent,
 }
 
 #[derive(Debug, Clone)]
@@ -915,7 +922,7 @@ impl LlmClient for OpenAiCompatibleClient {
                 .map_err(|err| LlmError::Config(format!("invalid auth header: {err}")))?;
             headers.insert(AUTHORIZATION, value);
         }
-        apply_provider_default_headers(&self.provider_id, &mut headers)
+        apply_provider_default_headers(&self.provider_id, &mut headers, RequestInitiator::User)
             .map_err(|err| LlmError::Config(err))?;
 
         let response = self
@@ -1009,7 +1016,7 @@ impl LlmClient for OpenAiCompatibleClient {
                 .map_err(|err| LlmError::Config(format!("invalid auth header: {err}")))?;
             headers.insert(AUTHORIZATION, value);
         }
-        apply_provider_default_headers(&self.provider_id, &mut headers)
+        apply_provider_default_headers(&self.provider_id, &mut headers, request.initiator)
             .map_err(LlmError::Config)?;
 
         let messages = request
@@ -1318,7 +1325,7 @@ impl LlmClient for VercelAiGatewayClient {
             HeaderName::from_static("ai-language-model-streaming"),
             HeaderValue::from_static("true"),
         );
-        apply_provider_default_headers("vercel", &mut headers)
+        apply_provider_default_headers("vercel", &mut headers, RequestInitiator::User)
             .map_err(|err| LlmError::Config(err))?;
 
         let response = self
@@ -1674,6 +1681,7 @@ fn openai_tool_spec_value(tool: &ToolSpec) -> Value {
 fn apply_provider_default_headers(
     provider_id: &str,
     headers: &mut HeaderMap,
+    initiator: RequestInitiator,
 ) -> Result<(), String> {
     // These headers are not required by the OpenAI-compatible spec, but several providers
     // use them for attribution / routing. Align with OpenCode defaults.
@@ -1705,7 +1713,10 @@ fn apply_provider_default_headers(
             );
             headers.insert(
                 HeaderName::from_static("x-initiator"),
-                HeaderValue::from_static("user"),
+                HeaderValue::from_static(match initiator {
+                    RequestInitiator::User => "user",
+                    RequestInitiator::Agent => "agent",
+                }),
             );
             let user_agent = format!("rustcode/{}", env!("CARGO_PKG_VERSION"));
             let value = HeaderValue::from_str(&user_agent)
@@ -2817,7 +2828,7 @@ mod tests {
     #[test]
     fn github_copilot_headers_include_required_defaults() {
         let mut headers = HeaderMap::new();
-        apply_provider_default_headers("github-copilot", &mut headers)
+        apply_provider_default_headers("github-copilot", &mut headers, RequestInitiator::User)
             .expect("headers should apply");
 
         assert_eq!(
@@ -2829,6 +2840,18 @@ mod tests {
             Some("user")
         );
         assert!(headers.contains_key("user-agent"));
+    }
+
+    #[test]
+    fn github_copilot_headers_use_agent_initiator_when_requested() {
+        let mut headers = HeaderMap::new();
+        apply_provider_default_headers("github-copilot", &mut headers, RequestInitiator::Agent)
+            .expect("headers should apply");
+
+        assert_eq!(
+            headers.get("x-initiator").and_then(|v| v.to_str().ok()),
+            Some("agent")
+        );
     }
 
     #[test]

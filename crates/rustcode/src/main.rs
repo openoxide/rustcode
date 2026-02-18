@@ -1713,13 +1713,22 @@ fn handle_models_command(
     config: &ResolvedConfig,
     json_output: bool,
 ) -> Result<()> {
-    let index = load_models_index()?;
+    let index = match load_models_index() {
+        Ok(index) => Some(index),
+        Err(err) => {
+            if provider_filter.is_none() {
+                return Err(err);
+            }
+            None
+        }
+    };
+    let index_unavailable = index.is_none();
 
     if let Some(provider) = provider_filter {
         if !config.provider_allowed(provider) {
             anyhow::bail!("provider is disabled by config: {provider}");
         }
-        let entry = index.get(provider);
+        let entry = index.as_ref().and_then(|index| index.get(provider));
         let diagnostics = diagnose_provider(config, Some(provider))
             .with_context(|| format!("failed to diagnose provider {provider}"))?;
 
@@ -1737,7 +1746,9 @@ fn handle_models_command(
         let provider_name = entry
             .and_then(|entry| entry.name.clone())
             .unwrap_or_else(|| provider.to_string());
-        let index_warning = if entry.is_some() {
+        let index_warning = if index_unavailable {
+            Some("models index unavailable; diagnostics only".to_string())
+        } else if entry.is_some() {
             None
         } else {
             Some("provider not found in models index; diagnostics only".to_string())
@@ -1844,6 +1855,7 @@ fn handle_models_command(
         return Ok(());
     }
 
+    let index = index.unwrap_or_default();
     let mut providers: Vec<_> = index
         .into_iter()
         .filter(|(provider_id, _)| config.provider_allowed(provider_id))

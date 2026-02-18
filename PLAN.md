@@ -1185,7 +1185,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
       - `GITHUB_COPILOT_ENTERPRISE_DOMAIN=<domain>` -> `https://copilot-api.<domain>`
     - provider default headers include (case-insensitive):
       - `Openai-Intent: conversation-edits`
-      - `x-initiator: user` (agent refinement later)
+      - `x-initiator: user` for `run`, `agent` for `agent` runs
       - `User-Agent: rustcode/<version>`
   - Docs:
     - updated `docs/CREDENTIAL_REQUIREMENTS.md` with Copilot base URL and header notes.
@@ -1230,6 +1230,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `github-copilot-enterprise` can derive base URL from `GITHUB_COPILOT_ENTERPRISE_DOMAIN`.
   - Docs:
     - fixed quickstart/provider examples to include `RUSTCODE_ALLOW_NETWORK=1` for live runs.
+  - Copilot parity:
+    - `x-initiator` header is now request-scoped (`user` for `run`, `agent` for `agent`).
 - 2026-02-18:
   - Completed Milestone 55 GitHub Copilot Provider:
     - added default base URL `https://api.githubcopilot.com` for `github-copilot` and `github-copilot-enterprise` providers.
