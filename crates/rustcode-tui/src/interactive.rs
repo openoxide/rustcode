@@ -174,12 +174,39 @@ struct ChatState {
     messages: Vec<StoredMessage>,
     scroll: u16,
     composer: String,
+    prompt_history: Vec<String>,
+    history_cursor: Option<usize>,
+    history_draft: String,
     focus: ChatFocus,
     activity: Vec<ActivityItem>,
     activity_selected: usize,
     details_open: bool,
     tool_details: bool,
     running: Option<RunningCommand>,
+}
+
+fn build_prompt_history(messages: &[StoredMessage]) -> Vec<String> {
+    let mut out = Vec::new();
+    for msg in messages {
+        if msg.role != MessageRole::User {
+            continue;
+        }
+        let Some(text) = msg.content.as_str() else {
+            continue;
+        };
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if out.last().is_some_and(|last| last == trimmed) {
+            continue;
+        }
+        out.push(trimmed.to_string());
+    }
+    while out.len() > 200 {
+        out.remove(0);
+    }
+    out
 }
 
 struct AppState {
@@ -263,6 +290,7 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
             let messages = store
                 .load_messages(&session.id)
                 .map_err(|err| TuiError::State(err.to_string()))?;
+            let prompt_history = build_prompt_history(&messages);
             screen = Screen::Chat(ChatState {
                 session,
                 messages,
@@ -272,6 +300,9 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
                 } else {
                     prompt.clone().unwrap_or_default()
                 },
+                prompt_history,
+                history_cursor: None,
+                history_draft: String::new(),
                 focus: ChatFocus::Composer,
                 activity: Vec::new(),
                 activity_selected: 0,
@@ -528,11 +559,15 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                             state.status = Some(err.to_string());
                             Vec::new()
                         });
+                    let prompt_history = build_prompt_history(&messages);
                     state.screen = Screen::Chat(ChatState {
                         session,
                         messages,
                         scroll: 0,
                         composer: String::new(),
+                        prompt_history,
+                        history_cursor: None,
+                        history_draft: String::new(),
                         focus: ChatFocus::Composer,
                         activity: Vec::new(),
                         activity_selected: 0,
@@ -634,11 +669,15 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                             state.status = Some(err.to_string());
                             Vec::new()
                         });
+                    let prompt_history = build_prompt_history(&messages);
                     state.screen = Screen::Chat(ChatState {
                         session,
                         messages,
                         scroll: 0,
                         composer: String::new(),
+                        prompt_history,
+                        history_cursor: None,
+                        history_draft: String::new(),
                         focus: ChatFocus::Composer,
                         activity: Vec::new(),
                         activity_selected: 0,
@@ -684,11 +723,15 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                             state.status = Some(err.to_string());
                             Vec::new()
                         });
+                    let prompt_history = build_prompt_history(&messages);
                     state.screen = Screen::Chat(ChatState {
                         session: forked,
                         messages,
                         scroll: 0,
                         composer: String::new(),
+                        prompt_history,
+                        history_cursor: None,
+                        history_draft: String::new(),
                         focus: ChatFocus::Composer,
                         activity: Vec::new(),
                         activity_selected: 0,
@@ -720,11 +763,15 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                     state.status = Some(err.to_string());
                     Vec::new()
                 });
+            let prompt_history = build_prompt_history(&messages);
             state.screen = Screen::Chat(ChatState {
                 session,
                 messages,
                 scroll: 0,
                 composer: String::new(),
+                prompt_history,
+                history_cursor: None,
+                history_draft: String::new(),
                 focus: ChatFocus::Composer,
                 activity: Vec::new(),
                 activity_selected: 0,
@@ -781,6 +828,9 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
                 chat.messages = messages;
                 chat.scroll = 0;
                 chat.composer.clear();
+                chat.prompt_history = build_prompt_history(&chat.messages);
+                chat.history_cursor = None;
+                chat.history_draft.clear();
                 chat.focus = ChatFocus::Composer;
                 chat.activity.clear();
                 chat.activity_selected = 0;
@@ -815,6 +865,9 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
                 chat.messages = messages;
                 chat.scroll = 0;
                 chat.composer.clear();
+                chat.prompt_history = build_prompt_history(&chat.messages);
+                chat.history_cursor = None;
+                chat.history_draft.clear();
                 chat.focus = ChatFocus::Composer;
                 chat.activity.clear();
                 chat.activity_selected = 0;
@@ -838,6 +891,20 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
             _ => {}
         }
         return ChatNav::Stay;
+    }
+
+    if chat.focus == ChatFocus::Composer && key.modifiers.contains(KeyModifiers::ALT) {
+        match key.code {
+            KeyCode::Up => {
+                history_prev(chat);
+                return ChatNav::Stay;
+            }
+            KeyCode::Down => {
+                history_next(chat);
+                return ChatNav::Stay;
+            }
+            _ => {}
+        }
     }
 
     match key.code {
@@ -955,6 +1022,22 @@ fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: String) {
     });
     state.status = None;
 
+    let trimmed = prompt.trim();
+    if !trimmed.is_empty() {
+        if !chat
+            .prompt_history
+            .last()
+            .is_some_and(|last| last.as_str() == trimmed)
+        {
+            chat.prompt_history.push(trimmed.to_string());
+            while chat.prompt_history.len() > 200 {
+                chat.prompt_history.remove(0);
+            }
+        }
+    }
+    chat.history_cursor = None;
+    chat.history_draft.clear();
+
     chat.focus = ChatFocus::Transcript;
 
     state.request_seq = state.request_seq.saturating_add(1);
@@ -995,6 +1078,40 @@ fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: String) {
         };
         let _ = tx.send(InteractiveMsg::RunEnded { ok, message });
     });
+}
+
+fn history_prev(chat: &mut ChatState) {
+    if chat.prompt_history.is_empty() {
+        return;
+    }
+    let next = match chat.history_cursor {
+        None => {
+            chat.history_draft = chat.composer.clone();
+            chat.prompt_history.len().saturating_sub(1)
+        }
+        Some(0) => 0,
+        Some(idx) => idx.saturating_sub(1),
+    };
+    chat.history_cursor = Some(next);
+    if let Some(value) = chat.prompt_history.get(next) {
+        chat.composer = value.clone();
+    }
+}
+
+fn history_next(chat: &mut ChatState) {
+    let Some(idx) = chat.history_cursor else {
+        return;
+    };
+    if idx + 1 >= chat.prompt_history.len() {
+        chat.history_cursor = None;
+        chat.composer = chat.history_draft.clone();
+        return;
+    }
+    let next = idx + 1;
+    chat.history_cursor = Some(next);
+    if let Some(value) = chat.prompt_history.get(next) {
+        chat.composer = value.clone();
+    }
 }
 
 fn render(frame: &mut ratatui::Frame<'_>, state: &AppState) {
@@ -1145,6 +1262,7 @@ fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState)
         Span::raw("  "),
         Span::raw("Enter: submit/open  "),
         Span::raw("Alt+Enter: newline  "),
+        Span::raw("Alt+Up/Down: history  "),
         Span::raw("Up/Down: scroll/select  "),
         Span::raw("t: tool details  "),
         Span::raw(tools_label),
