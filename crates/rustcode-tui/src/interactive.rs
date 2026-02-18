@@ -178,6 +178,7 @@ struct ChatState {
     activity: Vec<ActivityItem>,
     activity_selected: usize,
     details_open: bool,
+    tool_details: bool,
     running: Option<RunningCommand>,
 }
 
@@ -275,6 +276,7 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
                 activity: Vec::new(),
                 activity_selected: 0,
                 details_open: false,
+                tool_details: false,
                 running: None,
             });
             if should_submit {
@@ -535,6 +537,7 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         activity: Vec::new(),
                         activity_selected: 0,
                         details_open: false,
+                        tool_details: false,
                         running: None,
                     });
                 }
@@ -640,6 +643,7 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         activity: Vec::new(),
                         activity_selected: 0,
                         details_open: false,
+                        tool_details: false,
                         running: None,
                     });
                 }
@@ -689,6 +693,7 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         activity: Vec::new(),
                         activity_selected: 0,
                         details_open: false,
+                        tool_details: false,
                         running: None,
                     });
                 }
@@ -724,6 +729,7 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 activity: Vec::new(),
                 activity_selected: 0,
                 details_open: false,
+                tool_details: false,
                 running: None,
             });
         }
@@ -779,6 +785,7 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
                 chat.activity.clear();
                 chat.activity_selected = 0;
                 chat.details_open = false;
+                chat.tool_details = false;
                 chat.running = None;
                 state.status = None;
             }
@@ -812,6 +819,7 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
                 chat.activity.clear();
                 chat.activity_selected = 0;
                 chat.details_open = false;
+                chat.tool_details = false;
                 chat.running = None;
                 state.status = None;
             }
@@ -839,6 +847,9 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
                 ChatFocus::Transcript => ChatFocus::Activity,
                 ChatFocus::Activity => ChatFocus::Composer,
             };
+        }
+        KeyCode::Char('t') => {
+            chat.tool_details = !chat.tool_details;
         }
         KeyCode::Esc => {
             if !chat.composer.is_empty() {
@@ -1077,19 +1088,7 @@ fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState)
 
     let mut lines = Vec::new();
     for msg in &chat.messages {
-        let role = match msg.role {
-            MessageRole::System => "System",
-            MessageRole::User => "User",
-            MessageRole::Assistant => "Assistant",
-            MessageRole::Tool => "Tool",
-        };
-        let content = msg.content.as_str().unwrap_or("<non-string>");
-        lines.push(Line::from(vec![
-            Span::styled(role, Style::default().add_modifier(Modifier::BOLD)),
-            Span::raw(": "),
-            Span::raw(content),
-        ]));
-        lines.push(Line::raw(""));
+        append_message_lines(&mut lines, msg, chat.tool_details);
     }
 
     let transcript_border = if chat.focus == ChatFocus::Transcript {
@@ -1134,6 +1133,12 @@ fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState)
         ChatFocus::Activity => "focus: activity",
     };
 
+    let tools_label = if chat.tool_details {
+        "tools: details"
+    } else {
+        "tools: summary"
+    };
+
     let help = Paragraph::new(Line::from(vec![
         Span::raw("Tab: focus  "),
         Span::raw(focus_label),
@@ -1141,6 +1146,9 @@ fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState)
         Span::raw("Enter: submit/open  "),
         Span::raw("Alt+Enter: newline  "),
         Span::raw("Up/Down: scroll/select  "),
+        Span::raw("t: tool details  "),
+        Span::raw(tools_label),
+        Span::raw("  "),
         Span::raw("Ctrl+C: cancel  "),
         Span::raw("Ctrl+N: new  "),
         Span::raw("Ctrl+F: fork  "),
@@ -1160,6 +1168,130 @@ fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState)
 
     if chat.details_open {
         render_activity_details_modal(frame, chat);
+    }
+}
+
+fn append_message_lines(lines: &mut Vec<Line<'static>>, msg: &StoredMessage, tool_details: bool) {
+    let role = match msg.role {
+        MessageRole::System => "System",
+        MessageRole::User => "User",
+        MessageRole::Assistant => "Assistant",
+        MessageRole::Tool => "Tool",
+    };
+
+    lines.push(Line::from(vec![Span::styled(
+        role,
+        Style::default().add_modifier(Modifier::BOLD),
+    )]));
+
+    match msg.role {
+        MessageRole::Tool => {
+            append_tool_message_lines(lines, msg, tool_details);
+        }
+        _ => {
+            append_value_lines(lines, &msg.content, "", 200);
+
+            if !msg.tool_calls.is_empty() {
+                lines.push(Line::raw(""));
+                for call in &msg.tool_calls {
+                    lines.push(Line::from(vec![
+                        Span::styled(
+                            format!("Tool: {}", call.name),
+                            Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw(format!("  id={} ", call.id)),
+                    ]));
+
+                    if tool_details {
+                        let pretty = serde_json::from_str::<serde_json::Value>(&call.arguments)
+                            .ok()
+                            .and_then(|value| serde_json::to_string_pretty(&value).ok())
+                            .unwrap_or_else(|| call.arguments.clone());
+                        append_value_lines(lines, &serde_json::Value::String(pretty), "  ", 64);
+                    }
+                }
+            }
+        }
+    }
+
+    lines.push(Line::raw(""));
+}
+
+fn append_tool_message_lines(lines: &mut Vec<Line<'static>>, msg: &StoredMessage, tool_details: bool) {
+    let name = msg.tool_name.as_deref().unwrap_or("tool");
+    let call_id = msg.tool_call_id.as_deref().unwrap_or("-");
+
+    let content_str = msg.content.as_str().unwrap_or("");
+    if let Some((ok, truncated, output)) = parse_tool_payload(content_str) {
+        lines.push(Line::raw(format!(
+            "Tool: {name}  id={call_id}  ok={ok}  truncated={truncated}"
+        )));
+        if tool_details {
+            lines.push(Line::raw(""));
+            lines.push(Line::raw("Output:"));
+            append_value_lines(lines, &serde_json::Value::String(output), "  ", 200);
+        } else {
+            let snippet = output
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if !snippet.is_empty() {
+                lines.push(Line::raw(format!("  {snippet}")));
+            }
+        }
+        return;
+    }
+
+    // Fallback: show raw content.
+    if !content_str.is_empty() {
+        lines.push(Line::raw(format!("Tool: {name}  id={call_id}")));
+        append_value_lines(lines, &msg.content, "  ", 200);
+    } else {
+        lines.push(Line::raw(format!("Tool: {name}  id={call_id}")));
+    }
+}
+
+fn parse_tool_payload(content: &str) -> Option<(bool, bool, String)> {
+    let value = serde_json::from_str::<serde_json::Value>(content).ok()?;
+    let ok = value.get("ok")?.as_bool()?;
+    let truncated = value.get("truncated")?.as_bool().unwrap_or(false);
+    let output = value
+        .get("output")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
+    Some((ok, truncated, output))
+}
+
+fn append_value_lines(lines: &mut Vec<Line<'static>>, value: &serde_json::Value, prefix: &str, max_lines: usize) {
+    match value {
+        serde_json::Value::Null => {}
+        serde_json::Value::String(text) => {
+            append_text_lines(lines, text.as_str(), prefix, max_lines);
+        }
+        other => {
+            let pretty = serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string());
+            append_text_lines(lines, pretty.as_str(), prefix, max_lines);
+        }
+    }
+}
+
+fn append_text_lines(lines: &mut Vec<Line<'static>>, text: &str, prefix: &str, max_lines: usize) {
+    if text.is_empty() {
+        return;
+    }
+    for (idx, line) in text.lines().enumerate() {
+        if idx >= max_lines {
+            lines.push(Line::raw(format!("{prefix}...[truncated]...")));
+            break;
+        }
+        if prefix.is_empty() {
+            lines.push(Line::raw(line.to_string()));
+        } else {
+            lines.push(Line::raw(format!("{prefix}{line}")));
+        }
     }
 }
 
