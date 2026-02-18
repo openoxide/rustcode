@@ -1557,6 +1557,7 @@ mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::Terminal;
+    use serde_json::Value;
 
     use super::*;
 
@@ -1613,5 +1614,99 @@ mod tests {
         assert!(text.contains("Sessions"), "text={text}");
         assert!(text.contains("Enter: open"), "text={text}");
         assert!(text.contains("s-1"), "text={text}");
+    }
+
+    #[test]
+    fn chat_screen_renders_tool_messages_and_toggle_label() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+
+        let session = SessionInfo {
+            id: "s-1".to_string(),
+            title: Some("t1".to_string()),
+            created_at_unix_ms: 0,
+            updated_at_unix_ms: 0,
+            parent_id: None,
+            cwd: "/tmp".to_string(),
+            workspace_root: "/tmp".to_string(),
+            model: "null".to_string(),
+        };
+
+        let messages = vec![
+            StoredMessage {
+                id: "m-1".to_string(),
+                role: MessageRole::User,
+                created_at_unix_ms: 1,
+                content: Value::String("hello".to_string()),
+                tool_call_id: None,
+                tool_name: None,
+                tool_calls: Vec::new(),
+            },
+            StoredMessage {
+                id: "m-2".to_string(),
+                role: MessageRole::Tool,
+                created_at_unix_ms: 2,
+                content: Value::String(
+                    "{\"ok\":true,\"truncated\":false,\"output\":\"tool output\"}"
+                        .to_string(),
+                ),
+                tool_call_id: Some("tc-1".to_string()),
+                tool_name: Some("read".to_string()),
+                tool_calls: Vec::new(),
+            },
+        ];
+
+        let state = AppState {
+            sessions: vec![session.clone()],
+            sessions_view: vec![0],
+            selected: 0,
+            sessions_filter: String::new(),
+            sessions_filter_active: false,
+            screen: Screen::Chat(ChatState {
+                session,
+                messages,
+                scroll: 0,
+                composer: String::new(),
+                prompt_history: Vec::new(),
+                history_cursor: None,
+                history_draft: String::new(),
+                focus: ChatFocus::Composer,
+                activity: Vec::new(),
+                activity_selected: 0,
+                details_open: false,
+                tool_details: false,
+                running: None,
+            }),
+            status: None,
+            defaults: InteractiveDefaults {
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                model: "null".to_string(),
+            },
+
+            pending_approval: None,
+            store: SessionStore::with_root(std::path::PathBuf::from("/tmp")),
+            config: None,
+            executor: None,
+            runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
+            tx: tokio::sync::mpsc::unbounded_channel().0,
+            rx: tokio::sync::mpsc::unbounded_channel().1,
+            request_seq: 0,
+        };
+
+        terminal.draw(|frame| render(frame, &state)).expect("draw");
+        let text = buffer_to_string(terminal.backend().buffer());
+        assert!(text.contains("Tool: read"), "text={text}");
+        assert!(text.contains("ok=true"), "text={text}");
+        assert!(text.contains("tool output"), "text={text}");
+        assert!(!text.contains("Output:"), "text={text}");
+
+        let mut state = state;
+        if let Screen::Chat(chat) = &mut state.screen {
+            chat.tool_details = true;
+        }
+        terminal.draw(|frame| render(frame, &state)).expect("draw");
+        let text = buffer_to_string(terminal.backend().buffer());
+        assert!(text.contains("Output:"), "text={text}");
+        assert!(text.contains("tool output"), "text={text}");
     }
 }
