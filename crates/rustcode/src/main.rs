@@ -26,6 +26,7 @@ use rustcode_core::context::{CommandContext, SessionMeta};
 use rustcode_core::error::ExecutionError;
 use rustcode_core::event::EventPayload;
 use rustcode_core::ports::CommandExecutor;
+use rustcode_engine::mcp::McpRegistry;
 use rustcode_engine::{ChannelPublisher, Engine, WorkspacePermissionPolicy};
 use rustcode_io::LocalIo;
 use rustcode_llm::{
@@ -254,6 +255,16 @@ async fn main() -> Result<()> {
         Arc::new(rustcode_llm::NullLlmClient)
     };
 
+    let mcp_registry = if matches!(
+        &cli.command,
+        TopCommand::Agent { .. } | TopCommand::Run { .. }
+    ) && config.allow_network
+    {
+        Some(build_mcp_registry(&config).await?)
+    } else {
+        None
+    };
+
     let cancellation = CancellationToken::new();
     let context = CommandContext::with_cancellation(
         Arc::new(config),
@@ -269,7 +280,7 @@ async fn main() -> Result<()> {
     let publisher = Arc::new(ChannelPublisher::new(event_tx));
 
     let io = Arc::new(LocalIo);
-    let engine = Engine::new(
+    let mut engine = Engine::new(
         llm_client,
         io.clone(),
         io,
@@ -278,6 +289,9 @@ async fn main() -> Result<()> {
         recorder,
         approver,
     );
+    if let Some(registry) = mcp_registry {
+        engine = engine.with_mcp(registry);
+    }
     let command = match cli.command {
         TopCommand::Run { prompt, .. } => {
             let prompt = if run_history.is_empty() {
@@ -1971,6 +1985,34 @@ fn resolve_mcp_servers_path() -> Option<PathBuf> {
 
 fn mcp_store_key(name: &str) -> String {
     format!("mcp:{name}")
+}
+
+fn resolve_mcp_bearer_token(store: &AuthStore, name: &str) -> Result<Option<String>> {
+    let key = mcp_store_key(name);
+    let token = match store.get(&key)? {
+        Some(StoredCredential::ApiKey { key, .. }) => Some(key),
+        Some(StoredCredential::OAuth { access_token, .. }) => Some(access_token),
+        None => None,
+    };
+    Ok(token)
+}
+
+async fn build_mcp_registry(config: &ResolvedConfig) -> Result<McpRegistry> {
+    let mut registry = McpRegistry::new();
+    let store = AuthStore::open_default();
+
+    for (name, server) in &config.mcp_servers {
+        let Some(url) = server.url.as_deref() else {
+            tracing::debug!("skipping mcp server without url: {name}");
+            continue;
+        };
+        let token = resolve_mcp_bearer_token(&store, name)?;
+        if let Err(err) = registry.connect(name.clone(), url, token).await {
+            tracing::warn!("failed to connect mcp server {name}: {err}");
+        }
+    }
+
+    Ok(registry)
 }
 
 fn render_stored_credential(credential: Option<StoredCredential>) -> &'static str {
