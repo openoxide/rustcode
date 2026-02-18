@@ -8,7 +8,7 @@ use crossterm::terminal::{
 use crossterm::{execute, ExecutableCommand};
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
 use ratatui::Terminal;
@@ -31,6 +31,7 @@ struct AppState {
     sessions: Vec<SessionInfo>,
     selected: usize,
     screen: Screen,
+    status: Option<String>,
 }
 
 pub fn run_interactive(store: SessionStore) -> Result<(), TuiError> {
@@ -51,6 +52,7 @@ pub fn run_interactive(store: SessionStore) -> Result<(), TuiError> {
             .map_err(|err| TuiError::State(err.to_string()))?,
         selected: 0,
         screen: Screen::Sessions,
+        status: None,
     };
 
     loop {
@@ -75,7 +77,48 @@ pub fn run_interactive(store: SessionStore) -> Result<(), TuiError> {
                                 state.selected -= 1;
                             }
                         }
+                        KeyCode::Char('n') => {
+                            state.status = None;
+                            let cwd = match std::env::current_dir() {
+                                Ok(cwd) => cwd,
+                                Err(err) => {
+                                    state.status = Some(format!("failed to resolve cwd: {err}"));
+                                    continue;
+                                }
+                            };
+
+                            match store.create_session(None, None, &cwd, &cwd, "unknown") {
+                                Ok(_session) => {
+                                    state.sessions = store
+                                        .list_sessions()
+                                        .map_err(|err| TuiError::State(err.to_string()))?;
+                                    state.selected = 0;
+                                }
+                                Err(err) => {
+                                    state.status = Some(format!("failed to create session: {err}"));
+                                }
+                            }
+                        }
+                        KeyCode::Char('f') => {
+                            state.status = None;
+                            let Some(session) = state.sessions.get(state.selected) else {
+                                continue;
+                            };
+
+                            match store.fork_session(&session.id, None) {
+                                Ok(_forked) => {
+                                    state.sessions = store
+                                        .list_sessions()
+                                        .map_err(|err| TuiError::State(err.to_string()))?;
+                                    state.selected = 0;
+                                }
+                                Err(err) => {
+                                    state.status = Some(format!("failed to fork session: {err}"));
+                                }
+                            }
+                        }
                         KeyCode::Enter => {
+                            state.status = None;
                             if let Some(session) = state.sessions.get(state.selected).cloned() {
                                 let messages = store
                                     .load_messages(&session.id)
@@ -88,6 +131,7 @@ pub fn run_interactive(store: SessionStore) -> Result<(), TuiError> {
                             }
                         }
                         KeyCode::Char('r') => {
+                            state.status = None;
                             state.sessions = store
                                 .list_sessions()
                                 .map_err(|err| TuiError::State(err.to_string()))?;
@@ -102,6 +146,7 @@ pub fn run_interactive(store: SessionStore) -> Result<(), TuiError> {
                         scroll,
                     } => match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => {
+                            state.status = None;
                             state.screen = Screen::Sessions;
                         }
                         KeyCode::Down => {
@@ -111,6 +156,7 @@ pub fn run_interactive(store: SessionStore) -> Result<(), TuiError> {
                             *scroll = scroll.saturating_sub(1);
                         }
                         KeyCode::Char('r') => {
+                            state.status = None;
                             let refreshed = store
                                 .load_messages(&session.id)
                                 .map_err(|err| TuiError::State(err.to_string()))?;
@@ -133,7 +179,7 @@ fn render(frame: &mut ratatui::Frame<'_>, state: &AppState) {
             session,
             messages,
             scroll,
-        } => render_transcript(frame, session, messages, *scroll),
+        } => render_transcript(frame, session, messages, *scroll, state.status.as_deref()),
     }
 }
 
@@ -169,8 +215,15 @@ fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) {
     let help = Paragraph::new(Line::from(vec![
         Span::raw("Up/Down: select  "),
         Span::raw("Enter: open  "),
+        Span::raw("n: new  "),
+        Span::raw("f: fork  "),
         Span::raw("r: refresh  "),
         Span::raw("q: quit"),
+        Span::raw("  "),
+        Span::styled(
+            state.status.as_deref().unwrap_or(""),
+            Style::default().fg(Color::Red),
+        ),
     ]))
     .block(Block::default().borders(Borders::TOP));
     frame.render_widget(help, chunks[1]);
@@ -181,7 +234,13 @@ fn render_transcript(
     session: &SessionInfo,
     messages: &[StoredMessage],
     scroll: u16,
+    status: Option<&str>,
 ) {
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(2)])
+        .split(frame.area());
+
     let title = session
         .title
         .as_deref()
@@ -208,7 +267,17 @@ fn render_transcript(
         .block(Block::default().title(title).borders(Borders::ALL))
         .wrap(Wrap { trim: false })
         .scroll((scroll, 0));
-    frame.render_widget(paragraph, frame.area());
+    frame.render_widget(paragraph, chunks[0]);
+
+    let help = Paragraph::new(Line::from(vec![
+        Span::raw("Up/Down: scroll  "),
+        Span::raw("r: refresh  "),
+        Span::raw("q/Esc: back"),
+        Span::raw("  "),
+        Span::styled(status.unwrap_or(""), Style::default().fg(Color::Red)),
+    ]))
+    .block(Block::default().borders(Borders::TOP));
+    frame.render_widget(help, chunks[1]);
 }
 
 struct TerminalCleanup;
@@ -257,6 +326,7 @@ mod tests {
             }],
             selected: 0,
             screen: Screen::Sessions,
+            status: None,
         };
         terminal.draw(|frame| render(frame, &state)).expect("draw");
         let buf = terminal.backend().buffer();
