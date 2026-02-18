@@ -3,3 +3,4 @@
 .DS_Store
 /benchmarks/history/*.json
 /benchmarks/latest.json
+/dist/

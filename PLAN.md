@@ -1242,6 +1242,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - added integration harness `crates/rustcode/tests/docs_provider_doctest.rs` and ran it in `cargo test --workspace`.
     - linked doctest doc from `docs/PROVIDERS.md`.
     - Pass: `cargo test -p rustcode --test docs_provider_doctest` (2026-02-18)
+  - Release packaging hygiene:
+    - Pass: `./scripts/build_release_bundle.sh 0.1.0 dist` produced a tarball containing `rustcode`, `benchmarks/latest.json`, and `docs/RELEASE_NOTES_DRAFT.md` (2026-02-18)
+    - ignored `/dist/` release artifacts in `.gitignore` to keep worktree clean.
 - 2026-02-18:
   - Completed Milestone 55 GitHub Copilot Provider:
     - added default base URL `https://api.githubcopilot.com` for `github-copilot` and `github-copilot-enterprise` providers.
