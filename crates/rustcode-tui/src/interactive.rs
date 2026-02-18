@@ -786,6 +786,11 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
                 return ChatNav::Stay;
             }
 
+            if chat.focus == ChatFocus::Composer && key.modifiers.contains(KeyModifiers::ALT) {
+                chat.composer.push('\n');
+                return ChatNav::Stay;
+            }
+
             if chat.running.is_some() {
                 return ChatNav::Stay;
             }
@@ -1023,6 +1028,7 @@ fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState)
         Span::raw(focus_label),
         Span::raw("  "),
         Span::raw("Enter: submit/open  "),
+        Span::raw("Alt+Enter: newline  "),
         Span::raw("Up/Down: scroll/select  "),
         Span::raw("Ctrl+C: cancel  "),
         Span::raw("Ctrl+N: new  "),
