@@ -26,7 +26,7 @@ If `llm.provider` is `null`, `rustcode` derives provider from `model` when it is
 ## Current Protocols
 
 - `null` provider: offline deterministic response.
-- OpenAI-compatible: `POST /v1/chat/completions`
+- OpenAI-compatible: `POST /chat/completions` (some providers include a `/v1` prefix; `rustcode` normalizes per provider)
 - Anthropic: `POST /v1/messages`
 - Vercel AI Gateway: `POST /language-model` (AI SDK v2 protocol headers + SSE deltas)
 - Google Gemini: `POST /v1beta/models/<model>:generateContent` and `:streamGenerateContent?alt=sse`
