@@ -326,13 +326,20 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                 .into_iter()
                 .map(|method| method.as_str().to_string())
                 .collect::<Vec<_>>();
-            let credential = render_stored_credential(store.get(&provider)?);
+            let stored = store.get(&provider)?;
+            let credential = render_stored_credential(stored.clone());
+            let domain = match stored {
+                Some(StoredCredential::ApiKey { domain, .. }) => domain,
+                Some(StoredCredential::OAuth { domain, .. }) => domain,
+                None => None,
+            };
             if json_output {
                 let payload = serde_json::json!({
                     "schema_version": 1,
                     "provider": &provider,
                     "methods": method_names,
                     "credential": credential,
+                    "domain": domain,
                     "auth_file": store.path().display().to_string(),
                 });
                 if !write_stdout_line(
@@ -348,6 +355,10 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
             if !write_stdout_line(&format!("provider={provider}"))?
                 || !write_stdout_line(&format!("methods={rendered_methods}"))?
                 || !write_stdout_line(&format!("credential={credential}"))?
+                || !write_stdout_line(&format!(
+                    "domain={}",
+                    domain.as_deref().unwrap_or("<unset>")
+                ))?
                 || !write_stdout_line(&format!("auth_file={}", store.path().display()))?
             {
                 return Ok(());
