@@ -64,11 +64,11 @@
 - [x] System prompt management (reference: opencode `session/system.ts`)
 - [x] Retry logic (reference: opencode `session/retry.ts`)
 - [x] Summary generation (reference: opencode `session/summary.ts`)
-- [ ] Message v2 format (reference: opencode `session/message-v2.ts`)
-- [ ] Prompt construction (reference: opencode `session/prompt.ts`)
-- [ ] Revert logic (reference: opencode `session/revert.ts`)
-- [ ] Status tracking (reference: opencode `session/status.ts`)
-- [ ] Snapshot/share support (reference: opencode `snapshot/`, `share/`)
+- [x] Status tracking (reference: opencode `session/status.ts`)
+- [ ] Message v2 format (reference: opencode `session/message-v2.ts`) - *deferred: needs rich part system*
+- [ ] Prompt construction (reference: opencode `session/prompt.ts`) - *deferred: needs message v2*
+- [ ] Revert logic (reference: opencode `session/revert.ts`) - *deferred: needs snapshot system*
+- [ ] Snapshot/share support (reference: opencode `snapshot/`, `share/`) - *deferred: needs git integration*
 
 ## Milestone 5: Provider & Auth System Hardening
 - [ ] Model registry with presets (reference: codex `models_manager/`)

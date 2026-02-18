@@ -7,6 +7,7 @@ pub mod permissions;
 pub mod ports;
 pub mod server_protocol;
 pub mod session;
+pub mod status;
 pub mod tool_approval;
 
 pub use command::Command;
@@ -19,4 +20,5 @@ pub use ports::ToolApprover;
 pub use ports::TranscriptRecorder;
 pub use ports::{CommandExecutor, EventPublisher, PathOperation, PermissionPolicy};
 pub use session::{MessageId, MessageRole, SessionId, SessionInfo, StoredMessage, StoredToolCall};
+pub use status::SessionStatus;
 pub use tool_approval::ToolApprovalRequest;
