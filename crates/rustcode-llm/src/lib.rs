@@ -2397,11 +2397,42 @@ mod tests {
     use super::*;
     use rustcode_auth::AuthStore;
     use rustcode_core::config::ResolvedConfig;
+    use std::ffi::OsString;
+    use std::fs;
     use std::path::PathBuf;
     use std::sync::{LazyLock, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     static ENV_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    struct AuthFileGuard {
+        prev: Option<OsString>,
+        path: PathBuf,
+    }
+
+    impl AuthFileGuard {
+        fn empty(name: &str) -> Self {
+            let prev = std::env::var_os("RUSTCODE_AUTH_FILE");
+            let path = make_temp_file_path(name);
+            let _ = fs::remove_file(&path);
+            std::env::set_var("RUSTCODE_AUTH_FILE", &path);
+            Self { prev, path }
+        }
+    }
+
+    impl Drop for AuthFileGuard {
+        fn drop(&mut self) {
+            match self.prev.as_ref() {
+                Some(value) => {
+                    std::env::set_var("RUSTCODE_AUTH_FILE", value);
+                }
+                None => {
+                    std::env::remove_var("RUSTCODE_AUTH_FILE");
+                }
+            }
+            let _ = fs::remove_file(&self.path);
+        }
+    }
 
     #[test]
     fn resolves_provider_from_model_prefix_when_provider_is_null() {
@@ -2491,6 +2522,7 @@ mod tests {
     #[test]
     fn vercel_provider_resolves_as_gateway_protocol_and_requires_key() {
         let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        let _auth = AuthFileGuard::empty("llm-vercel-policy");
         std::env::remove_var("AI_GATEWAY_API_KEY");
         let cfg = ResolvedConfig {
             allow_network: true,
@@ -2789,6 +2821,7 @@ mod tests {
     #[test]
     fn diagnostics_include_missing_key_when_not_configured() {
         let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        let _auth = AuthFileGuard::empty("llm-diagnostics-missing-key");
         std::env::remove_var("OPENROUTER_API_KEY");
         let cfg = ResolvedConfig {
             allow_network: true,
@@ -2807,6 +2840,7 @@ mod tests {
     #[test]
     fn policy_selection_prefers_available_backend() {
         let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        let _auth = AuthFileGuard::empty("llm-policy-select");
         std::env::remove_var("OPENROUTER_API_KEY");
         std::env::set_var("OPENAI_API_KEY", "policy-openai-key");
 
@@ -2824,6 +2858,7 @@ mod tests {
     #[test]
     fn policy_diagnostics_surface_score_and_selection() {
         let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        let _auth = AuthFileGuard::empty("llm-policy-diagnostics");
         std::env::set_var("OPENROUTER_API_KEY", "policy-openrouter-key");
         std::env::remove_var("OPENAI_API_KEY");
 
