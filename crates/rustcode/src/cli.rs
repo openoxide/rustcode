@@ -35,6 +35,17 @@ pub struct Cli {
 
     #[arg(long = "trust-project-config", global = true)]
     pub trust_project_config: bool,
+
+    #[arg(
+        long = "allow-network",
+        global = true,
+        default_value_t = false,
+        conflicts_with = "deny_network"
+    )]
+    pub allow_network: bool,
+
+    #[arg(long = "deny-network", global = true, default_value_t = false)]
+    pub deny_network: bool,
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -380,6 +391,27 @@ mod tests {
         let cli = Cli::try_parse_from(["rustcode", "--event-debug", "run", "ping"])
             .expect("cli should parse");
         assert!(cli.event_debug);
+    }
+
+    #[test]
+    fn allow_network_flag_parses_globally() {
+        let cli = Cli::try_parse_from(["rustcode", "--allow-network", "run", "ping"])
+            .expect("cli should parse");
+        assert!(cli.allow_network);
+        assert!(!cli.deny_network);
+    }
+
+    #[test]
+    fn allow_network_conflicts_with_deny_network() {
+        let err = Cli::try_parse_from([
+            "rustcode",
+            "--allow-network",
+            "--deny-network",
+            "run",
+            "ping",
+        ])
+        .expect_err("must reject conflicting flags");
+        assert!(err.to_string().contains("cannot be used with"));
     }
 
     #[test]

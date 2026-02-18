@@ -36,6 +36,12 @@ cargo run -q -p rustcode -- models openrouter
 RUSTCODE_ALLOW_NETWORK=1 cargo run -q -p rustcode -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY run "hello"
 ```
 
+You can also enable networking with a CLI override:
+
+```bash
+cargo run -q -p rustcode -- --allow-network --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY run "hello"
+```
+
 Tool-calling agent runs require an OpenAI-compatible provider that supports `tools`:
 
 ```bash

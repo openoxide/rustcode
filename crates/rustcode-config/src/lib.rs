@@ -16,6 +16,7 @@ pub struct ConfigSources {
     pub cwd: PathBuf,
     pub profile_override: Option<String>,
     pub model_override: Option<String>,
+    pub allow_network_override: Option<bool>,
     pub llm_provider_override: Option<String>,
     pub llm_base_url_override: Option<String>,
     pub llm_api_key_env_override: Option<String>,
@@ -33,6 +34,7 @@ impl ConfigSources {
             cwd,
             profile_override: None,
             model_override: None,
+            allow_network_override: None,
             llm_provider_override: None,
             llm_base_url_override: None,
             llm_api_key_env_override: None,
@@ -198,6 +200,9 @@ impl ConfigLoader {
         }
         if let Some(model) = &sources.model_override {
             cfg.model.clone_from(model);
+        }
+        if let Some(allow_network) = sources.allow_network_override {
+            cfg.allow_network = allow_network;
         }
         if let Some(provider) = &sources.llm_provider_override {
             cfg.llm_provider.clone_from(provider);

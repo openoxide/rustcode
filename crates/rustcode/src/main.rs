@@ -2809,6 +2809,12 @@ fn load_effective_config(cli: &Cli) -> Result<ResolvedConfig> {
     let mut config_sources = ConfigSources::new(cwd);
     config_sources.profile_override = cli.profile.clone();
     config_sources.model_override = cli.model.clone();
+    if cli.allow_network {
+        config_sources.allow_network_override = Some(true);
+    }
+    if cli.deny_network {
+        config_sources.allow_network_override = Some(false);
+    }
     config_sources.llm_provider_override = cli.llm_provider.clone();
     config_sources.llm_base_url_override = cli.llm_base_url.clone();
     config_sources.llm_api_key_env_override = cli.llm_api_key_env.clone();
