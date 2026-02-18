@@ -80,8 +80,13 @@ You can also enable network access for a single run via env (no config file edit
 RUSTCODE_ALLOW_NETWORK=1 rustcode models
 ```
 
+For any non-`null` provider, you must either:
+
+- set `allow_network = true` in config, or
+- set `RUSTCODE_ALLOW_NETWORK=1` for the command.
+
 ```bash
-OPENROUTER_API_KEY=... rustcode run "hello"
+RUSTCODE_ALLOW_NETWORK=1 OPENROUTER_API_KEY=... rustcode run "hello"
 ```
 
 Or store once in the local auth store:
@@ -95,28 +100,39 @@ Vercel AI Gateway:
 
 ```bash
 AI_GATEWAY_API_KEY=... rustcode auth set-key vercel --from-env AI_GATEWAY_API_KEY
-rustcode run "hello via vercel gateway"
+RUSTCODE_ALLOW_NETWORK=1 rustcode run "hello via vercel gateway"
 ```
 
 Vercel v0:
 
 ```bash
 V0_API_KEY=... rustcode auth set-key v0 --from-env V0_API_KEY
-rustcode run "hello via v0"
+RUSTCODE_ALLOW_NETWORK=1 rustcode run "hello via v0"
 ```
 
 OpenCode Zen:
 
 ```bash
 OPENCODE_API_KEY=... rustcode auth set-key opencode --from-env OPENCODE_API_KEY
-rustcode run "hello via opencode zen"
+RUSTCODE_ALLOW_NETWORK=1 rustcode run "hello via opencode zen"
 ```
 
 Google Gemini:
 
 ```bash
 GEMINI_API_KEY=... rustcode auth set-key google --from-env GEMINI_API_KEY
-rustcode --llm-provider google --model google/gemini-2.5-flash run "hello via gemini"
+RUSTCODE_ALLOW_NETWORK=1 rustcode --llm-provider google --model google/gemini-2.5-flash run "hello via gemini"
+```
+
+GitHub Copilot enterprise base URL:
+
+```bash
+# Option A: explicit base URL
+RUSTCODE_ALLOW_NETWORK=1 rustcode --llm-provider github-copilot-enterprise --llm-base-url "https://copilot-api.github.example.com" --model github-copilot/gpt-4o run "hello"
+
+# Option B: env-derived base URL
+export GITHUB_COPILOT_ENTERPRISE_DOMAIN=github.example.com
+RUSTCODE_ALLOW_NETWORK=1 rustcode --llm-provider github-copilot-enterprise --model github-copilot/gpt-4o run "hello"
 ```
 
 Ollama local example:

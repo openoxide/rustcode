@@ -1181,6 +1181,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Deliverables:
   - `rustcode-llm`:
     - default base URL for `github-copilot`: `https://api.githubcopilot.com` (overrideable via config/CLI)
+    - `github-copilot-enterprise` base URL can be derived from env:
+      - `GITHUB_COPILOT_ENTERPRISE_DOMAIN=<domain>` -> `https://copilot-api.<domain>`
     - provider default headers include (case-insensitive):
       - `Openai-Intent: conversation-edits`
       - `x-initiator: user` (agent refinement later)
@@ -1224,6 +1226,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `rustcode version` no longer loads config or initializes an LLM provider (works even inside untrusted projects).
     - non-LLM commands (`list`, `read`, `write`, `edit`, `exec`, `tui`) no longer initialize an LLM provider at startup.
     - added integration coverage for both behaviors (`version_does_not_require_trusted_project_config_or_llm_init`, `list_does_not_require_llm_provider_even_when_allow_network_true`).
+  - Copilot enterprise UX:
+    - `github-copilot-enterprise` can derive base URL from `GITHUB_COPILOT_ENTERPRISE_DOMAIN`.
+  - Docs:
+    - fixed quickstart/provider examples to include `RUSTCODE_ALLOW_NETWORK=1` for live runs.
 - 2026-02-18:
   - Completed Milestone 55 GitHub Copilot Provider:
     - added default base URL `https://api.githubcopilot.com` for `github-copilot` and `github-copilot-enterprise` providers.

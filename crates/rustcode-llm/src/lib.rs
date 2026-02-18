@@ -390,10 +390,11 @@ fn resolve_provider(config: &ResolvedConfig) -> Result<ResolvedProvider, LlmErro
     }
 
     let preset = provider_preset(&provider_id);
-    let base_url = config
-        .llm_base_url
-        .clone()
-        .or_else(|| preset.default_base_url.clone());
+    let mut base_url = config.llm_base_url.clone();
+    if base_url.is_none() {
+        base_url = resolve_provider_base_url_from_env(config, &provider_id);
+    }
+    let base_url = base_url.or_else(|| preset.default_base_url.clone());
     let api_key_env_candidates = collect_provider_api_key_envs(&provider_id, &preset);
     let (api_key, api_key_source) = resolve_api_key(config, &api_key_env_candidates, &provider_id);
     let requires_api_key = preset.requires_api_key || !api_key_env_candidates.is_empty();
@@ -407,6 +408,48 @@ fn resolve_provider(config: &ResolvedConfig) -> Result<ResolvedProvider, LlmErro
         api_key_env_candidates,
         api_key_source,
     })
+}
+
+fn resolve_provider_base_url_from_env(
+    config: &ResolvedConfig,
+    provider_id: &str,
+) -> Option<String> {
+    match provider_id {
+        "github-copilot" => {
+            read_config_or_env(config, "GITHUB_COPILOT_BASE_URL").map(|pair| pair.0)
+        }
+        "github-copilot-enterprise" => {
+            if let Some((value, _)) =
+                read_config_or_env(config, "GITHUB_COPILOT_ENTERPRISE_BASE_URL")
+            {
+                return Some(value);
+            }
+            if let Some((domain, _)) =
+                read_config_or_env(config, "GITHUB_COPILOT_ENTERPRISE_DOMAIN")
+            {
+                return Some(derive_copilot_enterprise_base_url(domain.trim()));
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
+fn derive_copilot_enterprise_base_url(domain: &str) -> String {
+    if domain.is_empty() {
+        return "".to_string();
+    }
+
+    if domain.contains("://") {
+        return domain.trim_end_matches('/').to_string();
+    }
+
+    let domain = domain.trim_end_matches('/');
+    if domain.starts_with("copilot-api.") {
+        format!("https://{domain}")
+    } else {
+        format!("https://copilot-api.{domain}")
+    }
 }
 
 fn resolve_api_key(
@@ -2828,6 +2871,41 @@ mod tests {
         );
 
         std::env::remove_var("GITHUB_COPILOT_TOKEN");
+    }
+
+    #[test]
+    fn github_copilot_enterprise_base_url_can_be_derived_from_env_domain() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        std::env::set_var("GITHUB_COPILOT_TOKEN", "copilot-test-token");
+        std::env::set_var("GITHUB_COPILOT_ENTERPRISE_DOMAIN", "github.example.com");
+
+        let cfg = ResolvedConfig {
+            allow_network: true,
+            llm_provider: "github-copilot-enterprise".to_string(),
+            ..ResolvedConfig::default()
+        };
+
+        let diag = diagnose_provider(&cfg, Some("github-copilot-enterprise"))
+            .expect("diagnostic should resolve");
+        assert_eq!(
+            diag.base_url.as_deref(),
+            Some("https://copilot-api.github.example.com")
+        );
+
+        std::env::remove_var("GITHUB_COPILOT_ENTERPRISE_DOMAIN");
+        std::env::remove_var("GITHUB_COPILOT_TOKEN");
+    }
+
+    #[test]
+    fn copilot_enterprise_domain_derivation_handles_prefixed_and_url_values() {
+        assert_eq!(
+            derive_copilot_enterprise_base_url("copilot-api.github.example.com"),
+            "https://copilot-api.github.example.com"
+        );
+        assert_eq!(
+            derive_copilot_enterprise_base_url("https://copilot-api.github.example.com/"),
+            "https://copilot-api.github.example.com"
+        );
     }
 
     fn make_temp_file_path(name: &str) -> PathBuf {

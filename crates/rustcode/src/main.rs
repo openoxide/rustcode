@@ -1719,25 +1719,36 @@ fn handle_models_command(
         if !config.provider_allowed(provider) {
             anyhow::bail!("provider is disabled by config: {provider}");
         }
-        let Some(entry) = index.get(provider) else {
-            anyhow::bail!("provider not found in models index: {provider}");
-        };
+        let entry = index.get(provider);
         let diagnostics = diagnose_provider(config, Some(provider))
             .with_context(|| format!("failed to diagnose provider {provider}"))?;
 
         let mut model_ids: Vec<String> = entry
-            .models
-            .keys()
-            .map(|id| format!("{provider}/{id}"))
-            .collect();
+            .map(|entry| {
+                entry
+                    .models
+                    .keys()
+                    .map(|id| format!("{provider}/{id}"))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
         model_ids.sort();
+
+        let provider_name = entry
+            .and_then(|entry| entry.name.clone())
+            .unwrap_or_else(|| provider.to_string());
+        let index_warning = if entry.is_some() {
+            None
+        } else {
+            Some("provider not found in models index; diagnostics only".to_string())
+        };
 
         if json_output {
             let payload = serde_json::json!({
                 "schema_version": 1,
                 "provider": {
                     "id": provider,
-                    "name": entry.name.clone().unwrap_or_else(|| provider.to_string()),
+                    "name": provider_name,
                     "protocol": render_protocol(&diagnostics.protocol),
                     "base_url": diagnostics.base_url,
                     "endpoint": diagnostics.endpoint,
@@ -1749,6 +1760,7 @@ fn handle_models_command(
                     "policy_selected": diagnostics.policy_selected,
                     "policy_available": diagnostics.policy_available,
                     "models": model_ids,
+                    "warning": index_warning,
                 }
             });
             if !write_stdout_line(
@@ -1757,6 +1769,12 @@ fn handle_models_command(
                 return Ok(());
             }
             return Ok(());
+        }
+
+        if let Some(warning) = &index_warning {
+            if !write_stdout_line(&format!("warning={warning}"))? {
+                return Ok(());
+            }
         }
 
         if !write_stdout_line(&format!("provider={provider}"))?

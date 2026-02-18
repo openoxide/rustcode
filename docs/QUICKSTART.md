@@ -32,13 +32,13 @@ cargo run -q -p rustcode -- models openrouter
 
 ## Provider Setup
 ```bash
-cargo run -q -p rustcode -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY run "hello"
+RUSTCODE_ALLOW_NETWORK=1 cargo run -q -p rustcode -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY run "hello"
 ```
 
 Tool-calling agent runs require an OpenAI-compatible provider that supports `tools`:
 
 ```bash
-cargo run -q -p rustcode -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY agent "list files then read Cargo.toml"
+RUSTCODE_ALLOW_NETWORK=1 cargo run -q -p rustcode -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY agent "list files then read Cargo.toml"
 ```
 
 Safety defaults:
