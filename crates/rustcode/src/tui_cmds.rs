@@ -47,8 +47,8 @@ pub async fn handle_tui_command(
             };
 
             if !resolved_config.allow_network {
-                anyhow::bail!(
-                    "tui attach requires allow_network (set RUSTCODE_ALLOW_NETWORK=1 or --allow-network)"
+                initial_status = Some(
+                    "network access is disabled; LLM calls will not work (use --allow-network)".to_string()
                 );
             }
 

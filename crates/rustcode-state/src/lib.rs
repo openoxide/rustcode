@@ -255,6 +255,7 @@ impl SessionStore {
         Ok(())
     }
 
+    #[must_use] 
     pub fn new_message_id(&self) -> MessageId {
         new_message_id()
     }

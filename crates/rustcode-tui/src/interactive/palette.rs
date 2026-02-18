@@ -1,4 +1,4 @@
-use super::*;
+use super::{AppState, Modal, CommandItem, Screen, InteractiveSubmitMode, CommandId, execute_command, push_toast, ToastVariant, Duration, ChatFocus, transcript_area_height, set_find, build_transcript_lines, compute_find_matches, build_prompt_history, ChatState};
 
 pub(super) fn open_command_palette(state: &mut AppState) {
     let items = build_command_items(state);
@@ -180,8 +180,7 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
 
     let (verb, rest) = trimmed
         .split_once(' ')
-        .map(|(a, b)| (a, b.trim()))
-        .unwrap_or((trimmed, ""));
+        .map_or((trimmed, ""), |(a, b)| (a, b.trim()));
     let verb = verb.to_ascii_lowercase();
 
     match verb.as_str() {
@@ -230,7 +229,7 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
                 .unwrap_or_default();
             let transcript = build_transcript_lines(&chat);
             let matches = compute_find_matches(&transcript, &query);
-            let current = chat.find.as_ref().map(|f| f.current).unwrap_or(0);
+            let current = chat.find.as_ref().map_or(0, |f| f.current);
             state.screen = Screen::Chat(chat);
             state.modal = Some(Modal::Search {
                 query,
@@ -360,9 +359,7 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
             true
         }
         "delete" => {
-            let session_id = if !rest.is_empty() {
-                rest.to_string()
-            } else {
+            let session_id = if rest.is_empty() {
                 match &state.screen {
                     Screen::Chat(chat) => chat.session.id.clone(),
                     Screen::Sessions => state
@@ -372,6 +369,8 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
                         .map(|s| s.id.clone())
                         .unwrap_or_default(),
                 }
+            } else {
+                rest.to_string()
             };
             if session_id.is_empty() {
                 push_toast(

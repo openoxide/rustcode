@@ -339,9 +339,7 @@ fn handle_auth_status(store: &AuthStore, provider: &str, json_output: bool) -> R
     let (rows, _) = resolve_auth_method_rows();
     let methods = rows
         .into_iter()
-        .find(|row| row.id == provider)
-        .map(|row| row.methods)
-        .unwrap_or_else(|| methods_for_provider(provider));
+        .find(|row| row.id == provider).map_or_else(|| methods_for_provider(provider), |row| row.methods);
 
     if json_output {
         let payload = serde_json::json!({
@@ -370,9 +368,7 @@ fn handle_auth_methods_provider(provider: &str, json_output: bool) -> Result<()>
     let (rows, _) = resolve_auth_method_rows();
     let methods = rows
         .into_iter()
-        .find(|row| row.id == provider)
-        .map(|row| row.methods)
-        .unwrap_or_else(|| methods_for_provider(provider));
+        .find(|row| row.id == provider).map_or_else(|| methods_for_provider(provider), |row| row.methods);
 
     if json_output {
         let payload = serde_json::json!({

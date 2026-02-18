@@ -2,16 +2,15 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use globset::Glob;
-use rustcode_core::config::{
-    BackendSelectionPolicy, McpOAuthConfig, McpServerConfig, ResolvedConfig,
-};
+use rustcode_core::config::ResolvedConfig;
 use rustcode_core::error::ConfigError;
 use rustcode_core::permissions::PermissionRule;
 use serde::Deserialize;
 
 mod mcp_edit;
+mod merge;
 mod paths;
+mod validation;
 
 pub use mcp_edit::{edit_mcp_server, remove_mcp_server, ConfigEditScope};
 use paths::{
@@ -56,84 +55,84 @@ impl ConfigSources {
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct FileConfig {
-    profile: Option<String>,
-    model: Option<String>,
-    llm: Option<LlmConfig>,
-    enabled_providers: Option<Vec<String>>,
-    disabled_providers: Option<Vec<String>>,
-    mcp: Option<McpConfig>,
-    allow_network: Option<bool>,
-    plugins: Option<Vec<String>>,
-    env: Option<BTreeMap<String, String>>,
-    policy: Option<PolicyConfig>,
-    permissions: Option<Vec<PermissionRule>>,
-    trust: Option<TrustConfig>,
+pub(crate) struct FileConfig {
+    pub profile: Option<String>,
+    pub model: Option<String>,
+    pub llm: Option<LlmConfig>,
+    pub enabled_providers: Option<Vec<String>>,
+    pub disabled_providers: Option<Vec<String>>,
+    pub mcp: Option<McpConfig>,
+    pub allow_network: Option<bool>,
+    pub plugins: Option<Vec<String>>,
+    pub env: Option<BTreeMap<String, String>>,
+    pub policy: Option<PolicyConfig>,
+    pub permissions: Option<Vec<PermissionRule>>,
+    pub trust: Option<TrustConfig>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct LlmConfig {
-    provider: Option<String>,
+pub(crate) struct LlmConfig {
+    pub provider: Option<String>,
     #[serde(alias = "baseURL")]
-    base_url: Option<String>,
+    pub base_url: Option<String>,
     #[serde(alias = "apiKeyEnv")]
-    api_key_env: Option<String>,
+    pub api_key_env: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct McpConfig {
-    servers: Option<BTreeMap<String, McpServerFileConfig>>,
+pub(crate) struct McpConfig {
+    pub servers: Option<BTreeMap<String, McpServerFileConfig>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct McpServerFileConfig {
-    url: Option<String>,
-    command: Option<String>,
+pub(crate) struct McpServerFileConfig {
+    pub url: Option<String>,
+    pub command: Option<String>,
     #[serde(default)]
-    args: Vec<String>,
+    pub args: Vec<String>,
     #[serde(default)]
-    env: BTreeMap<String, String>,
-    oauth: Option<McpOAuthFileConfig>,
+    pub env: BTreeMap<String, String>,
+    pub oauth: Option<McpOAuthFileConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
-enum McpOAuthFileConfig {
+pub(crate) enum McpOAuthFileConfig {
     Enabled(bool),
     Settings(McpOAuthFileSettings),
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
-struct McpOAuthFileSettings {
-    enabled: Option<bool>,
-    client_id: Option<String>,
-    client_secret_env: Option<String>,
+pub(crate) struct McpOAuthFileSettings {
+    pub enabled: Option<bool>,
+    pub client_id: Option<String>,
+    pub client_secret_env: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct TrustConfig {
-    projects: Option<Vec<String>>,
+pub(crate) struct TrustConfig {
+    pub projects: Option<Vec<String>>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct PolicyConfig {
-    backend_selection: Option<BackendSelectionPolicyConfig>,
+pub(crate) struct PolicyConfig {
+    pub backend_selection: Option<BackendSelectionPolicyConfig>,
 }
 
 #[derive(Debug, Default, Deserialize)]
-struct BackendSelectionPolicyConfig {
+pub(crate) struct BackendSelectionPolicyConfig {
     #[serde(alias = "providerAgnosticWeight")]
-    provider_agnostic_weight: Option<i32>,
+    pub provider_agnostic_weight: Option<i32>,
     #[serde(alias = "automationSkillsWeight")]
-    automation_skills_weight: Option<i32>,
+    pub automation_skills_weight: Option<i32>,
     #[serde(alias = "openSourceWeight")]
-    open_source_weight: Option<i32>,
+    pub open_source_weight: Option<i32>,
     #[serde(alias = "lspSupportWeight")]
-    lsp_support_weight: Option<i32>,
+    pub lsp_support_weight: Option<i32>,
     #[serde(alias = "privacyWeight")]
-    privacy_weight: Option<i32>,
+    pub privacy_weight: Option<i32>,
     #[serde(alias = "subscriptionPenalty")]
-    subscription_penalty: Option<i32>,
+    pub subscription_penalty: Option<i32>,
 }
 
 pub struct ConfigLoader;
@@ -156,79 +155,103 @@ impl ConfigLoader {
 
         let global_cfg = read_file_config(&global_config_path)?;
         if let Some(file_cfg) = global_cfg.as_ref() {
-            apply_file(&mut cfg, file_cfg);
+            merge::apply_file(&mut cfg, file_cfg);
         }
 
         let user_cfg = read_file_config(&user_config_path)?;
         if let Some(file_cfg) = user_cfg.as_ref() {
-            apply_file(&mut cfg, file_cfg);
+            merge::apply_file(&mut cfg, file_cfg);
         }
 
         let trusted_projects =
             trusted_project_set(&[global_cfg.as_ref(), user_cfg.as_ref()], &sources.cwd);
 
+        apply_project_config(
+            &mut cfg,
+            sources,
+            &project_config_path,
+            &trusted_projects,
+        )?;
+        apply_env_overrides(&mut cfg, sources);
+        apply_cli_overrides(&mut cfg, sources);
+
+        validation::validate(&cfg)?;
+        Ok(cfg)
+    }
+}
+
+fn apply_project_config(
+    cfg: &mut ResolvedConfig,
+    sources: &ConfigSources,
+    project_config_path: &Path,
+    trusted_projects: &BTreeSet<PathBuf>,
+) -> Result<(), ConfigError> {
+    let project_cfg = read_file_config(project_config_path)?;
+    if let Some(file_cfg) = project_cfg.as_ref() {
         let env_trust = sources.read_process_env && env_truthy("RUSTCODE_TRUST_PROJECT");
         let project_explicitly_trusted = sources.trust_project || env_trust;
         let project_in_trust_list = trusted_projects.contains(&normalize_path(&sources.cwd));
         let project_trusted = project_explicitly_trusted || project_in_trust_list;
 
-        let project_cfg = read_file_config(&project_config_path)?;
-        if let Some(file_cfg) = project_cfg.as_ref() {
-            if !project_trusted {
-                return Err(ConfigError::Trust(format!(
-                    "project config {} exists but {} is not trusted; pass --trust-project-config, set RUSTCODE_TRUST_PROJECT=1, or add the path to [trust].projects",
-                    project_config_path.display(),
-                    sources.cwd.display()
-                )));
-            }
-
-            cfg.project_config_path = Some(project_config_path.clone());
-            cfg.project_config_trusted = true;
-            apply_file(&mut cfg, file_cfg);
+        if !project_trusted {
+            return Err(ConfigError::Trust(format!(
+                "project config {} exists but {} is not trusted; pass --trust-project-config, set RUSTCODE_TRUST_PROJECT=1, or add the path to [trust].projects",
+                project_config_path.display(),
+                sources.cwd.display()
+            )));
         }
 
-        if sources.read_process_env {
-            if let Ok(profile) = std::env::var("RUSTCODE_PROFILE") {
-                cfg.profile = profile;
-            }
-            if let Ok(model) = std::env::var("RUSTCODE_MODEL") {
-                cfg.model = model;
-            }
-            if let Ok(allow_network) = std::env::var("RUSTCODE_ALLOW_NETWORK") {
-                cfg.allow_network = parse_boolish_env("RUSTCODE_ALLOW_NETWORK", &allow_network)?;
-            }
-            if let Ok(llm_provider) = std::env::var("RUSTCODE_LLM_PROVIDER") {
-                cfg.llm_provider = llm_provider;
-            }
-            if let Ok(llm_base_url) = std::env::var("RUSTCODE_LLM_BASE_URL") {
-                cfg.llm_base_url = Some(llm_base_url);
-            }
-            if let Ok(llm_api_key_env) = std::env::var("RUSTCODE_LLM_API_KEY_ENV") {
-                cfg.llm_api_key_env = Some(llm_api_key_env);
-            }
-        }
+        cfg.project_config_path = Some(project_config_path.to_path_buf());
+        cfg.project_config_trusted = true;
+        merge::apply_file(cfg, file_cfg);
+    }
+    Ok(())
+}
 
-        if let Some(profile) = &sources.profile_override {
-            cfg.profile.clone_from(profile);
+fn apply_env_overrides(cfg: &mut ResolvedConfig, sources: &ConfigSources) {
+    if !sources.read_process_env {
+        return;
+    }
+    if let Ok(profile) = std::env::var("RUSTCODE_PROFILE") {
+        cfg.profile = profile;
+    }
+    if let Ok(model) = std::env::var("RUSTCODE_MODEL") {
+        cfg.model = model;
+    }
+    if let Ok(allow_network) = std::env::var("RUSTCODE_ALLOW_NETWORK") {
+        if let Ok(val) = parse_boolish_env("RUSTCODE_ALLOW_NETWORK", &allow_network) {
+            cfg.allow_network = val;
         }
-        if let Some(model) = &sources.model_override {
-            cfg.model.clone_from(model);
-        }
-        if let Some(allow_network) = sources.allow_network_override {
-            cfg.allow_network = allow_network;
-        }
-        if let Some(provider) = &sources.llm_provider_override {
-            cfg.llm_provider.clone_from(provider);
-        }
-        if let Some(base_url) = &sources.llm_base_url_override {
-            cfg.llm_base_url = Some(base_url.clone());
-        }
-        if let Some(api_key_env) = &sources.llm_api_key_env_override {
-            cfg.llm_api_key_env = Some(api_key_env.clone());
-        }
+    }
+    if let Ok(llm_provider) = std::env::var("RUSTCODE_LLM_PROVIDER") {
+        cfg.llm_provider = llm_provider;
+    }
+    if let Ok(llm_base_url) = std::env::var("RUSTCODE_LLM_BASE_URL") {
+        cfg.llm_base_url = Some(llm_base_url);
+    }
+    if let Ok(llm_api_key_env) = std::env::var("RUSTCODE_LLM_API_KEY_ENV") {
+        cfg.llm_api_key_env = Some(llm_api_key_env);
+    }
+}
 
-        validate(&cfg)?;
-        Ok(cfg)
+fn apply_cli_overrides(cfg: &mut ResolvedConfig, sources: &ConfigSources) {
+    if let Some(profile) = &sources.profile_override {
+        cfg.profile.clone_from(profile);
+    }
+    if let Some(model) = &sources.model_override {
+        cfg.model.clone_from(model);
+    }
+    if let Some(allow_network) = sources.allow_network_override {
+        cfg.allow_network = allow_network;
+    }
+    if let Some(provider) = &sources.llm_provider_override {
+        cfg.llm_provider.clone_from(provider);
+    }
+    if let Some(base_url) = &sources.llm_base_url_override {
+        cfg.llm_base_url = Some(base_url.clone());
+    }
+    if let Some(api_key_env) = &sources.llm_api_key_env_override {
+        cfg.llm_api_key_env = Some(api_key_env.clone());
     }
 }
 
@@ -242,149 +265,6 @@ fn read_file_config(path: &Path) -> Result<Option<FileConfig>, ConfigError> {
     let parsed = toml::from_str::<FileConfig>(&raw)
         .map_err(|err| ConfigError::Parse(format!("{}: {err}", path.display())))?;
     Ok(Some(parsed))
-}
-
-fn apply_file(cfg: &mut ResolvedConfig, file_cfg: &FileConfig) {
-    if let Some(profile) = &file_cfg.profile {
-        cfg.profile.clone_from(profile);
-    }
-    if let Some(model) = &file_cfg.model {
-        cfg.model.clone_from(model);
-    }
-    if let Some(llm) = &file_cfg.llm {
-        if let Some(provider) = &llm.provider {
-            cfg.llm_provider.clone_from(provider);
-        }
-        if let Some(base_url) = &llm.base_url {
-            cfg.llm_base_url = Some(base_url.clone());
-        }
-        if let Some(api_key_env) = &llm.api_key_env {
-            cfg.llm_api_key_env = Some(api_key_env.clone());
-        }
-    }
-    if let Some(enabled) = &file_cfg.enabled_providers {
-        cfg.enabled_providers = Some(
-            enabled
-                .iter()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty())
-                .collect(),
-        );
-    }
-    if let Some(disabled) = &file_cfg.disabled_providers {
-        cfg.disabled_providers = disabled
-            .iter()
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-            .collect();
-    }
-    if let Some(mcp) = &file_cfg.mcp {
-        if let Some(servers) = &mcp.servers {
-            merge_mcp_servers(&mut cfg.mcp_servers, servers);
-        }
-    }
-    if let Some(allow_network) = file_cfg.allow_network {
-        cfg.allow_network = allow_network;
-    }
-    if let Some(plugins) = &file_cfg.plugins {
-        merge_plugins(&mut cfg.plugins, plugins);
-    }
-    if let Some(env) = &file_cfg.env {
-        for (key, value) in env {
-            cfg.env.insert(key.clone(), value.clone());
-        }
-    }
-    if let Some(policy) = &file_cfg.policy {
-        if let Some(backend_selection) = &policy.backend_selection {
-            merge_backend_selection_policy(&mut cfg.backend_selection, backend_selection);
-        }
-    }
-    if let Some(rules) = &file_cfg.permissions {
-        for rule in rules {
-            cfg.permission_rules.push(PermissionRule {
-                permission: rule.permission.trim().to_string(),
-                action: rule.action,
-                pattern: rule.pattern.trim().to_string(),
-            });
-        }
-    }
-}
-
-fn merge_mcp_servers(
-    current: &mut BTreeMap<String, McpServerConfig>,
-    incoming: &BTreeMap<String, McpServerFileConfig>,
-) {
-    for (name, server) in incoming {
-        let mut entry = current.remove(name).unwrap_or(McpServerConfig {
-            url: None,
-            command: None,
-            args: Vec::new(),
-            env: BTreeMap::new(),
-            oauth: McpOAuthConfig::default(),
-        });
-        if server.url.is_some() {
-            entry.url.clone_from(&server.url);
-        }
-        if server.command.is_some() {
-            entry.command.clone_from(&server.command);
-        }
-        if !server.args.is_empty() {
-            entry.args.clone_from(&server.args);
-        }
-        if !server.env.is_empty() {
-            entry.env.clone_from(&server.env);
-        }
-        let oauth = match &server.oauth {
-            None => entry.oauth.clone(),
-            Some(McpOAuthFileConfig::Enabled(enabled)) => McpOAuthConfig {
-                enabled: *enabled,
-                client_id: entry.oauth.client_id.clone(),
-                client_secret_env: entry.oauth.client_secret_env.clone(),
-            },
-            Some(McpOAuthFileConfig::Settings(settings)) => McpOAuthConfig {
-                enabled: settings.enabled.unwrap_or(true),
-                client_id: settings.client_id.clone().or(entry.oauth.client_id),
-                client_secret_env: settings
-                    .client_secret_env
-                    .clone()
-                    .or(entry.oauth.client_secret_env),
-            },
-        };
-        entry.oauth = oauth;
-        current.insert(name.clone(), entry);
-    }
-}
-
-fn merge_backend_selection_policy(
-    current: &mut BackendSelectionPolicy,
-    incoming: &BackendSelectionPolicyConfig,
-) {
-    if let Some(value) = incoming.provider_agnostic_weight {
-        current.provider_agnostic_weight = value;
-    }
-    if let Some(value) = incoming.automation_skills_weight {
-        current.automation_skills_weight = value;
-    }
-    if let Some(value) = incoming.open_source_weight {
-        current.open_source_weight = value;
-    }
-    if let Some(value) = incoming.lsp_support_weight {
-        current.lsp_support_weight = value;
-    }
-    if let Some(value) = incoming.privacy_weight {
-        current.privacy_weight = value;
-    }
-    if let Some(value) = incoming.subscription_penalty {
-        current.subscription_penalty = value;
-    }
-}
-
-fn merge_plugins(current: &mut Vec<String>, incoming: &[String]) {
-    for plugin in incoming {
-        if !current.iter().any(|item| item == plugin) {
-            current.push(plugin.clone());
-        }
-    }
 }
 
 fn trusted_project_set(configs: &[Option<&FileConfig>], cwd: &Path) -> BTreeSet<PathBuf> {
@@ -422,172 +302,6 @@ fn env_truthy(var_name: &str) -> bool {
         raw.trim().to_ascii_lowercase().as_str(),
         "1" | "true" | "yes" | "on"
     )
-}
-
-fn validate(cfg: &ResolvedConfig) -> Result<(), ConfigError> {
-    if cfg.profile.trim().is_empty() {
-        return Err(ConfigError::Validation(
-            "profile must not be empty".to_string(),
-        ));
-    }
-    if cfg.model.trim().is_empty() {
-        return Err(ConfigError::Validation(
-            "model must not be empty".to_string(),
-        ));
-    }
-    if cfg.llm_provider.trim().is_empty() {
-        return Err(ConfigError::Validation(
-            "llm.provider must not be empty".to_string(),
-        ));
-    }
-    if let Some(api_key_env) = cfg.llm_api_key_env.as_ref() {
-        if api_key_env.trim().is_empty() {
-            return Err(ConfigError::Validation(
-                "llm.api_key_env must not be empty".to_string(),
-            ));
-        }
-    }
-    if let Some(enabled) = cfg.enabled_providers.as_ref() {
-        for provider in enabled {
-            validate_provider_id("enabled_providers", provider)?;
-        }
-    }
-    for provider in &cfg.disabled_providers {
-        validate_provider_id("disabled_providers", provider)?;
-    }
-    for (name, server) in &cfg.mcp_servers {
-        if name.trim().is_empty() {
-            return Err(ConfigError::Validation(
-                "mcp.servers entries must have non-empty names".to_string(),
-            ));
-        }
-        if let Some(url) = server.url.as_ref() {
-            if url.trim().is_empty() {
-                return Err(ConfigError::Validation(format!(
-                    "mcp.servers.{name}.url must not be empty"
-                )));
-            }
-        }
-        if let Some(command) = server.command.as_ref() {
-            if command.trim().is_empty() {
-                return Err(ConfigError::Validation(format!(
-                    "mcp.servers.{name}.command must not be empty"
-                )));
-            }
-        }
-        if server.url.is_none() && server.command.is_none() {
-            return Err(ConfigError::Validation(format!(
-                "mcp.servers.{name} must set either url or command"
-            )));
-        }
-        if server.url.is_some() && server.command.is_some() {
-            return Err(ConfigError::Validation(format!(
-                "mcp.servers.{name} cannot set both url and command"
-            )));
-        }
-        for (idx, arg) in server.args.iter().enumerate() {
-            if arg.trim().is_empty() {
-                return Err(ConfigError::Validation(format!(
-                    "mcp.servers.{name}.args[{idx}] must not be empty"
-                )));
-            }
-        }
-        for (key, value) in &server.env {
-            if key.trim().is_empty() {
-                return Err(ConfigError::Validation(format!(
-                    "mcp.servers.{name}.env keys must not be empty"
-                )));
-            }
-            if value.trim().is_empty() {
-                return Err(ConfigError::Validation(format!(
-                    "mcp.servers.{name}.env.{key} must not be empty"
-                )));
-            }
-        }
-        if let Some(client_id) = server.oauth.client_id.as_ref() {
-            if client_id.trim().is_empty() {
-                return Err(ConfigError::Validation(format!(
-                    "mcp.servers.{name}.oauth.client_id must not be empty"
-                )));
-            }
-        }
-        if let Some(secret_env) = server.oauth.client_secret_env.as_ref() {
-            if secret_env.trim().is_empty() {
-                return Err(ConfigError::Validation(format!(
-                    "mcp.servers.{name}.oauth.client_secret_env must not be empty"
-                )));
-            }
-        }
-    }
-    validate_non_negative(
-        "policy.backend_selection.provider_agnostic_weight",
-        cfg.backend_selection.provider_agnostic_weight,
-    )?;
-    validate_non_negative(
-        "policy.backend_selection.automation_skills_weight",
-        cfg.backend_selection.automation_skills_weight,
-    )?;
-    validate_non_negative(
-        "policy.backend_selection.open_source_weight",
-        cfg.backend_selection.open_source_weight,
-    )?;
-    validate_non_negative(
-        "policy.backend_selection.lsp_support_weight",
-        cfg.backend_selection.lsp_support_weight,
-    )?;
-    validate_non_negative(
-        "policy.backend_selection.privacy_weight",
-        cfg.backend_selection.privacy_weight,
-    )?;
-    validate_non_negative(
-        "policy.backend_selection.subscription_penalty",
-        cfg.backend_selection.subscription_penalty,
-    )?;
-
-    for (idx, rule) in cfg.permission_rules.iter().enumerate() {
-        if rule.permission.trim().is_empty() {
-            return Err(ConfigError::Validation(format!(
-                "permissions[{idx}].permission must not be empty"
-            )));
-        }
-        if rule.pattern.trim().is_empty() {
-            return Err(ConfigError::Validation(format!(
-                "permissions[{idx}].pattern must not be empty"
-            )));
-        }
-        Glob::new(&rule.pattern).map_err(|err| {
-            ConfigError::Validation(format!(
-                "permissions[{idx}].pattern is not a valid glob: {err}"
-            ))
-        })?;
-    }
-    Ok(())
-}
-
-fn validate_non_negative(field: &str, value: i32) -> Result<(), ConfigError> {
-    if value < 0 {
-        return Err(ConfigError::Validation(format!(
-            "{field} must not be negative"
-        )));
-    }
-    Ok(())
-}
-
-fn validate_provider_id(field: &str, value: &str) -> Result<(), ConfigError> {
-    if value.trim().is_empty() {
-        return Err(ConfigError::Validation(format!(
-            "{field} entries must not be empty"
-        )));
-    }
-    if !value
-        .chars()
-        .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
-    {
-        return Err(ConfigError::Validation(format!(
-            "{field} provider id must match [a-z0-9-]+: {value}"
-        )));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

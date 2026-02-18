@@ -1,4 +1,4 @@
-use super::*;
+use super::ChatState;
 
 fn composer_set(chat: &mut ChatState, text: String) {
     chat.composer = text;

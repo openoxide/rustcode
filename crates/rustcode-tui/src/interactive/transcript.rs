@@ -1,4 +1,4 @@
-use super::*;
+use super::{Line, StoredMessage, MessageRole, Style, Modifier, Color, Span, ChatState, FindState, AppState, push_toast, ToastVariant, Duration};
 
 fn append_message_lines(lines: &mut Vec<Line<'static>>, msg: &StoredMessage, tool_details: bool) {
     let role = match msg.role {
@@ -21,30 +21,27 @@ fn append_message_lines(lines: &mut Vec<Line<'static>>, msg: &StoredMessage, too
 
     lines.push(Line::from(vec![Span::styled(role, role_style)]));
 
-    match msg.role {
-        MessageRole::Tool => append_tool_message_lines(lines, msg, tool_details),
-        _ => {
-            append_value_lines(lines, &msg.content, "", 200);
-            if !msg.tool_calls.is_empty() {
-                lines.push(Line::raw(""));
-                for call in &msg.tool_calls {
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            format!("Tool: {}", call.name),
-                            Style::default()
-                                .fg(Color::Cyan)
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw(format!("  id={} ", call.id)),
-                    ]));
+    if msg.role == MessageRole::Tool { append_tool_message_lines(lines, msg, tool_details) } else {
+        append_value_lines(lines, &msg.content, "", 200);
+        if !msg.tool_calls.is_empty() {
+            lines.push(Line::raw(""));
+            for call in &msg.tool_calls {
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        format!("Tool: {}", call.name),
+                        Style::default()
+                            .fg(Color::Cyan)
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(format!("  id={} ", call.id)),
+                ]));
 
-                    if tool_details {
-                        let pretty = serde_json::from_str::<serde_json::Value>(&call.arguments)
-                            .ok()
-                            .and_then(|value| serde_json::to_string_pretty(&value).ok())
-                            .unwrap_or_else(|| call.arguments.clone());
-                        append_value_lines(lines, &serde_json::Value::String(pretty), "  ", 64);
-                    }
+                if tool_details {
+                    let pretty = serde_json::from_str::<serde_json::Value>(&call.arguments)
+                        .ok()
+                        .and_then(|value| serde_json::to_string_pretty(&value).ok())
+                        .unwrap_or_else(|| call.arguments.clone());
+                    append_value_lines(lines, &serde_json::Value::String(pretty), "  ", 64);
                 }
             }
         }
@@ -79,11 +76,11 @@ fn append_tool_message_lines(
         return;
     }
 
-    if !content_str.is_empty() {
+    if content_str.is_empty() {
         lines.push(Line::raw(format!("Tool: {name}  id={call_id}")));
-        append_value_lines(lines, &msg.content, "  ", 200);
     } else {
         lines.push(Line::raw(format!("Tool: {name}  id={call_id}")));
+        append_value_lines(lines, &msg.content, "  ", 200);
     }
 }
 
@@ -108,7 +105,7 @@ fn append_value_lines(
     match value {
         serde_json::Value::Null => {}
         serde_json::Value::String(text) => {
-            append_text_lines(lines, text.as_str(), prefix, max_lines)
+            append_text_lines(lines, text.as_str(), prefix, max_lines);
         }
         other => {
             let pretty = serde_json::to_string_pretty(other).unwrap_or_else(|_| other.to_string());

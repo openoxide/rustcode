@@ -1,4 +1,4 @@
-use super::*;
+use super::{AppState, ChatState, KeyEvent, ChatNav, KeyModifiers, KeyCode, ActivityItem, open_command_palette, push_toast, ToastVariant, Duration, CreateSessionOptions, composer_clear, build_prompt_history, ChatFocus, history_prev, history_next, build_transcript_lines, compute_find_matches, Modal, refresh_chat_messages, find_next, transcript_area_height, find_prev, composer_move_down, composer_move_up, composer_backspace, composer_delete, composer_move_left, composer_move_right, composer_move_home, composer_move_end, composer_insert_str, handle_slash_command, submit_prompt};
 
 pub(super) fn handle_chat_key(
     state: &mut AppState,
@@ -164,7 +164,7 @@ pub(super) fn handle_chat_key(
                 let matches = compute_find_matches(&transcript, &query);
                 state.modal = Some(Modal::Search {
                     query,
-                    current: chat.find.as_ref().map(|f| f.current).unwrap_or(0),
+                    current: chat.find.as_ref().map_or(0, |f| f.current),
                     matches,
                 });
                 return ChatNav::Stay;
@@ -173,11 +173,10 @@ pub(super) fn handle_chat_key(
         KeyCode::Char('?') => state.help_open = true,
         KeyCode::Char('t') => chat.tool_details = !chat.tool_details,
         KeyCode::Esc => {
-            if !chat.composer.is_empty() {
-                composer_clear(chat);
-            } else {
+            if chat.composer.is_empty() {
                 return ChatNav::ToSessions;
             }
+            composer_clear(chat);
         }
         KeyCode::Char('q') => return ChatNav::ToSessions,
         KeyCode::Char('r') => refresh_chat_messages(state, chat),

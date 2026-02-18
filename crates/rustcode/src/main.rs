@@ -171,7 +171,7 @@ async fn main() -> Result<()> {
     } = &cli.command
     {
         if !config.allow_network {
-            anyhow::bail!("run --attach requires allow_network (set RUSTCODE_ALLOW_NETWORK=1 or --allow-network)");
+            tracing::warn!("run --attach with network disabled; remote calls will fail");
         }
         if *fork || title.is_some() {
             anyhow::bail!("run --attach does not support local session flags like --fork/--title");

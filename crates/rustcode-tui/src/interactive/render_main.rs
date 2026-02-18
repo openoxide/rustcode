@@ -1,4 +1,4 @@
-use super::*;
+use super::{AppState, Screen, render_approval_modal, render_modal, render_help_modal, Layout, Direction, Constraint, ListItem, format_age, Line, Span, Style, Color, Modifier, List, Block, Borders, ToastVariant, Paragraph, ChatState, build_transcript_lines, apply_find_highlight, ChatFocus, Wrap, composer_cursor_visual, render_activity, render_activity_details_modal};
 
 pub(super) fn render(frame: &mut ratatui::Frame<'_>, state: &AppState) {
     match &state.screen {
@@ -51,7 +51,7 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
                     Span::raw(title.to_string()),
                     Span::raw("  "),
                     Span::styled(
-                        format!("{age}"),
+                        age.clone(),
                         Style::default().add_modifier(Modifier::DIM),
                     ),
                 ]))
@@ -99,7 +99,7 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
         Span::raw("r: refresh  "),
         Span::raw("q: quit"),
         Span::raw("  "),
-        Span::styled(toast.map(|(_, msg)| msg).unwrap_or(""), toast_style),
+        Span::styled(toast.map_or("", |(_, msg)| msg), toast_style),
         Span::raw("  "),
         Span::styled(
             format!(
@@ -295,7 +295,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         Span::raw("Esc: clear/back  "),
         Span::raw("q: sessions"),
         Span::raw("  "),
-        Span::styled(toast.map(|(_, msg)| msg).unwrap_or(""), toast_style),
+        Span::styled(toast.map_or("", |(_, msg)| msg), toast_style),
     ]))
     .block(Block::default().borders(Borders::TOP));
     frame.render_widget(help, left[2]);

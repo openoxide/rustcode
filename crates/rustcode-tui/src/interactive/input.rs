@@ -1,4 +1,4 @@
-use super::*;
+use super::{AppState, ChatState, KeyEvent, ChatNav, KeyModifiers, KeyCode, ActivityItem, open_command_palette, push_toast, ToastVariant, Duration, CreateSessionOptions, composer_clear, build_prompt_history, ChatFocus, history_prev, history_next, build_transcript_lines, compute_find_matches, Modal, refresh_chat_messages, find_next, transcript_area_height, find_prev, composer_move_down, composer_move_up, composer_backspace, composer_delete, composer_move_left, composer_move_right, composer_move_home, composer_move_end, composer_insert_str, handle_slash_command, submit_prompt, compute_sessions_view, Screen, sort_sessions, compute_palette_view, maybe_execute_palette_query, execute_command, set_find};
 
 mod input_chat;
 mod input_sessions;
@@ -244,9 +244,7 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
                 }
             }
             KeyCode::Left => {
-                if cursor > 0 {
-                    cursor -= 1;
-                }
+                cursor = cursor.saturating_sub(1);
                 state.modal = Some(Modal::Rename {
                     session_id,
                     input,

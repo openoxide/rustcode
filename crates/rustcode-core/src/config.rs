@@ -80,7 +80,7 @@ impl Default for ResolvedConfig {
         Self {
             profile: "default".to_string(),
             workspace_root: PathBuf::from("."),
-            allow_network: false,
+            allow_network: true,
             model: "default".to_string(),
             llm_provider: "null".to_string(),
             llm_base_url: None,

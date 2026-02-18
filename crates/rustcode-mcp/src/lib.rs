@@ -139,7 +139,7 @@ impl McpHttpSession {
             cursor = result
                 .get("nextCursor")
                 .and_then(Value::as_str)
-                .map(|value| value.to_string());
+                .map(std::string::ToString::to_string);
             if cursor.is_none() {
                 break;
             }
@@ -180,7 +180,7 @@ impl McpHttpSession {
             cursor = result
                 .get("nextCursor")
                 .and_then(Value::as_str)
-                .map(|value| value.to_string());
+                .map(std::string::ToString::to_string);
             if cursor.is_none() {
                 break;
             }
@@ -248,8 +248,7 @@ impl McpHttpSession {
         let (response, _headers) = self.post_jsonrpc(&request, true).await?;
         match response.get("error") {
             Some(err) => Err(McpError::Protocol(format!(
-                "jsonrpc error: {}",
-                err.to_string()
+                "jsonrpc error: {err}"
             ))),
             None => response
                 .get("result")
@@ -283,8 +282,7 @@ impl McpHttpSession {
             return Ok(());
         }
         Err(McpError::Http(format!(
-            "notification rejected with status={}",
-            status
+            "notification rejected with status={status}"
         )))
     }
 

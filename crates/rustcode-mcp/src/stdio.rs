@@ -1,4 +1,4 @@
-use super::*;
+use super::{McpStdioSession, BTreeMap, McpError, Command, Stdio, AsyncReadExt, Mutex, BufReader, DEFAULT_PROTOCOL_VERSION, AtomicU64, McpTool, Value, McpResource, Ordering, STDIO_RESPONSE_TIMEOUT, is_matching_id, AsyncWriteExt, read_jsonrpc_frame};
 
 impl McpStdioSession {
     pub async fn connect(
@@ -77,7 +77,7 @@ impl McpStdioSession {
             cursor = result
                 .get("nextCursor")
                 .and_then(Value::as_str)
-                .map(|value| value.to_string());
+                .map(std::string::ToString::to_string);
             if cursor.is_none() {
                 break;
             }
@@ -116,7 +116,7 @@ impl McpStdioSession {
             cursor = result
                 .get("nextCursor")
                 .and_then(Value::as_str)
-                .map(|value| value.to_string());
+                .map(std::string::ToString::to_string);
             if cursor.is_none() {
                 break;
             }
@@ -175,7 +175,7 @@ impl McpStdioSession {
 
         let response = self.send_request_expect_response(id, &request).await?;
         match response.get("error") {
-            Some(err) => Err(McpError::Protocol(format!("jsonrpc error: {}", err))),
+            Some(err) => Err(McpError::Protocol(format!("jsonrpc error: {err}"))),
             None => response
                 .get("result")
                 .cloned()

@@ -1,4 +1,4 @@
-use super::*;
+use super::{Duration, Engine, CommandContext, ExecutionError, StreamExt, CONTENT_TYPE, Regex};
 
 const WEBFETCH_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const WEBFETCH_DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -32,8 +32,7 @@ impl Engine {
         }
 
         let timeout = timeout_secs
-            .map(Duration::from_secs)
-            .unwrap_or(WEBFETCH_DEFAULT_TIMEOUT)
+            .map_or(WEBFETCH_DEFAULT_TIMEOUT, Duration::from_secs)
             .clamp(Duration::from_secs(1), WEBFETCH_MAX_TIMEOUT);
 
         let client = reqwest::Client::builder()
@@ -47,7 +46,7 @@ impl Engine {
             })?;
 
         let response = tokio::select! {
-            _ = context.cancellation.cancelled() => {
+            () = context.cancellation.cancelled() => {
                 return Err(ExecutionError::Cancelled);
             }
             result = client.get(parsed.clone()).send() => {
@@ -71,7 +70,7 @@ impl Engine {
         let mut body: Vec<u8> = Vec::new();
         let mut body_truncated = false;
         while let Some(chunk) = tokio::select! {
-            _ = context.cancellation.cancelled() => {
+            () = context.cancellation.cancelled() => {
                 return Err(ExecutionError::Cancelled);
             }
             next = stream.next() => next

@@ -1,4 +1,4 @@
-use super::*;
+use super::{AppState, CommandId, Screen, push_toast, ToastVariant, Duration, CreateSessionOptions, sort_sessions, compute_sessions_view, build_prompt_history, ChatState, ChatFocus, composer_clear, Modal, build_transcript_lines, compute_find_matches, ChatNav};
 
 pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
     match id {
@@ -253,7 +253,7 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                 .unwrap_or_default();
             let transcript = build_transcript_lines(&chat);
             let matches = compute_find_matches(&transcript, &query);
-            let current = chat.find.as_ref().map(|f| f.current).unwrap_or(0);
+            let current = chat.find.as_ref().map_or(0, |f| f.current);
             state.screen = Screen::Chat(chat);
             state.modal = Some(Modal::Search {
                 query,

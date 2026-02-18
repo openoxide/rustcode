@@ -1,4 +1,4 @@
-use super::*;
+use super::{AppState, ToastVariant, Duration, Toast, SystemTime, SessionInfo};
 
 pub(super) fn push_toast(
     state: &mut AppState,
@@ -61,16 +61,16 @@ pub(super) fn format_age(updated_at_unix_ms: i64) -> String {
         return "now".to_string();
     }
     if secs < 60 {
-        return format!("{}s", secs);
+        return format!("{secs}s");
     }
     let mins = secs / 60;
     if mins < 60 {
-        return format!("{}m", mins);
+        return format!("{mins}m");
     }
     let hours = mins / 60;
     if hours < 24 {
-        return format!("{}h", hours);
+        return format!("{hours}h");
     }
     let days = hours / 24;
-    format!("{}d", days)
+    format!("{days}d")
 }

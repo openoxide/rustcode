@@ -1,4 +1,4 @@
-use super::*;
+use super::{Engine, CommandContext, Arc, EventPublisher, ExecutionError, TcpListener, EventScope, EventPayload, TcpStream, serve_http};
 
 impl Engine {
     pub(crate) async fn run_serve(
@@ -26,7 +26,7 @@ impl Engine {
 
         loop {
             tokio::select! {
-                _ = context.cancellation.cancelled() => {
+                () = context.cancellation.cancelled() => {
                     return Err(ExecutionError::Cancelled);
                 }
                 incoming = listener.accept() => {

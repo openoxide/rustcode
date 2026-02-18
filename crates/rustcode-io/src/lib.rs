@@ -217,7 +217,7 @@ impl FileSystemPort for LocalIo {
             }
 
             // Deterministic traversal: sort by full path and always enqueue subdirs after.
-            paths.sort_by(|a, b| a.path().cmp(&b.path()));
+            paths.sort_by_key(tokio::fs::DirEntry::path);
             for entry in paths {
                 let entry_path = entry.path();
                 out.push(entry_path.clone());

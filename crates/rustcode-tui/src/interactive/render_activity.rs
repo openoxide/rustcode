@@ -1,4 +1,4 @@
-use super::*;
+use super::{Rect, ChatState, ChatFocus, Style, Color, SystemTime, Duration, List, ListItem, Block, Borders, ActivityItem, Modifier, Line, Span, centered_rect, Clear, Paragraph, Wrap, PendingApproval};
 
 pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: &ChatState) {
     let border = if chat.focus == ChatFocus::Activity {

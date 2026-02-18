@@ -1,4 +1,4 @@
-use super::*;
+use super::{Path, PathBuf, env, Component};
 
 pub(crate) fn absolute_normalized(path: &Path) -> Result<PathBuf, std::io::Error> {
     let absolute = if path.is_absolute() {

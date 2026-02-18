@@ -1,4 +1,4 @@
-use super::*;
+use super::{AppState, KeyEvent, KeyCode, compute_sessions_view, push_toast, ToastVariant, Duration, build_prompt_history, Screen, ChatState, ChatFocus, KeyModifiers, open_command_palette, Modal, sort_sessions, CreateSessionOptions};
 
 pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
     if state.sessions_filter_active {
@@ -84,7 +84,7 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
     match key.code {
         KeyCode::Char('?') => state.help_open = true,
         KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-            open_command_palette(state)
+            open_command_palette(state);
         }
         KeyCode::Char('q') | KeyCode::Esc => return true,
         KeyCode::Char('e') => {

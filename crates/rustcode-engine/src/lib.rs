@@ -15,7 +15,7 @@ use futures_util::StreamExt;
 use globset::Glob;
 use regex::Regex;
 use reqwest::header::CONTENT_TYPE;
-use serde_json::{json, Value};
+use serde_json::Value;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
@@ -45,10 +45,17 @@ use rustcode_llm::{
 use rustcode_plugins::PluginRegistry;
 use rustcode_state::SessionStore;
 
+mod agent_handlers_bash;
 mod agent_handlers_fs;
+mod agent_handlers_interactive;
+mod agent_handlers_multiedit;
+mod agent_handlers_patch;
+mod agent_handlers_search;
 mod agent_handlers_web;
 mod agent_runtime;
 mod agent_tools;
+mod agent_tool_specs;
+mod agent_util;
 mod engine_commands;
 mod path_utils;
 mod serve_api;
@@ -62,6 +69,7 @@ pub struct ChannelPublisher {
 }
 
 impl ChannelPublisher {
+    #[must_use] 
     pub fn new(sender: mpsc::Sender<Event>) -> Self {
         Self { sender }
     }

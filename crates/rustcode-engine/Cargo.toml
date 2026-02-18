@@ -22,6 +22,7 @@ serde_json.workspace = true
 serde.workspace = true
 globset.workspace = true
 regex.workspace = true
+urlencoding = "2"
 
 [lints]
 workspace = true

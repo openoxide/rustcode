@@ -1,4 +1,4 @@
-use super::*;
+use super::{async_trait, debug, env, Engine, CommandContext, Arc, EventPublisher, ExecutionError, ProcessPort, IoError, ProcessOutput, EventScope, EventPayload, StoredMessage, MessageRole, StreamExt, SystemTime, UNIX_EPOCH, Value, LlmClient, LlmRequest, PathOperation, FileSystemPort, path_utils, AsyncReadExt, PathBuf, PermissionPolicy, CommandExecutor, Command};
 
 impl Engine {
     async fn run_exec(
@@ -56,7 +56,7 @@ impl Engine {
         .await?;
 
         let response = tokio::select! {
-            _ = context.cancellation.cancelled() => {
+            () = context.cancellation.cancelled() => {
                 return Err(ExecutionError::Cancelled);
             }
             result = self.llm.complete(LlmRequest {
@@ -232,7 +232,7 @@ impl Engine {
             .await
             .map_err(|err| ExecutionError::Executor(err.to_string()))?;
 
-        let changed = if original == updated { 0 } else { 1 };
+        let changed = i32::from(original != updated);
         self.emit(
             publisher,
             EventScope::Tool,

@@ -300,8 +300,7 @@ fn anthropic_tool_result_from_value(value: &Value) -> (String, bool) {
         Ok(parsed) => parsed
             .get("ok")
             .and_then(Value::as_bool)
-            .map(|ok| !ok)
-            .unwrap_or(false),
+            .is_some_and(|ok| !ok),
         Err(_) => false,
     };
 

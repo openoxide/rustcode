@@ -1,4 +1,4 @@
-use super::*;
+use super::{execute, InteractiveServices, TuiError, io, enable_raw_mode, EnterAlternateScreen, CrosstermBackend, Terminal, sort_sessions, compute_sessions_view, Screen, InteractiveStart, build_prompt_history, ChatState, ChatFocus, AppState, drain_toasts, render, event, Duration, CEvent, KeyEventKind, handle_key, composer_insert_str, InteractiveMsg, EventPayload, ActivityItem, push_toast, ToastVariant, PendingApproval, InteractiveSubmitMode, CancellationToken, RunningCommand, Arc, EventPublisher, TuiPublisher, CommandContext, SessionMeta, SystemTime, AgentOptions, Command, ExecutableCommand, disable_raw_mode, LeaveAlternateScreen};
 
 pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
     let InteractiveServices {
@@ -341,10 +341,9 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
 
     let trimmed = prompt.trim();
     if !trimmed.is_empty()
-        && !chat
+        && chat
             .prompt_history
-            .last()
-            .is_some_and(|last| last.as_str() == trimmed)
+            .last().is_none_or(|last| last.as_str() != trimmed)
     {
         chat.prompt_history.push(trimmed.to_string());
         while chat.prompt_history.len() > 200 {

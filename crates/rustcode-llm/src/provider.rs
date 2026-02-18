@@ -98,7 +98,7 @@ pub fn diagnose_provider(
     config: &ResolvedConfig,
     provider_id: Option<&str>,
 ) -> Result<ProviderDiagnostics, LlmError> {
-    let policy_selected_provider = select_provider_by_policy(config).map(|value| value.to_string());
+    let policy_selected_provider = select_provider_by_policy(config).map(std::string::ToString::to_string);
     let policy_eval_for_input =
         provider_id.and_then(|value| evaluate_backend_policy(config, value));
 
@@ -144,6 +144,7 @@ pub fn diagnose_provider(
     })
 }
 
+#[must_use] 
 pub fn builtin_provider_ids() -> &'static [&'static str] {
     &[
         "null",
@@ -256,9 +257,10 @@ fn resolve_provider_base_url_from_env(
     }
 }
 
+#[must_use] 
 pub fn derive_copilot_enterprise_base_url(domain: &str) -> String {
     if domain.is_empty() {
-        return "".to_string();
+        return String::new();
     }
 
     if domain.contains("://") {

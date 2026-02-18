@@ -1,10 +1,13 @@
 use serde_json::Value;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use rustcode_core::command::AgentOptions;
 use rustcode_core::context::CommandContext;
 use rustcode_core::error::ExecutionError;
 use rustcode_llm::ToolSpec;
 
+use crate::agent_handlers_multiedit::MultiEditOp;
 use crate::{AgentState, Engine};
 
 pub struct AgentToolRegistry;
@@ -67,171 +70,22 @@ fn opt_str_list(args: &Value, key: &str) -> Result<Vec<String>, ExecutionError> 
 
 impl AgentToolRegistry {
     pub fn tool_specs(options: &AgentOptions, allow_network: bool) -> Vec<ToolSpec> {
-        let mut specs = vec![
-            ToolSpec {
-                name: "list".to_string(),
-                description: "List files and directories under a workspace-relative path."
-                    .to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "Workspace-relative path (default: .)" }
-                    },
-                    "additionalProperties": false
-                }),
-            },
-            ToolSpec {
-                name: "read".to_string(),
-                description: "Read a UTF-8 text file from the workspace.".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "Workspace-relative file path" }
-                    },
-                    "required": ["path"],
-                    "additionalProperties": false
-                }),
-            },
-            ToolSpec {
-                name: "glob".to_string(),
-                description: "Find workspace files matching a glob pattern.".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "pattern": { "type": "string", "description": "Glob pattern (e.g. **/*.rs)" },
-                        "path": { "type": "string", "description": "Workspace-relative search root (default: .)" }
-                    },
-                    "required": ["pattern"],
-                    "additionalProperties": false
-                }),
-            },
-            ToolSpec {
-                name: "grep".to_string(),
-                description: "Search file contents using a regular expression.".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "pattern": { "type": "string", "description": "Regex pattern" },
-                        "path": { "type": "string", "description": "Workspace-relative search root (default: .)" },
-                        "include": { "type": "string", "description": "Optional glob filter for file paths" }
-                    },
-                    "required": ["pattern"],
-                    "additionalProperties": false
-                }),
-            },
-            ToolSpec {
-                name: "todowrite".to_string(),
-                description: "Update the agent's working todo list.".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "todos": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "content": { "type": "string" },
-                                    "status": { "type": "string", "description": "pending|in_progress|completed|cancelled" },
-                                    "priority": { "type": "string", "description": "high|medium|low" }
-                                },
-                                "required": ["content", "status", "priority"],
-                                "additionalProperties": false
-                            }
-                        }
-                    },
-                    "required": ["todos"],
-                    "additionalProperties": false
-                }),
-            },
-        ];
-
-        if allow_network {
-            specs.push(ToolSpec {
-                name: "webfetch".to_string(),
-                description:
-                    "Fetch a URL over HTTP(S) and return its contents (optionally simplified)."
-                        .to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "url": { "type": "string", "description": "HTTP(S) URL to fetch" },
-                        "format": { "type": "string", "description": "Output format: markdown|text|html (default: markdown)" },
-                        "timeout_secs": { "type": "integer", "description": "Request timeout in seconds (default: 30, max: 120)" }
-                    },
-                    "required": ["url"],
-                    "additionalProperties": false
-                }),
-            });
-        }
-
-        if options.allow_write || options.allow_edit {
-            specs.push(ToolSpec {
-                name: "write".to_string(),
-                description: "Write a UTF-8 text file to the workspace.".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "Workspace-relative file path" },
-                        "contents": { "type": "string", "description": "Full file contents" }
-                    },
-                    "required": ["path", "contents"],
-                    "additionalProperties": false
-                }),
-            });
-        }
-
-        if options.allow_edit {
-            specs.push(ToolSpec {
-                name: "edit".to_string(),
-                description: "Replace a substring in a workspace file.".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "path": { "type": "string", "description": "Workspace-relative file path" },
-                        "from": { "type": "string", "description": "Exact text to replace" },
-                        "to": { "type": "string", "description": "Replacement text" }
-                    },
-                    "required": ["path", "from", "to"],
-                    "additionalProperties": false
-                }),
-            });
-        }
-
-        if options.allow_exec {
-            specs.push(ToolSpec {
-                name: "exec".to_string(),
-                description: "Execute a command in the workspace.".to_string(),
-                parameters: serde_json::json!({
-                    "type": "object",
-                    "properties": {
-                        "command": { "type": "string", "description": "Program name" },
-                        "args": {
-                            "type": "array",
-                            "items": { "type": "string" },
-                            "description": "Command arguments"
-                        }
-                    },
-                    "required": ["command"],
-                    "additionalProperties": false
-                }),
-            });
-        }
-
-        specs
+        super::agent_tool_specs::tool_specs(options, allow_network)
     }
 
-    pub async fn execute(
-        engine: &Engine,
-        name: &str,
+    pub fn execute<'a>(
+        engine: &'a Engine,
+        name: &'a str,
         args: Value,
-        context: &CommandContext,
-        options: &AgentOptions,
-        state: &mut AgentState,
-    ) -> Result<String, ExecutionError> {
+        context: &'a CommandContext,
+        options: &'a AgentOptions,
+        state: &'a mut AgentState,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, ExecutionError>> + Send + 'a>> {
+        Box::pin(async move {
         match name {
             "list" => {
                 ensure_allowed_keys(&args, &["path"])?;
-                let path = opt_str(&args, "path")?.map(|value| value.to_string());
+                let path = opt_str(&args, "path")?.map(std::string::ToString::to_string);
                 engine.agent_tool_list(path, context, options).await
             }
             "read" => {
@@ -315,6 +169,182 @@ impl AgentToolRegistry {
                 engine
                     .agent_tool_grep(pattern, root, include, context, options)
                     .await
+            }
+            "bash" => {
+                ensure_allowed_keys(&args, &["command", "timeout_secs"])?;
+                let command = opt_str(&args, "command")?.ok_or_else(|| {
+                    ExecutionError::Dispatch("bash tool requires command".to_string())
+                })?;
+                let timeout_secs = opt_u64(&args, "timeout_secs")?;
+                engine
+                    .agent_tool_bash(command, timeout_secs, context)
+                    .await
+            }
+            "apply_patch" => {
+                ensure_allowed_keys(&args, &["patch_text"])?;
+                if !options.allow_write && !options.allow_edit {
+                    return Err(ExecutionError::Dispatch(
+                        "apply_patch requires --allow-write or --allow-edit".to_string(),
+                    ));
+                }
+                let patch_text = opt_str(&args, "patch_text")?.ok_or_else(|| {
+                    ExecutionError::Dispatch("apply_patch requires patch_text".to_string())
+                })?;
+                engine
+                    .agent_tool_apply_patch(patch_text, context, options, state)
+                    .await
+            }
+            "multiedit" => {
+                ensure_allowed_keys(&args, &["path", "edits"])?;
+                if !options.allow_edit && !options.allow_write {
+                    return Err(ExecutionError::Dispatch(
+                        "multiedit requires --allow-edit or --allow-write".to_string(),
+                    ));
+                }
+                let path = opt_str(&args, "path")?.ok_or_else(|| {
+                    ExecutionError::Dispatch("multiedit requires path".to_string())
+                })?;
+                let edits_arr = args.get("edits")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| ExecutionError::Dispatch("multiedit requires edits array".to_string()))?;
+                let mut edits = Vec::with_capacity(edits_arr.len());
+                for (idx, edit) in edits_arr.iter().enumerate() {
+                    let old = edit.get("old_string").and_then(Value::as_str)
+                        .ok_or_else(|| ExecutionError::Dispatch(format!("edits[{idx}].old_string required")))?
+                        .to_string();
+                    let new = edit.get("new_string").and_then(Value::as_str)
+                        .ok_or_else(|| ExecutionError::Dispatch(format!("edits[{idx}].new_string required")))?
+                        .to_string();
+                    let replace_all = edit.get("replace_all").and_then(Value::as_bool).unwrap_or(false);
+                    edits.push(MultiEditOp { old_string: old, new_string: new, replace_all });
+                }
+                engine
+                    .agent_tool_multiedit(path, &edits, context, options, state)
+                    .await
+            }
+            "batch" => {
+                ensure_allowed_keys(&args, &["tool_calls"])?;
+                let calls = args.get("tool_calls")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| ExecutionError::Dispatch("batch requires tool_calls array".to_string()))?;
+                if calls.is_empty() {
+                    return Err(ExecutionError::Dispatch("batch requires at least one tool call".to_string()));
+                }
+                let calls: Vec<_> = calls.iter().take(25).cloned().collect();
+                let discarded = args.get("tool_calls")
+                    .and_then(Value::as_array)
+                    .map_or(0, |a| a.len().saturating_sub(25));
+
+                let state_mutex = Arc::new(Mutex::new(std::mem::take(state)));
+                let mut handles = Vec::with_capacity(calls.len());
+
+                for call in &calls {
+                    let tool_name = call.get("tool").and_then(Value::as_str).unwrap_or("").to_string();
+                    let tool_params = call.get("parameters").cloned().unwrap_or(Value::Object(Default::default()));
+
+                    if tool_name == "batch" {
+                        handles.push(Err(ExecutionError::Dispatch(
+                            "batch cannot be called recursively".to_string(),
+                        )));
+                        continue;
+                    }
+
+                    let engine_ref = engine;
+                    let context_ref = context;
+                    let options_ref = options;
+                    let state_ref = state_mutex.clone();
+
+                    handles.push(Ok((tool_name, tool_params, engine_ref, context_ref, options_ref, state_ref)));
+                }
+
+                // Execute sequentially (parallel would require Send bounds we don't have)
+                let mut results = Vec::new();
+                for handle in handles {
+                    match handle {
+                        Err(e) => results.push(format!("error: {e}")),
+                        Ok((tool_name, tool_params, eng, ctx, opts, st)) => {
+                            let mut locked_state = st.lock().await;
+                            let result = Self::execute(eng, &tool_name, tool_params, ctx, opts, &mut locked_state).await;
+                            match result {
+                                Ok(output) => results.push(format!("{tool_name}: ok\n{output}")),
+                                Err(e) => results.push(format!("{tool_name}: error\n{e}")),
+                            }
+                        }
+                    }
+                }
+
+                // Restore state
+                *state = Arc::try_unwrap(state_mutex)
+                    .map_err(|_| ExecutionError::Executor("state lock contention".to_string()))?
+                    .into_inner();
+
+                let successful = results.iter().filter(|r| r.contains(": ok")).count();
+                let failed = results.len() - successful;
+                let mut output = format!("batch: {successful}/{} successful", results.len());
+                if discarded > 0 {
+                    output.push_str(&format!(" ({discarded} calls discarded, max 25)"));
+                }
+                if failed > 0 {
+                    output.push_str(&format!(" ({failed} failed)"));
+                }
+                output.push_str("\n\n");
+                for r in &results {
+                    output.push_str(r);
+                    output.push_str("\n---\n");
+                }
+                Ok(output)
+            }
+            "question" => {
+                ensure_allowed_keys(&args, &["questions"])?;
+                let questions_arr = args.get("questions")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| ExecutionError::Dispatch("question requires questions array".to_string()))?;
+                let mut questions = Vec::with_capacity(questions_arr.len());
+                for q in questions_arr {
+                    let question = q.get("question").and_then(Value::as_str)
+                        .ok_or_else(|| ExecutionError::Dispatch("each question requires a 'question' field".to_string()))?
+                        .to_string();
+                    let options = q.get("options")
+                        .and_then(Value::as_array)
+                        .map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect())
+                        .unwrap_or_default();
+                    let default = q.get("default").and_then(Value::as_str).map(String::from);
+                    questions.push(crate::agent_handlers_interactive::QuestionItem { question, options, default });
+                }
+                engine.agent_tool_question(&questions).await
+            }
+            "plan" => {
+                ensure_allowed_keys(&args, &["title", "steps"])?;
+                let title = opt_str(&args, "title")?.ok_or_else(|| {
+                    ExecutionError::Dispatch("plan requires title".to_string())
+                })?;
+                let steps_arr = args.get("steps")
+                    .and_then(Value::as_array)
+                    .ok_or_else(|| ExecutionError::Dispatch("plan requires steps array".to_string()))?;
+                let mut steps = Vec::with_capacity(steps_arr.len());
+                for s in steps_arr {
+                    let description = s.get("description").and_then(Value::as_str)
+                        .ok_or_else(|| ExecutionError::Dispatch("each step requires 'description'".to_string()))?
+                        .to_string();
+                    let status = s.get("status").and_then(Value::as_str)
+                        .unwrap_or("pending")
+                        .to_string();
+                    steps.push(crate::agent_handlers_interactive::PlanStep { description, status });
+                }
+                engine.agent_tool_plan(title, &steps).await
+            }
+            "websearch" => {
+                ensure_allowed_keys(&args, &["query", "num_results"])?;
+                if !context.config.allow_network {
+                    return Err(ExecutionError::Dispatch(
+                        "websearch requires network access".to_string(),
+                    ));
+                }
+                let query = opt_str(&args, "query")?.ok_or_else(|| {
+                    ExecutionError::Dispatch("websearch requires query".to_string())
+                })?;
+                let num_results = opt_u64(&args, "num_results")?;
+                engine.agent_tool_websearch(query, num_results, context).await
             }
             "webfetch" => {
                 ensure_allowed_keys(&args, &["url", "format", "timeout_secs"])?;
@@ -416,5 +446,6 @@ impl AgentToolRegistry {
                 "unknown tool call: {name}"
             ))),
         }
+        }) // Box::pin
     }
 }

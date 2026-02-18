@@ -86,7 +86,7 @@ fn list_does_not_require_llm_provider_even_when_allow_network_true() {
 fn json_stream_includes_schema_version_and_completion_event() {
     let sessions_dir = make_temp_dir_path("sessions-json-stream");
     let output = Command::new(rustcode_bin())
-        .args(["--json", "run", "integration-stream"])
+        .args(["--deny-network", "--json", "run", "integration-stream"])
         .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
         .output()
         .expect("must run rustcode binary");
@@ -119,7 +119,7 @@ fn json_stream_includes_schema_version_and_completion_event() {
 fn human_run_output_is_plain_text_by_default() {
     let sessions_dir = make_temp_dir_path("sessions-human-run");
     let output = Command::new(rustcode_bin())
-        .args(["run", "integration-human"])
+        .args(["--deny-network", "run", "integration-human"])
         .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
         .output()
         .expect("must run rustcode binary");
@@ -209,7 +209,7 @@ fn run_attach_streams_output_chunks_from_server() {
 fn human_run_output_uses_event_envelope_with_event_debug() {
     let sessions_dir = make_temp_dir_path("sessions-human-run-debug");
     let output = Command::new(rustcode_bin())
-        .args(["--event-debug", "run", "integration-human-debug"])
+        .args(["--deny-network", "--event-debug", "run", "integration-human-debug"])
         .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
         .output()
         .expect("must run rustcode binary");
