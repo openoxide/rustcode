@@ -133,6 +133,10 @@ RUSTCODE_ALLOW_NETWORK=1 rustcode --llm-provider github-copilot-enterprise --llm
 # Option B: env-derived base URL
 export GITHUB_COPILOT_ENTERPRISE_DOMAIN=github.example.com
 RUSTCODE_ALLOW_NETWORK=1 rustcode --llm-provider github-copilot-enterprise --model github-copilot/gpt-4o run "hello"
+
+# Option C: store domain during login (recommended)
+rustcode auth login github-copilot-enterprise --method oauth_device_code --domain github.example.com
+RUSTCODE_ALLOW_NETWORK=1 rustcode --llm-provider github-copilot-enterprise --model github-copilot/gpt-4o run "hello"
 ```
 
 Ollama local example:

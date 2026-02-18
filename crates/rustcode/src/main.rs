@@ -667,7 +667,22 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                     let timeout = Duration::from_secs(timeout_secs.max(1));
                     let credential = poll_device_code_flow_for_credential(&flow, timeout).await?;
                     let credential_kind = login_credential_kind(&credential);
-                    persist_oauth_or_api_key(&store, &provider, credential)?;
+                    let copilot_enterprise_domain_for_store = if provider
+                        == "github-copilot-enterprise"
+                        && domain
+                            .as_deref()
+                            .is_some_and(|value| !value.trim().is_empty())
+                    {
+                        Some(flow.domain.as_str())
+                    } else {
+                        None
+                    };
+                    persist_oauth_or_api_key(
+                        &store,
+                        &provider,
+                        credential,
+                        copilot_enterprise_domain_for_store,
+                    )?;
                     if json_output {
                         let payload = serde_json::json!({
                             "schema_version": 1,
@@ -817,7 +832,7 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                         complete_browser_oauth_flow(&flow, timeout, client_secret.as_deref())
                             .await?;
                     let credential_kind = login_credential_kind(&credential);
-                    persist_oauth_or_api_key(&store, &provider, credential)?;
+                    persist_oauth_or_api_key(&store, &provider, credential, None)?;
                     if json_output {
                         let payload = serde_json::json!({
                             "schema_version": 1,
@@ -2242,6 +2257,7 @@ fn persist_oauth_or_api_key(
     store: &AuthStore,
     provider: &str,
     credential: rustcode_auth::DeviceCodeFlowCredential,
+    domain: Option<&str>,
 ) -> Result<()> {
     if credential.refresh_token.is_some() || credential.expires_in_secs.is_some() {
         let expires_at_unix = credential.expires_in_secs.map(|secs| {
@@ -2258,7 +2274,11 @@ fn persist_oauth_or_api_key(
             credential.account_id.as_deref(),
         )?;
     } else {
-        store.set_api_key(provider, &credential.access_token)?;
+        if provider == "github-copilot-enterprise" {
+            store.set_api_key_with_domain(provider, &credential.access_token, domain)?;
+        } else {
+            store.set_api_key(provider, &credential.access_token)?;
+        }
     }
     Ok(())
 }

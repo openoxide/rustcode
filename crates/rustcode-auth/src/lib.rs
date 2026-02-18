@@ -49,12 +49,16 @@ fn auth_http_client() -> Result<reqwest::Client, AuthError> {
 pub enum StoredCredential {
     ApiKey {
         key: String,
+        #[serde(default)]
+        domain: Option<String>,
     },
     OAuth {
         access_token: String,
         refresh_token: Option<String>,
         expires_at_unix: Option<i64>,
         account_id: Option<String>,
+        #[serde(default)]
+        domain: Option<String>,
     },
 }
 
@@ -95,12 +99,21 @@ impl AuthStore {
             return Ok(None);
         };
         match credential {
-            StoredCredential::ApiKey { key } => Ok(Some(key)),
+            StoredCredential::ApiKey { key, .. } => Ok(Some(key)),
             StoredCredential::OAuth { .. } => Ok(None),
         }
     }
 
     pub fn set_api_key(&self, provider: &str, key: &str) -> Result<(), AuthError> {
+        self.set_api_key_with_domain(provider, key, None)
+    }
+
+    pub fn set_api_key_with_domain(
+        &self,
+        provider: &str,
+        key: &str,
+        domain: Option<&str>,
+    ) -> Result<(), AuthError> {
         validate_provider(provider)?;
         if key.trim().is_empty() {
             return Err(AuthError::Validation(
@@ -113,6 +126,9 @@ impl AuthStore {
             provider.to_string(),
             StoredCredential::ApiKey {
                 key: key.to_string(),
+                domain: domain
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty()),
             },
         );
         self.write_file(&auth)
@@ -141,6 +157,7 @@ impl AuthStore {
                 refresh_token: refresh_token.map(ToOwned::to_owned),
                 expires_at_unix,
                 account_id: account_id.map(ToOwned::to_owned),
+                domain: None,
             },
         );
         self.write_file(&auth)
@@ -1485,13 +1502,40 @@ mod tests {
                 refresh_token,
                 expires_at_unix,
                 account_id,
+                domain,
             }) => {
                 assert_eq!(access_token, "access-token");
                 assert_eq!(refresh_token.as_deref(), Some("refresh-token"));
                 assert_eq!(expires_at_unix, Some(1234));
                 assert_eq!(account_id.as_deref(), Some("account-1"));
+                assert!(domain.is_none());
             }
             _ => panic!("expected oauth credential"),
+        }
+    }
+
+    #[test]
+    fn api_key_can_store_domain_metadata() {
+        let path = make_temp_file_path("auth-api-key-domain");
+        let store = AuthStore::with_path(path);
+
+        store
+            .set_api_key_with_domain(
+                "github-copilot-enterprise",
+                "enterprise-token",
+                Some("github.example.com"),
+            )
+            .expect("set key should succeed");
+
+        let value = store
+            .get("github-copilot-enterprise")
+            .expect("get should succeed");
+        match value {
+            Some(StoredCredential::ApiKey { key, domain }) => {
+                assert_eq!(key, "enterprise-token");
+                assert_eq!(domain.as_deref(), Some("github.example.com"));
+            }
+            _ => panic!("expected api key credential"),
         }
     }
 

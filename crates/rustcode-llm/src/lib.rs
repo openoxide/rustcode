@@ -470,6 +470,17 @@ fn resolve_provider_base_url_from_env(
             {
                 return Some(derive_copilot_enterprise_base_url(domain.trim()));
             }
+
+            let store = AuthStore::open_default();
+            if let Some(credential) = store.get(provider_id).ok().flatten() {
+                let domain = match credential {
+                    StoredCredential::ApiKey { domain, .. } => domain,
+                    StoredCredential::OAuth { domain, .. } => domain,
+                };
+                if let Some(domain) = domain.as_deref().filter(|value| !value.trim().is_empty()) {
+                    return Some(derive_copilot_enterprise_base_url(domain));
+                }
+            }
             None
         }
         _ => None,
@@ -513,7 +524,7 @@ fn resolve_api_key(
     let store = AuthStore::open_default();
     if let Some(credential) = store.get(provider_id).ok().flatten() {
         match credential {
-            StoredCredential::ApiKey { key } => {
+            StoredCredential::ApiKey { key, .. } => {
                 if !key.trim().is_empty() {
                     return (Some(key), ApiKeySource::AuthStore);
                 }
@@ -2963,6 +2974,47 @@ mod tests {
             derive_copilot_enterprise_base_url("https://copilot-api.github.example.com/"),
             "https://copilot-api.github.example.com"
         );
+    }
+
+    #[test]
+    fn github_copilot_enterprise_base_url_can_be_derived_from_auth_store_domain() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+
+        let auth_path = make_temp_file_path("copilot-enterprise-auth-domain");
+        std::fs::write(
+            &auth_path,
+            r#"{
+  "providers": {
+    "github-copilot-enterprise": {
+      "type": "api_key",
+      "key": "enterprise-token",
+      "domain": "github.example.com"
+    }
+  }
+}"#,
+        )
+        .expect("must write auth fixture");
+
+        std::env::set_var("RUSTCODE_AUTH_FILE", auth_path.as_os_str());
+        std::env::remove_var("GITHUB_COPILOT_ENTERPRISE_DOMAIN");
+        std::env::remove_var("GITHUB_COPILOT_ENTERPRISE_BASE_URL");
+        std::env::remove_var("GITHUB_COPILOT_TOKEN");
+
+        let cfg = ResolvedConfig {
+            allow_network: true,
+            llm_provider: "github-copilot-enterprise".to_string(),
+            ..ResolvedConfig::default()
+        };
+
+        let diag = diagnose_provider(&cfg, Some("github-copilot-enterprise"))
+            .expect("diagnostic should resolve");
+        assert_eq!(
+            diag.base_url.as_deref(),
+            Some("https://copilot-api.github.example.com")
+        );
+
+        std::env::remove_var("RUSTCODE_AUTH_FILE");
+        let _ = std::fs::remove_file(&auth_path);
     }
 
     fn make_temp_file_path(name: &str) -> PathBuf {

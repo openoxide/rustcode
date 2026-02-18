@@ -385,7 +385,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Status: completed
 - Deliverables:
   - Updated `rustcode-llm` auth-store fallback to consume both credential shapes:
-    - `StoredCredential::ApiKey { key }`
+    - `StoredCredential::ApiKey { key, .. }`
     - `StoredCredential::OAuth { access_token, .. }`
   - Kept config/env precedence unchanged; auth store remains fallback only.
   - Added unit test coverage for OAuth fallback in provider resolution:
@@ -1228,6 +1228,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - added integration coverage for both behaviors (`version_does_not_require_trusted_project_config_or_llm_init`, `list_does_not_require_llm_provider_even_when_allow_network_true`).
   - Copilot enterprise UX:
     - `github-copilot-enterprise` can derive base URL from `GITHUB_COPILOT_ENTERPRISE_DOMAIN`.
+    - `auth login github-copilot-enterprise --domain <host>` stores the domain alongside the token so `rustcode` can infer the Copilot API base URL automatically.
   - Docs:
     - fixed quickstart/provider examples to include `RUSTCODE_ALLOW_NETWORK=1` for live runs.
   - Copilot parity:
