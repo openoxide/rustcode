@@ -2845,6 +2845,49 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tool_rejects_wrong_argument_types() {
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+        let context = CommandContext::new(
+            Arc::new(ResolvedConfig {
+                workspace_root: PathBuf::from("/tmp/rustcode-bad-types"),
+                allow_network: true,
+                ..ResolvedConfig::default()
+            }),
+            SessionMeta {
+                session_id: "s-args-2".to_string(),
+                request_id: "r-args-2".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let options = AgentOptions::default();
+        let mut state = AgentState::default();
+        let result = engine
+            .execute_agent_tool_call(
+                "webfetch",
+                r#"{"url":"https://example.com","timeout_secs":"nope"}"#,
+                &context,
+                &options,
+                &mut state,
+            )
+            .await;
+        match result {
+            Err(ExecutionError::Dispatch(message)) => {
+                assert!(message.contains("timeout_secs"), "message={message}");
+            }
+            other => panic!("expected dispatch error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn mutating_tools_can_be_denied_by_permissions_without_prompt() {
         let mut cfg = ResolvedConfig::default();
         cfg.permission_rules = vec![rustcode_core::PermissionRule {

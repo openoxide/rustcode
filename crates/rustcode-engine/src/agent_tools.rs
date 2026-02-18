@@ -23,6 +23,50 @@ fn ensure_allowed_keys(args: &Value, allowed: &[&str]) -> Result<(), ExecutionEr
     Ok(())
 }
 
+fn opt_str<'a>(args: &'a Value, key: &str) -> Result<Option<&'a str>, ExecutionError> {
+    match args.get(key) {
+        None => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.as_str())),
+        Some(_) => Err(ExecutionError::Dispatch(format!(
+            "{key} must be a string"
+        ))),
+    }
+}
+
+fn opt_u64(args: &Value, key: &str) -> Result<Option<u64>, ExecutionError> {
+    match args.get(key) {
+        None => Ok(None),
+        Some(Value::Number(num)) => num
+            .as_u64()
+            .ok_or_else(|| ExecutionError::Dispatch(format!("{key} must be an integer")))
+            .map(Some),
+        Some(_) => Err(ExecutionError::Dispatch(format!(
+            "{key} must be an integer"
+        ))),
+    }
+}
+
+fn opt_str_list(args: &Value, key: &str) -> Result<Vec<String>, ExecutionError> {
+    match args.get(key) {
+        None => Ok(Vec::new()),
+        Some(Value::Array(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                let Some(value) = item.as_str() else {
+                    return Err(ExecutionError::Dispatch(format!(
+                        "{key} must be an array of strings"
+                    )));
+                };
+                out.push(value.to_string());
+            }
+            Ok(out)
+        }
+        Some(_) => Err(ExecutionError::Dispatch(format!(
+            "{key} must be an array of strings"
+        ))),
+    }
+}
+
 impl AgentToolRegistry {
     pub fn tool_specs(options: &AgentOptions, allow_network: bool) -> Vec<ToolSpec> {
         let mut specs = vec![
@@ -164,15 +208,12 @@ impl AgentToolRegistry {
         match name {
             "list" => {
                 ensure_allowed_keys(&args, &["path"])?;
-                let path = args
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .map(|s| s.to_string());
+                let path = opt_str(&args, "path")?.map(|value| value.to_string());
                 engine.agent_tool_list(path, context, options).await
             }
             "read" => {
                 ensure_allowed_keys(&args, &["path"])?;
-                let path = args.get("path").and_then(Value::as_str).ok_or_else(|| {
+                let path = opt_str(&args, "path")?.ok_or_else(|| {
                     ExecutionError::Dispatch("read tool requires path".to_string())
                 })?;
                 engine.agent_tool_read(path, context, options, state).await
@@ -184,13 +225,10 @@ impl AgentToolRegistry {
                         "agent write is disabled; rerun with --allow-write".to_string(),
                     ));
                 }
-                let path = args.get("path").and_then(Value::as_str).ok_or_else(|| {
+                let path = opt_str(&args, "path")?.ok_or_else(|| {
                     ExecutionError::Dispatch("write tool requires path".to_string())
                 })?;
-                let contents = args
-                    .get("contents")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
+                let contents = opt_str(&args, "contents")?.ok_or_else(|| {
                         ExecutionError::Dispatch("write tool requires contents".to_string())
                     })?;
                 engine
@@ -204,10 +242,10 @@ impl AgentToolRegistry {
                         "agent edit is disabled; rerun with --allow-edit".to_string(),
                     ));
                 }
-                let path = args.get("path").and_then(Value::as_str).ok_or_else(|| {
+                let path = opt_str(&args, "path")?.ok_or_else(|| {
                     ExecutionError::Dispatch("edit tool requires path".to_string())
                 })?;
-                let from = args.get("from").and_then(Value::as_str).ok_or_else(|| {
+                let from = opt_str(&args, "from")?.ok_or_else(|| {
                     ExecutionError::Dispatch("edit tool requires from".to_string())
                 })?;
                 if from.is_empty() {
@@ -215,7 +253,7 @@ impl AgentToolRegistry {
                         "edit tool requires non-empty from".to_string(),
                     ));
                 }
-                let to = args.get("to").and_then(Value::as_str).ok_or_else(|| {
+                let to = opt_str(&args, "to")?.ok_or_else(|| {
                     ExecutionError::Dispatch("edit tool requires to".to_string())
                 })?;
                 engine
@@ -229,54 +267,40 @@ impl AgentToolRegistry {
                         "agent exec is disabled; rerun with --allow-exec".to_string(),
                     ));
                 }
-                let command = args
-                    .get("command")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
+                let command = opt_str(&args, "command")?.ok_or_else(|| {
                         ExecutionError::Dispatch("exec tool requires command".to_string())
                     })?;
-                let args_list = args
-                    .get("args")
-                    .and_then(Value::as_array)
-                    .map(|items| {
-                        items
-                            .iter()
-                            .filter_map(|item| item.as_str().map(|s| s.to_string()))
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
+                let args_list = opt_str_list(&args, "args")?;
                 engine.agent_tool_exec(command, &args_list, context).await
             }
             "glob" => {
                 ensure_allowed_keys(&args, &["pattern", "path"])?;
-                let pattern = args.get("pattern").and_then(Value::as_str).ok_or_else(|| {
+                let pattern = opt_str(&args, "pattern")?.ok_or_else(|| {
                     ExecutionError::Dispatch("glob tool requires pattern".to_string())
                 })?;
-                let root = args.get("path").and_then(Value::as_str);
+                let root = opt_str(&args, "path")?;
                 engine
                     .agent_tool_glob(pattern, root, context, options)
                     .await
             }
             "grep" => {
                 ensure_allowed_keys(&args, &["pattern", "path", "include"])?;
-                let pattern = args.get("pattern").and_then(Value::as_str).ok_or_else(|| {
+                let pattern = opt_str(&args, "pattern")?.ok_or_else(|| {
                     ExecutionError::Dispatch("grep tool requires pattern".to_string())
                 })?;
-                let root = args.get("path").and_then(Value::as_str);
-                let include = args.get("include").and_then(Value::as_str);
+                let root = opt_str(&args, "path")?;
+                let include = opt_str(&args, "include")?;
                 engine
                     .agent_tool_grep(pattern, root, include, context, options)
                     .await
             }
             "webfetch" => {
                 ensure_allowed_keys(&args, &["url", "format", "timeout_secs"])?;
-                let url = args.get("url").and_then(Value::as_str).ok_or_else(|| {
+                let url = opt_str(&args, "url")?.ok_or_else(|| {
                     ExecutionError::Dispatch("webfetch tool requires url".to_string())
                 })?;
-                let format = args.get("format").and_then(Value::as_str);
-                let timeout_secs = args
-                    .get("timeout_secs")
-                    .and_then(Value::as_u64);
+                let format = opt_str(&args, "format")?;
+                let timeout_secs = opt_u64(&args, "timeout_secs")?;
                 engine
                     .agent_tool_webfetch(url, format, timeout_secs, context)
                     .await
