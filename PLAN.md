@@ -187,7 +187,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `cargo fmt --all` (2026-02-17)
   - Pass: `cargo test --workspace` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
-  - Pass: provider coverage matrix for opencode provider IDs (`./scripts/provider_matrix.sh`) with 91/91 deterministic classifications and zero unknown-init failures (2026-02-17)
+  - Pass: provider coverage matrix for opencode provider IDs (`./scripts/provider_matrix.sh`) with 94/94 deterministic classifications and zero unknown-init failures (2026-02-18)
   - Pass: runtime probes
     - default null path: `cargo run -q -p rustcode -- run "provider smoke"`
     - network-disabled guard: provider init fails with actionable message
@@ -280,7 +280,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: live CLI usage probes:
     - `RUSTCODE_AUTH_FILE=/tmp/... rustcode auth ls` lists stored providers and credential type.
     - `RUSTCODE_AUTH_FILE=/tmp/... rustcode auth logout openrouter` removes stored credential via logout alias.
-    - `rustcode auth login` lists 91 providers with methods and priority ordering.
+    - `rustcode auth login` lists 94 providers with methods and priority ordering.
     - `RUSTCODE_AUTH_FILE=/tmp/... RUSTCODE_TEST_KEY=... rustcode auth login openrouter --from-env RUSTCODE_TEST_KEY` stores key.
     - `RUSTCODE_AUTH_FILE=/tmp/... rustcode auth status openrouter` reports `credential=stored:api_key`.
     - `rustcode auth login openai` prints OAuth URL + updated instructions.
@@ -1608,7 +1608,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
       - validates all providers found in opencode models index (`~/.cache/opencode/models.json`).
     - Added provider coverage report:
       - `docs/PROVIDER_COVERAGE.md`
-      - latest measured result: 91 providers classified, 0 unknown/error init paths.
+      - latest measured result: 94 providers classified, 0 unknown/error init paths.
     - Added models metadata fallback in `rustcode-llm`:
       - loads provider metadata from `RUSTCODE_MODELS_PATH` or `~/.cache/opencode/models.json`
       - inherits provider env keys/endpoints when static preset data is missing.

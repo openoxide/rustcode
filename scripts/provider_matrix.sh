@@ -19,11 +19,16 @@ cat >"$tmp_dir/rustcode.toml" <<'EOF'
 allow_network = true
 EOF
 
+# Ensure the matrix is deterministic and does not depend on any locally-stored credentials.
+auth_file="$tmp_dir/auth.json"
+touch "$auth_file"
+
 summary_json="$tmp_dir/models_summary.json"
 summary_err="$tmp_dir/models_summary.err"
 
 RUSTCODE_USER_CONFIG="$tmp_dir/rustcode.toml" \
 RUSTCODE_TRUST_PROJECT=1 \
+RUSTCODE_AUTH_FILE="$auth_file" \
 RUSTCODE_MODELS_PATH="$MODELS_PATH" \
 cargo run -q -p rustcode -- --json models >"$summary_json" 2>"$summary_err" || true
 

@@ -1,6 +1,6 @@
 # Provider Coverage Audit
 
-Date: 2026-02-17
+Date: 2026-02-18
 
 ## Command
 
@@ -11,11 +11,11 @@ Date: 2026-02-17
 ## Source of Provider IDs
 
 - `~/.cache/opencode/models.json`
-- 91 provider IDs discovered
+- 94 provider IDs discovered
 
 ## Result Summary
 
-- `needs_api_key`: 81
+- `needs_api_key`: 84
 - `needs_base_url`: 10
 - `error`: 0
 
