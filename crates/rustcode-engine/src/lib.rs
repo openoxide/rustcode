@@ -40,6 +40,7 @@ use rustcode_llm::{
 use rustcode_plugins::PluginRegistry;
 
 mod agent_tools;
+pub mod mcp;
 
 const WEBFETCH_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const WEBFETCH_DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -96,6 +97,7 @@ pub struct Engine {
     plugins: PluginRegistry,
     recorder: Option<Arc<dyn TranscriptRecorder>>,
     approver: Option<Arc<dyn ToolApprover>>,
+    mcp: Option<mcp::McpRegistry>,
     next_event_id: AtomicU64,
     next_message_id: AtomicU64,
 }
@@ -123,9 +125,16 @@ impl Engine {
             plugins,
             recorder,
             approver,
+            mcp: None,
             next_event_id: AtomicU64::new(1),
             next_message_id: AtomicU64::new(1),
         }
+    }
+
+    /// Set the MCP registry for connecting to MCP servers.
+    pub fn with_mcp(mut self, mcp: mcp::McpRegistry) -> Self {
+        self.mcp = Some(mcp);
+        self
     }
 
     fn new_message_id(&self) -> String {
@@ -316,8 +325,25 @@ impl Engine {
         context: &CommandContext,
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
-        let tools =
+        let mut tools =
             agent_tools::AgentToolRegistry::tool_specs(&options, context.config.allow_network);
+        
+        // Add MCP tools if registry is available and allow_network is enabled.
+        if context.config.allow_network {
+            if let Some(mcp) = self.mcp.as_ref() {
+                match mcp.tool_specs().await {
+                    Ok(mcp_tools) => {
+                        for (_namespaced_name, spec) in mcp_tools {
+                            tools.push(spec);
+                        }
+                    }
+                    Err(err) => {
+                        tracing::warn!("failed to fetch MCP tool specs: {err}");
+                    }
+                }
+            }
+        }
+        
         let mut state = AgentState::default();
 
         let system_prompt = "You are rustcode, a production-grade coding agent.\n\
@@ -646,6 +672,22 @@ When you are done, respond with a final plain-text answer."
                         ));
                     }
                 }
+            }
+        }
+
+        // Handle MCP tools (namespaced as mcp:<server>:<tool>)
+        if name.starts_with("mcp:") {
+            if let Some(mcp) = self.mcp.as_ref() {
+                match mcp.call_tool(name, args).await {
+                    Ok(result) => return Ok(result),
+                    Err(err) => {
+                        return Err(ExecutionError::Executor(format!("MCP tool failed: {err}")));
+                    }
+                }
+            } else {
+                return Err(ExecutionError::Dispatch(
+                    "MCP tool called but MCP registry not configured".to_string(),
+                ));
             }
         }
 

@@ -1045,6 +1045,7 @@ dependencies = [
  "rustcode-core",
  "rustcode-io",
  "rustcode-llm",
+ "rustcode-mcp",
  "rustcode-plugins",
  "serde_json",
  "tokio",

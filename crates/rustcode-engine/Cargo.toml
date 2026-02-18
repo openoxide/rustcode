@@ -9,6 +9,7 @@ rust-version.workspace = true
 rustcode-core = { path = "../rustcode-core" }
 rustcode-io = { path = "../rustcode-io" }
 rustcode-llm = { path = "../rustcode-llm" }
+rustcode-mcp = { path = "../rustcode-mcp" }
 rustcode-plugins = { path = "../rustcode-plugins" }
 async-trait.workspace = true
 futures-util.workspace = true
