@@ -64,6 +64,11 @@ action = "deny"
 pattern = "rm*"
 
 [[permissions]]
+permission = "exec"
+action = "allow"
+pattern = "git status"
+
+[[permissions]]
 permission = "write"
 action = "allow"
 pattern = "docs/**"
