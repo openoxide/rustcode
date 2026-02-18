@@ -1,6 +1,6 @@
 # Rustcode Execution Plan
 
-Last updated: 2026-02-17
+Last updated: 2026-02-18
 Owner: Codex agent
 Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
@@ -1234,6 +1234,14 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - fixed quickstart/provider examples to include `RUSTCODE_ALLOW_NETWORK=1` for live runs.
   - Copilot parity:
     - `x-initiator` header is now request-scoped (`user` for `run`, `agent` for `agent`).
+  - CLI polish:
+    - added a real global `--version` flag (previously rejected by clap); kept `rustcode version` subcommand.
+  - Provider docs doctest harness:
+    - added `docs/PROVIDER_DOCTESTS.md` with no-network provider diagnostics examples.
+    - added deterministic models fixture `docs/fixtures/models_min.json`.
+    - added integration harness `crates/rustcode/tests/docs_provider_doctest.rs` and ran it in `cargo test --workspace`.
+    - linked doctest doc from `docs/PROVIDERS.md`.
+    - Pass: `cargo test -p rustcode --test docs_provider_doctest` (2026-02-18)
 - 2026-02-18:
   - Completed Milestone 55 GitHub Copilot Provider:
     - added default base URL `https://api.githubcopilot.com` for `github-copilot` and `github-copilot-enterprise` providers.
