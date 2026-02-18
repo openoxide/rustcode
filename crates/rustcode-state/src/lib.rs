@@ -254,7 +254,9 @@ impl TranscriptRecorder for FileTranscriptRecorder {
         let session_id = session_id.to_string();
         tokio::task::spawn_blocking(move || store.append_message(&session_id, &message))
             .await
-            .map_err(|err| ExecutionError::Executor(format!("transcript recorder join error: {err}")))?
+            .map_err(|err| {
+                ExecutionError::Executor(format!("transcript recorder join error: {err}"))
+            })?
             .map_err(|err| ExecutionError::Executor(err.to_string()))
     }
 }

@@ -253,9 +253,7 @@ impl ProcessPort for LocalIo {
         cwd: &Path,
         cancellation: CancellationToken,
     ) -> Result<ProcessOutput, IoError> {
-        let output = self
-            .run_capture(program, args, cwd, cancellation)
-            .await?;
+        let output = self.run_capture(program, args, cwd, cancellation).await?;
 
         if output.code == 0 {
             Ok(output)

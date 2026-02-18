@@ -27,9 +27,7 @@ fn opt_str<'a>(args: &'a Value, key: &str) -> Result<Option<&'a str>, ExecutionE
     match args.get(key) {
         None => Ok(None),
         Some(Value::String(value)) => Ok(Some(value.as_str())),
-        Some(_) => Err(ExecutionError::Dispatch(format!(
-            "{key} must be a string"
-        ))),
+        Some(_) => Err(ExecutionError::Dispatch(format!("{key} must be a string"))),
     }
 }
 
@@ -72,7 +70,8 @@ impl AgentToolRegistry {
         let mut specs = vec![
             ToolSpec {
                 name: "list".to_string(),
-                description: "List files and directories under a workspace-relative path.".to_string(),
+                description: "List files and directories under a workspace-relative path."
+                    .to_string(),
                 parameters: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -253,8 +252,8 @@ impl AgentToolRegistry {
                     ExecutionError::Dispatch("write tool requires path".to_string())
                 })?;
                 let contents = opt_str(&args, "contents")?.ok_or_else(|| {
-                        ExecutionError::Dispatch("write tool requires contents".to_string())
-                    })?;
+                    ExecutionError::Dispatch("write tool requires contents".to_string())
+                })?;
                 engine
                     .agent_tool_write(path, contents, context, options, state)
                     .await
@@ -277,9 +276,8 @@ impl AgentToolRegistry {
                         "edit tool requires non-empty from".to_string(),
                     ));
                 }
-                let to = opt_str(&args, "to")?.ok_or_else(|| {
-                    ExecutionError::Dispatch("edit tool requires to".to_string())
-                })?;
+                let to = opt_str(&args, "to")?
+                    .ok_or_else(|| ExecutionError::Dispatch("edit tool requires to".to_string()))?;
                 engine
                     .agent_tool_edit(path, from, to, context, options, state)
                     .await
@@ -292,8 +290,8 @@ impl AgentToolRegistry {
                     ));
                 }
                 let command = opt_str(&args, "command")?.ok_or_else(|| {
-                        ExecutionError::Dispatch("exec tool requires command".to_string())
-                    })?;
+                    ExecutionError::Dispatch("exec tool requires command".to_string())
+                })?;
                 let args_list = opt_str_list(&args, "args")?;
                 engine.agent_tool_exec(command, &args_list, context).await
             }

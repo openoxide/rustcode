@@ -530,7 +530,14 @@ pub async fn complete_browser_oauth_flow(
 ) -> Result<DeviceCodeFlowCredential, AuthError> {
     match flow.provider.as_str() {
         "openai" => Box::pin(complete_openai_browser_oauth_flow(flow, timeout)).await,
-        "gitlab" => Box::pin(complete_gitlab_browser_oauth_flow(flow, timeout, client_secret)).await,
+        "gitlab" => {
+            Box::pin(complete_gitlab_browser_oauth_flow(
+                flow,
+                timeout,
+                client_secret,
+            ))
+            .await
+        }
         other => Err(AuthError::Validation(format!(
             "provider {other} does not support browser oauth completion"
         ))),
@@ -1260,8 +1267,12 @@ async fn wait_for_oauth_callback(
             .map_err(|_| AuthError::OAuthTimeout)?
             .map_err(|err| AuthError::Network(format!("oauth callback accept failed: {err}")))?;
         let (mut socket, _) = accepted;
-        if let Some(code) =
-            Box::pin(handle_oauth_callback_connection(&mut socket, expected_state, &callback.path)).await?
+        if let Some(code) = Box::pin(handle_oauth_callback_connection(
+            &mut socket,
+            expected_state,
+            &callback.path,
+        ))
+        .await?
         {
             return Ok(code);
         }
@@ -1758,10 +1769,13 @@ mod tests {
             let _ = client.get(callback_url).send().await;
         });
 
-        let credential =
-            Box::pin(complete_mcp_browser_oauth_flow(&flow, Duration::from_secs(5), Some("shh")))
-                .await
-                .expect("flow should complete");
+        let credential = Box::pin(complete_mcp_browser_oauth_flow(
+            &flow,
+            Duration::from_secs(5),
+            Some("shh"),
+        ))
+        .await
+        .expect("flow should complete");
         assert_eq!(credential.access_token, "mcp-access-token");
         assert_eq!(
             credential.refresh_token.as_deref(),
@@ -1905,9 +1919,13 @@ mod tests {
             let _ = client.get(callback_url).send().await;
         });
 
-        let credential = Box::pin(complete_browser_oauth_flow(&flow, Duration::from_secs(5), None))
-            .await
-            .expect("flow should complete");
+        let credential = Box::pin(complete_browser_oauth_flow(
+            &flow,
+            Duration::from_secs(5),
+            None,
+        ))
+        .await
+        .expect("flow should complete");
         assert_eq!(credential.access_token, "gitlab-access-token");
         assert_eq!(
             credential.refresh_token.as_deref(),
