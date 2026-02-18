@@ -7,8 +7,11 @@ rust-version.workspace = true
 
 [dependencies]
 rustcode-core = { path = "../rustcode-core" }
+rustcode-state = { path = "../rustcode-state" }
 thiserror.workspace = true
 tokio.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
 
 [lints]
 workspace = true

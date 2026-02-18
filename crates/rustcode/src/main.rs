@@ -37,7 +37,6 @@ use rustcode_llm::{
 };
 use rustcode_plugins::PluginRegistry;
 use rustcode_state::{FileTranscriptRecorder, SessionStore};
-use rustcode_tui::TuiApp;
 
 mod cli;
 mod render;
@@ -149,7 +148,20 @@ async fn main() -> Result<()> {
         let config = load_effective_config(&cli)?;
         return handle_session_command(command.clone(), cli.json, &config);
     }
-    let launch_tui = matches!(&cli.command, TopCommand::Tui);
+
+    if matches!(&cli.command, TopCommand::Tui) {
+        if !is_interactive_terminal() {
+            // Non-interactive environments (tests, pipes) should not attempt to enter raw mode.
+            return Ok(());
+        }
+        let store = SessionStore::open_default();
+        tokio::task::spawn_blocking(move || rustcode_tui::run_interactive(store))
+            .await
+            .context("tui join failed")?
+            .context("tui failed")?;
+        return Ok(());
+    }
+
     let requires_llm = matches!(
         &cli.command,
         TopCommand::Agent { .. } | TopCommand::Serve { .. } | TopCommand::Run { attach: None, .. }
@@ -421,12 +433,7 @@ async fn main() -> Result<()> {
 
     drop(publisher);
 
-    if launch_tui {
-        let _summary = TuiApp::from_domain_receiver(event_rx)
-            .run()
-            .await
-            .context("tui event loop failed")?;
-    } else {
+    {
         let mut streamed_text_open = false;
         let mut run_output_capture = String::new();
         while let Some(event) = event_rx.recv().await {

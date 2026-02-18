@@ -7,7 +7,15 @@ use rustcode_core::event::Event;
 pub enum TuiError {
     #[error("ui channel closed")]
     ChannelClosed,
+    #[error("io error: {0}")]
+    Io(String),
+    #[error("state error: {0}")]
+    State(String),
 }
+
+mod interactive;
+
+pub use interactive::run_interactive;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiInput {
