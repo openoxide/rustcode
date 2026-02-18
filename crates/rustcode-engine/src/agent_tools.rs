@@ -120,6 +120,30 @@ impl AgentToolRegistry {
                     "additionalProperties": false
                 }),
             },
+            ToolSpec {
+                name: "todowrite".to_string(),
+                description: "Update the agent's working todo list.".to_string(),
+                parameters: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "todos": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "content": { "type": "string" },
+                                    "status": { "type": "string", "description": "pending|in_progress|completed|cancelled" },
+                                    "priority": { "type": "string", "description": "high|medium|low" }
+                                },
+                                "required": ["content", "status", "priority"],
+                                "additionalProperties": false
+                            }
+                        }
+                    },
+                    "required": ["todos"],
+                    "additionalProperties": false
+                }),
+            },
         ];
 
         if allow_network {
@@ -304,6 +328,91 @@ impl AgentToolRegistry {
                 engine
                     .agent_tool_webfetch(url, format, timeout_secs, context)
                     .await
+            }
+            "todowrite" => {
+                ensure_allowed_keys(&args, &["todos"])?;
+                let todos = args.get("todos").ok_or_else(|| {
+                    ExecutionError::Dispatch("todowrite tool requires todos".to_string())
+                })?;
+                let list = todos.as_array().ok_or_else(|| {
+                    ExecutionError::Dispatch("todos must be an array".to_string())
+                })?;
+
+                let mut normalized = Vec::with_capacity(list.len());
+                for (idx, item) in list.iter().enumerate() {
+                    let obj = item.as_object().ok_or_else(|| {
+                        ExecutionError::Dispatch(format!("todos[{idx}] must be an object"))
+                    })?;
+                    for key in obj.keys() {
+                        if !matches!(key.as_str(), "content" | "status" | "priority") {
+                            return Err(ExecutionError::Dispatch(format!(
+                                "todos[{idx}] unexpected key: {key}"
+                            )));
+                        }
+                    }
+
+                    let content = obj
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            ExecutionError::Dispatch(format!(
+                                "todos[{idx}].content must be a string"
+                            ))
+                        })?
+                        .trim()
+                        .to_string();
+                    if content.is_empty() {
+                        return Err(ExecutionError::Dispatch(format!(
+                            "todos[{idx}].content must not be empty"
+                        )));
+                    }
+
+                    let status = obj
+                        .get("status")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            ExecutionError::Dispatch(format!(
+                                "todos[{idx}].status must be a string"
+                            ))
+                        })?
+                        .trim()
+                        .to_ascii_lowercase();
+                    if !matches!(
+                        status.as_str(),
+                        "pending" | "in_progress" | "completed" | "cancelled"
+                    ) {
+                        return Err(ExecutionError::Dispatch(format!(
+                            "todos[{idx}].status must be pending|in_progress|completed|cancelled"
+                        )));
+                    }
+
+                    let priority = obj
+                        .get("priority")
+                        .and_then(Value::as_str)
+                        .ok_or_else(|| {
+                            ExecutionError::Dispatch(format!(
+                                "todos[{idx}].priority must be a string"
+                            ))
+                        })?
+                        .trim()
+                        .to_ascii_lowercase();
+                    if !matches!(priority.as_str(), "high" | "medium" | "low") {
+                        return Err(ExecutionError::Dispatch(format!(
+                            "todos[{idx}].priority must be high|medium|low"
+                        )));
+                    }
+
+                    normalized.push(serde_json::json!({
+                        "content": content,
+                        "status": status,
+                        "priority": priority,
+                    }));
+                }
+
+                Ok(serde_json::json!({
+                    "todos": normalized,
+                })
+                .to_string())
             }
             _ => Err(ExecutionError::Dispatch(format!(
                 "unknown tool call: {name}"
