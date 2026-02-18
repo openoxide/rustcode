@@ -29,7 +29,8 @@ use rustcode_core::ports::CommandExecutor;
 use rustcode_engine::{ChannelPublisher, Engine, WorkspacePermissionPolicy};
 use rustcode_io::LocalIo;
 use rustcode_llm::{
-    build_client, builtin_provider_ids, diagnose_provider, ApiKeySource, ProviderProtocolName,
+    build_client, builtin_provider_ids, derive_copilot_enterprise_base_url, diagnose_provider,
+    ApiKeySource, ProviderProtocolName,
 };
 use rustcode_plugins::PluginRegistry;
 use rustcode_tui::TuiApp;
@@ -560,16 +561,39 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                 }
                 AuthMethod::OAuthDeviceCode => {
                     let flow = start_device_code_flow(&provider, domain.as_deref()).await?;
+                    let copilot_enterprise_llm_base_url_hint = if provider
+                        == "github-copilot-enterprise"
+                        && domain
+                            .as_deref()
+                            .is_some_and(|value| !value.trim().is_empty())
+                    {
+                        Some(derive_copilot_enterprise_base_url(&flow.domain))
+                    } else {
+                        None
+                    };
+                    let copilot_enterprise_env_hint =
+                        copilot_enterprise_llm_base_url_hint.as_ref().map(|_| {
+                            format!("export GITHUB_COPILOT_ENTERPRISE_DOMAIN={}", flow.domain)
+                        });
+                    let copilot_enterprise_run_hint = copilot_enterprise_llm_base_url_hint.as_ref().map(|base_url| {
+                        format!(
+                            "RUSTCODE_ALLOW_NETWORK=1 rustcode --llm-provider github-copilot-enterprise --llm-base-url \"{base_url}\" --model github-copilot/gpt-4o run \"hello\""
+                        )
+                    });
                     if json_output {
                         let challenge_payload = serde_json::json!({
                             "schema_version": 1,
                             "provider": &provider,
                             "method": selected_method.as_str(),
                             "stage": "challenge",
+                            "oauth_domain": flow.domain,
                             "authorize_url": flow.verification_uri,
                             "user_code": flow.user_code,
                             "interval_secs": flow.interval_secs,
                             "expires_in_secs": flow.expires_in_secs,
+                            "llm_base_url_hint": copilot_enterprise_llm_base_url_hint,
+                            "env_hint": copilot_enterprise_env_hint,
+                            "run_hint": copilot_enterprise_run_hint,
                         });
                         if !write_stdout_line(
                             &serde_json::to_string(&challenge_payload)
@@ -581,10 +605,27 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                         || !write_stdout_line(&format!("method={}", selected_method.as_str()))?
                         || !write_stdout_line(&format!("authorize_url={}", flow.verification_uri))?
                         || !write_stdout_line(&format!("user_code={}", flow.user_code))?
+                        || !write_stdout_line(&format!("oauth_domain={}", flow.domain))?
                         || !write_stdout_line(&format!("interval_secs={}", flow.interval_secs))?
                         || !write_stdout_line(&format!("expires_in_secs={}", flow.expires_in_secs))?
                     {
                         return Ok(());
+                    }
+
+                    if let Some(base_url) = copilot_enterprise_llm_base_url_hint.as_deref() {
+                        if !write_stdout_line(&format!("llm_base_url_hint={base_url}"))? {
+                            return Ok(());
+                        }
+                    }
+                    if let Some(hint) = copilot_enterprise_env_hint.as_deref() {
+                        if !write_stdout_line(&format!("env_hint={hint}"))? {
+                            return Ok(());
+                        }
+                    }
+                    if let Some(hint) = copilot_enterprise_run_hint.as_deref() {
+                        if !write_stdout_line(&format!("run_hint={hint}"))? {
+                            return Ok(());
+                        }
                     }
 
                     if no_wait {

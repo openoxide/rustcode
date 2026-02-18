@@ -476,7 +476,7 @@ fn resolve_provider_base_url_from_env(
     }
 }
 
-fn derive_copilot_enterprise_base_url(domain: &str) -> String {
+pub fn derive_copilot_enterprise_base_url(domain: &str) -> String {
     if domain.is_empty() {
         return "".to_string();
     }
