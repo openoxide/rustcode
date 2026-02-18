@@ -1319,8 +1319,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - `opencode/packages/opencode/src/cli/cmd/tui/*` (thread/attach flows)
 - Deliverables:
   - ratatui-based UI with snapshot tests
- - Progress:
+- Progress:
   - Added initial ratatui/crossterm interactive TUI skeleton with session list + transcript viewer
+  - Added basic session actions: new (`n`) and fork (`f`)
   - `rustcode tui` now launches interactive UI only when running in a real terminal (no-op when piped)
 
 62. Export/Import/Share
