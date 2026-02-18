@@ -4,6 +4,7 @@ pub struct AgentOptions {
     pub max_tool_calls_per_step: usize,
     pub allow_write: bool,
     pub allow_edit: bool,
+    pub allow_exec: bool,
     pub max_read_bytes: usize,
     pub max_list_entries: usize,
     pub max_tool_result_bytes: usize,
@@ -17,6 +18,7 @@ impl Default for AgentOptions {
             max_tool_calls_per_step: 8,
             allow_write: false,
             allow_edit: false,
+            allow_exec: false,
             // Align with OpenCode truncation defaults (50 KiB).
             max_read_bytes: 50 * 1024,
             max_list_entries: 2000,

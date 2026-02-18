@@ -50,6 +50,18 @@ pub trait ProcessPort: Send + Sync {
         cwd: &Path,
         cancellation: CancellationToken,
     ) -> Result<ProcessOutput, IoError>;
+
+    /// Runs a process and captures output regardless of exit status.
+    ///
+    /// This is useful for tool execution where stdout/stderr should be returned to the caller
+    /// even when the command fails.
+    async fn run_capture(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: &Path,
+        cancellation: CancellationToken,
+    ) -> Result<ProcessOutput, IoError>;
 }
 
 #[derive(Debug, Default)]
@@ -163,6 +175,27 @@ impl ProcessPort for LocalIo {
         cwd: &Path,
         cancellation: CancellationToken,
     ) -> Result<ProcessOutput, IoError> {
+        let output = self
+            .run_capture(program, args, cwd, cancellation)
+            .await?;
+
+        if output.code == 0 {
+            Ok(output)
+        } else {
+            Err(IoError::Exit {
+                code: output.code,
+                stderr: output.stderr,
+            })
+        }
+    }
+
+    async fn run_capture(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: &Path,
+        cancellation: CancellationToken,
+    ) -> Result<ProcessOutput, IoError> {
         let mut command = Command::new(program);
         command.args(args);
         command.current_dir(cwd);
@@ -177,19 +210,11 @@ impl ProcessPort for LocalIo {
             }
         };
 
-        let code = output.status.code().unwrap_or(-1);
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-        if output.status.success() {
-            Ok(ProcessOutput {
-                code,
-                stdout,
-                stderr,
-            })
-        } else {
-            Err(IoError::Exit { code, stderr })
-        }
+        Ok(ProcessOutput {
+            code: output.status.code().unwrap_or(-1),
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        })
     }
 }
 

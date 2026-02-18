@@ -212,7 +212,7 @@ impl Engine {
         context: &CommandContext,
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
-        let tools = agent_tool_specs();
+        let tools = agent_tool_specs(&options);
         let mut state = AgentState::default();
         let mut messages = vec![
             ChatMessage {
@@ -314,6 +314,8 @@ When you are done, respond with a final plain-text answer."
 
                 let (ok, output) = match tool_result {
                     Ok(output) => (true, output),
+                    Err(ExecutionError::Dispatch(message)) => (false, message),
+                    Err(ExecutionError::Executor(message)) => (false, message),
                     Err(err) => (false, err.to_string()),
                 };
                 let result_payload = tool_payload_json(ok, output, options.max_tool_result_bytes);
@@ -417,9 +419,77 @@ When you are done, respond with a final plain-text answer."
                 self.agent_tool_edit(path, from, to, context, options, state)
                     .await
             }
+            "exec" => {
+                if !options.allow_exec {
+                    return Err(ExecutionError::Dispatch(
+                        "agent exec is disabled; rerun with --allow-exec".to_string(),
+                    ));
+                }
+                let command = args
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ExecutionError::Dispatch("exec tool requires command".to_string()))?;
+                let args_list = args
+                    .get("args")
+                    .and_then(Value::as_array)
+                    .map(|items| {
+                        items
+                            .iter()
+                            .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                self.agent_tool_exec(command, &args_list, context).await
+            }
             _ => Err(ExecutionError::Dispatch(format!(
                 "unknown tool call: {name}"
             ))),
+        }
+    }
+
+    async fn agent_tool_exec(
+        &self,
+        command: &str,
+        args: &[String],
+        context: &CommandContext,
+    ) -> Result<String, ExecutionError> {
+        let output = self
+            .process
+            .run_capture(
+                command,
+                args,
+                &context.config.workspace_root,
+                context.cancellation.clone(),
+            )
+            .await
+            .map_err(|err| match err {
+                IoError::Cancelled => ExecutionError::Cancelled,
+                _ => ExecutionError::Executor(err.to_string()),
+            })?;
+
+        let mut rendered = String::new();
+        rendered.push_str("exit_code=");
+        rendered.push_str(&output.code.to_string());
+        rendered.push('\n');
+        if !output.stdout.is_empty() {
+            rendered.push_str("stdout:\n");
+            rendered.push_str(&output.stdout);
+            if !output.stdout.ends_with('\n') {
+                rendered.push('\n');
+            }
+        }
+        if !output.stderr.is_empty() {
+            rendered.push_str("stderr:\n");
+            rendered.push_str(&output.stderr);
+            if !output.stderr.ends_with('\n') {
+                rendered.push('\n');
+            }
+        }
+
+        if output.code == 0 {
+            Ok(rendered)
+        } else {
+            Err(ExecutionError::Executor(rendered))
         }
     }
 
@@ -955,8 +1025,8 @@ impl CommandExecutor for Engine {
     }
 }
 
-fn agent_tool_specs() -> Vec<ToolSpec> {
-    vec![
+fn agent_tool_specs(options: &AgentOptions) -> Vec<ToolSpec> {
+    let mut specs = vec![
         ToolSpec {
             name: "list".to_string(),
             description: "List files and directories under a workspace-relative path.".to_string(),
@@ -980,7 +1050,10 @@ fn agent_tool_specs() -> Vec<ToolSpec> {
                 "additionalProperties": false
             }),
         },
-        ToolSpec {
+    ];
+
+    if options.allow_write || options.allow_edit {
+        specs.push(ToolSpec {
             name: "write".to_string(),
             description: "Write a UTF-8 text file to the workspace.".to_string(),
             parameters: json!({
@@ -992,8 +1065,11 @@ fn agent_tool_specs() -> Vec<ToolSpec> {
                 "required": ["path", "contents"],
                 "additionalProperties": false
             }),
-        },
-        ToolSpec {
+        });
+    }
+
+    if options.allow_edit {
+        specs.push(ToolSpec {
             name: "edit".to_string(),
             description: "Replace a substring in a workspace file.".to_string(),
             parameters: json!({
@@ -1006,8 +1082,30 @@ fn agent_tool_specs() -> Vec<ToolSpec> {
                 "required": ["path", "from", "to"],
                 "additionalProperties": false
             }),
-        },
-    ]
+        });
+    }
+
+    if options.allow_exec {
+        specs.push(ToolSpec {
+            name: "exec".to_string(),
+            description: "Execute a command in the workspace.".to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": "Program name" },
+                    "args": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Command arguments"
+                    }
+                },
+                "required": ["command"],
+                "additionalProperties": false
+            }),
+        });
+    }
+
+    specs
 }
 
 fn tool_payload_json(ok: bool, output: String, max_bytes: usize) -> String {
@@ -1080,6 +1178,11 @@ mod tests {
     use super::*;
 
     struct CancelledProcess;
+    struct StubProcess {
+        stdout: String,
+        stderr: String,
+        code: i32,
+    }
     struct DummyFs;
     struct StreamingLlmClient;
     struct AgentFs {
@@ -1169,6 +1272,54 @@ mod tests {
             _cancellation: CancellationToken,
         ) -> Result<ProcessOutput, IoError> {
             Err(IoError::Cancelled)
+        }
+
+        async fn run_capture(
+            &self,
+            _program: &str,
+            _args: &[String],
+            _cwd: &Path,
+            _cancellation: CancellationToken,
+        ) -> Result<ProcessOutput, IoError> {
+            Err(IoError::Cancelled)
+        }
+    }
+
+    #[async_trait]
+    impl ProcessPort for StubProcess {
+        async fn run(
+            &self,
+            _program: &str,
+            _args: &[String],
+            _cwd: &Path,
+            _cancellation: CancellationToken,
+        ) -> Result<ProcessOutput, IoError> {
+            if self.code == 0 {
+                Ok(ProcessOutput {
+                    code: 0,
+                    stdout: self.stdout.clone(),
+                    stderr: self.stderr.clone(),
+                })
+            } else {
+                Err(IoError::Exit {
+                    code: self.code,
+                    stderr: self.stderr.clone(),
+                })
+            }
+        }
+
+        async fn run_capture(
+            &self,
+            _program: &str,
+            _args: &[String],
+            _cwd: &Path,
+            _cancellation: CancellationToken,
+        ) -> Result<ProcessOutput, IoError> {
+            Ok(ProcessOutput {
+                code: self.code,
+                stdout: self.stdout.clone(),
+                stderr: self.stderr.clone(),
+            })
         }
     }
 
@@ -1362,6 +1513,120 @@ mod tests {
             .iter()
             .any(|event| matches!(event.payload, EventPayload::ToolResult { .. })));
         assert!(events.iter().any(|event| matches!(event.payload, EventPayload::OutputChunk { ref text } if text.contains("done"))));
+    }
+
+    #[tokio::test]
+    async fn agent_can_exec_when_allowed() {
+        struct ExecAgentLlm {
+            step: Mutex<usize>,
+        }
+
+        #[async_trait]
+        impl LlmClient for ExecAgentLlm {
+            async fn complete(
+                &self,
+                _request: LlmRequest,
+            ) -> Result<LlmResponse, rustcode_llm::LlmError> {
+                Ok(LlmResponse {
+                    text: "unused".to_string(),
+                    chunks: Vec::new(),
+                })
+            }
+
+            async fn chat(
+                &self,
+                request: ChatRequest,
+            ) -> Result<ChatResponse, rustcode_llm::LlmError> {
+                let mut step = self.step.lock().await;
+                match *step {
+                    0 => {
+                        *step = 1;
+                        assert!(
+                            request.tools.iter().any(|tool| tool.name == "exec"),
+                            "expected exec tool spec when allow-exec is enabled"
+                        );
+                        Ok(ChatResponse {
+                            text: String::new(),
+                            tool_calls: vec![ToolCall {
+                                id: "call_exec".to_string(),
+                                name: "exec".to_string(),
+                                arguments: r#"{"command":"echo","args":["hi"]}"#.to_string(),
+                            }],
+                        })
+                    }
+                    _ => {
+                        assert!(
+                            request
+                                .messages
+                                .iter()
+                                .any(|msg| msg.tool_call_id.as_deref() == Some("call_exec")),
+                            "expected tool result message for call_exec"
+                        );
+                        Ok(ChatResponse {
+                            text: "done".to_string(),
+                            tool_calls: Vec::new(),
+                        })
+                    }
+                }
+            }
+        }
+
+        let workspace_root = PathBuf::from("/tmp/rustcode-agent-exec-workspace");
+        let engine = Engine::new(
+            Arc::new(ExecAgentLlm {
+                step: Mutex::new(0),
+            }),
+            Arc::new(DummyFs),
+            Arc::new(StubProcess {
+                stdout: "hi\n".to_string(),
+                stderr: String::new(),
+                code: 0,
+            }),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+        );
+        let publisher = Arc::new(CollectingPublisher::default());
+        let context = CommandContext::new(
+            Arc::new(ResolvedConfig {
+                workspace_root,
+                ..ResolvedConfig::default()
+            }),
+            SessionMeta {
+                session_id: "agent-exec-s1".to_string(),
+                request_id: "agent-exec-r1".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let result = engine
+            .execute(
+                Command::Agent {
+                    prompt: "hi".to_string(),
+                    options: AgentOptions {
+                        allow_exec: true,
+                        ..AgentOptions::default()
+                    },
+                },
+                context,
+                publisher.clone(),
+            )
+            .await;
+        assert!(result.is_ok(), "result={result:?}");
+
+        let events = publisher.events.lock().await.clone();
+        assert!(events.iter().any(|event| {
+            matches!(
+                &event.payload,
+                EventPayload::ToolCall { name, .. } if name == "exec"
+            )
+        }));
+        assert!(events.iter().any(|event| {
+            matches!(
+                &event.payload,
+                EventPayload::ToolResult { name, ok, output, .. }
+                if name == "exec" && *ok && output.contains("exit_code=0")
+            )
+        }));
     }
 
     #[tokio::test]

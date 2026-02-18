@@ -55,6 +55,8 @@ pub enum TopCommand {
         allow_write: bool,
         #[arg(long = "allow-edit", default_value_t = false)]
         allow_edit: bool,
+        #[arg(long = "allow-exec", default_value_t = false)]
+        allow_exec: bool,
         #[arg(
             long = "max-read-bytes",
             default_value_t = AgentOptions::default().max_read_bytes
@@ -226,6 +228,7 @@ pub fn map_command(command: TopCommand) -> Command {
             max_tool_calls_per_step,
             allow_write,
             allow_edit,
+            allow_exec,
             max_read_bytes,
             max_list_entries,
             max_tool_result_bytes,
@@ -237,6 +240,7 @@ pub fn map_command(command: TopCommand) -> Command {
                 max_tool_calls_per_step,
                 allow_write,
                 allow_edit,
+                allow_exec,
                 max_read_bytes,
                 max_list_entries,
                 max_tool_result_bytes,
@@ -333,6 +337,18 @@ mod tests {
         match cli.command {
             TopCommand::Agent { prompt, .. } => {
                 assert_eq!(prompt, "hello");
+            }
+            _ => panic!("expected agent command"),
+        }
+    }
+
+    #[test]
+    fn agent_accepts_allow_exec_flag() {
+        let cli = Cli::try_parse_from(["rustcode", "agent", "--allow-exec", "hello"])
+            .expect("cli should parse");
+        match cli.command {
+            TopCommand::Agent { allow_exec, .. } => {
+                assert!(allow_exec);
             }
             _ => panic!("expected agent command"),
         }

@@ -1236,6 +1236,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `x-initiator` header is now request-scoped (`user` for `run`, `agent` for `agent`).
   - CLI polish:
     - added a real global `--version` flag (previously rejected by clap); kept `rustcode version` subcommand.
+  - Agent:
+    - added `--allow-exec` and an `exec` tool for agent runs; tool specs are now filtered by allow-flags (no more advertising write/edit/exec when disabled).
   - Provider docs doctest harness:
     - added `docs/PROVIDER_DOCTESTS.md` with no-network provider diagnostics examples.
     - added deterministic models fixture `docs/fixtures/models_min.json`.
@@ -1245,6 +1247,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Release packaging hygiene:
     - Pass: `./scripts/build_release_bundle.sh 0.1.0 dist` produced a tarball containing `rustcode`, `benchmarks/latest.json`, and `docs/RELEASE_NOTES_DRAFT.md` (2026-02-18)
     - ignored `/dist/` release artifacts in `.gitignore` to keep worktree clean.
+  - Docs polish:
+    - clarified OpenAI-compatible endpoint normalization note in `docs/PROVIDERS.md`.
+    - added root `README.md` with build/run/provider pointers.
 - 2026-02-18:
   - Completed Milestone 55 GitHub Copilot Provider:
     - added default base URL `https://api.githubcopilot.com` for `github-copilot` and `github-copilot-enterprise` providers.
