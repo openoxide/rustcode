@@ -39,6 +39,7 @@ use rustcode_llm::{
     ChatMessage, ChatRequest, ChatRole, LlmClient, LlmRequest, RequestInitiator, ToolCall,
 };
 use rustcode_plugins::PluginRegistry;
+use rustcode_state::SessionStore;
 
 mod agent_tools;
 pub mod mcp;
@@ -198,11 +199,32 @@ impl EventPublisher for SsePublisher {
     }
 }
 
+struct CapturingPublisher {
+    inner: Arc<dyn EventPublisher>,
+    captured_output: Arc<tokio::sync::Mutex<String>>,
+}
+
+#[async_trait]
+impl EventPublisher for CapturingPublisher {
+    async fn publish(&self, event: Event) -> Result<(), PublishError> {
+        if let EventPayload::OutputChunk { text } = &event.payload {
+            let mut out = self.captured_output.lock().await;
+            out.push_str(text);
+        }
+        self.inner.publish(event).await
+    }
+}
+
 fn unix_ms() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0)
+}
+
+fn unix_ms_i64() -> i64 {
+    let ms = unix_ms();
+    i64::try_from(ms).unwrap_or(i64::MAX)
 }
 
 #[derive(Clone)]
@@ -1403,6 +1425,62 @@ When you are done, respond with a final plain-text answer."
         let method = request.method.clone();
         let path = request.path.clone();
 
+        if method == "GET" && path == "/v1/sessions" {
+            let status = self.handle_serve_list_sessions(&mut stream).await?;
+            self.emit(
+                publisher,
+                EventScope::System,
+                EventPayload::ServeRequest {
+                    method,
+                    path,
+                    status,
+                },
+                context,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        if method == "POST" && path == "/v1/sessions" {
+            let status = self
+                .handle_serve_create_session(&mut stream, request.body, context)
+                .await?;
+            self.emit(
+                publisher,
+                EventScope::System,
+                EventPayload::ServeRequest {
+                    method,
+                    path,
+                    status,
+                },
+                context,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        if method == "GET" {
+            if let Some(session_id) = path.strip_prefix("/v1/sessions/") {
+                if !session_id.is_empty() && !session_id.contains('/') {
+                    let status = self
+                        .handle_serve_show_session(&mut stream, session_id)
+                        .await?;
+                    self.emit(
+                        publisher,
+                        EventScope::System,
+                        EventPayload::ServeRequest {
+                            method,
+                            path,
+                            status,
+                        },
+                        context,
+                    )
+                    .await?;
+                    return Ok(());
+                }
+            }
+        }
+
         if method == "POST" && path == "/v1/run" {
             let status = self
                 .handle_serve_run_request(stream, request.body, context)
@@ -1477,7 +1555,7 @@ When you are done, respond with a final plain-text answer."
             return Ok(400);
         }
         if let Some(schema) = request.schema_version {
-            if schema != rustcode_core::event::EVENT_SCHEMA_VERSION {
+            if schema != 1 {
                 let payload = serde_json::json!({
                     "error": "bad request",
                     "message": format!("unsupported schema_version={schema}"),
@@ -1488,12 +1566,66 @@ When you are done, respond with a final plain-text answer."
             }
         }
 
-        let response = concat!(
-            "HTTP/1.1 200 OK\r\n",
-            "content-type: text/event-stream\r\n",
-            "cache-control: no-cache\r\n",
-            "connection: close\r\n",
-            "\r\n"
+        let cwd = std::env::current_dir()
+            .map_err(|err| ExecutionError::Executor(format!("failed to resolve cwd: {err}")))?;
+        let workspace_root = serve_context.config.workspace_root.clone();
+        let model = serve_context.config.model.clone();
+        let requested_session_id = request.session_id.clone();
+
+        let store = SessionStore::open_default();
+        let create_new = requested_session_id.is_none();
+        let session_result = tokio::task::spawn_blocking(move || {
+            if let Some(session_id) = requested_session_id {
+                let info = store.get_session(&session_id)?;
+                Ok::<_, rustcode_state::StateError>(info)
+            } else {
+                store.create_session(None, None, &cwd, &workspace_root, &model)
+            }
+        })
+        .await
+        .map_err(|err| ExecutionError::Executor(format!("session init join error: {err}")))?;
+
+        let mut persist = true;
+        let session_id = match session_result {
+            Ok(info) => info.id,
+            Err(rustcode_state::StateError::NotFound(_)) => {
+                let payload = serde_json::json!({
+                    "error": "not found",
+                    "message": "session not found",
+                })
+                .to_string();
+                write_http_json(&mut stream, 404, "Not Found", &(payload + "\n")).await?;
+                return Ok(404);
+            }
+            Err(rustcode_state::StateError::Validation(message)) => {
+                let payload = serde_json::json!({
+                    "error": "bad request",
+                    "message": message,
+                })
+                .to_string();
+                write_http_json(&mut stream, 400, "Bad Request", &(payload + "\n")).await?;
+                return Ok(400);
+            }
+            Err(err) if create_new => {
+                // Best-effort: allow run streaming even if sessions cannot be persisted.
+                persist = false;
+                debug!("failed to create session for /v1/run: {err}");
+                format!("session-{}", unix_ms())
+            }
+            Err(err) => {
+                let payload = serde_json::json!({
+                    "error": "internal",
+                    "message": err.to_string(),
+                })
+                .to_string();
+                write_http_json(&mut stream, 500, "Internal Server Error", &(payload + "\n"))
+                    .await?;
+                return Ok(500);
+            }
+        };
+
+        let response = format!(
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncache-control: no-cache\r\nrustcode-session-id: {session_id}\r\nconnection: close\r\n\r\n"
         );
         stream.write_all(response.as_bytes()).await.map_err(|err| {
             ExecutionError::Executor(format!("failed to write sse headers: {err}"))
@@ -1503,10 +1635,13 @@ When you are done, respond with a final plain-text answer."
             stream: tokio::sync::Mutex::new(stream),
         });
 
+        let capture = Arc::new(tokio::sync::Mutex::new(String::new()));
+        let publisher: Arc<dyn EventPublisher> = Arc::new(CapturingPublisher {
+            inner: sse_publisher,
+            captured_output: capture.clone(),
+        });
+
         let now_ms = unix_ms();
-        let session_id = request
-            .session_id
-            .unwrap_or_else(|| format!("session-{now_ms}"));
         let request_id = format!("request-{now_ms}");
 
         let cancellation = CancellationToken::new();
@@ -1520,19 +1655,235 @@ When you are done, respond with a final plain-text answer."
         let context = CommandContext::with_cancellation(
             serve_context.config.clone(),
             rustcode_core::context::SessionMeta {
-                session_id,
+                session_id: session_id.clone(),
                 request_id,
                 started_at: SystemTime::now(),
             },
             cancellation,
         );
 
+        let prompt_for_store = request.prompt.clone();
         let command = Command::Run {
             prompt: request.prompt,
         };
-        let _ = self.execute(command, context, sse_publisher).await;
+        let result = self.execute(command, context, publisher).await;
+
+        if persist && matches!(result, Ok(())) {
+            let assistant = capture.lock().await.trim_end().to_string();
+            let prompt = prompt_for_store;
+            let model = serve_context.config.model.clone();
+            let workspace_root = serve_context.config.workspace_root.clone();
+            let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+            let store = SessionStore::open_default();
+            let session_id = session_id.clone();
+            tokio::task::spawn_blocking(move || {
+                // Ensure session exists (it should), but avoid failing hard if not.
+                if matches!(
+                    store.get_session(&session_id),
+                    Err(rustcode_state::StateError::NotFound(_))
+                ) {
+                    let _ = store.create_session(None, None, &cwd, &workspace_root, &model);
+                }
+                let now = unix_ms_i64();
+                let user = StoredMessage {
+                    id: store.new_message_id(),
+                    role: MessageRole::User,
+                    created_at_unix_ms: now,
+                    content: Value::String(prompt),
+                    tool_call_id: None,
+                    tool_name: None,
+                    tool_calls: Vec::new(),
+                };
+                let assistant_msg = StoredMessage {
+                    id: store.new_message_id(),
+                    role: MessageRole::Assistant,
+                    created_at_unix_ms: now,
+                    content: Value::String(assistant),
+                    tool_call_id: None,
+                    tool_name: None,
+                    tool_calls: Vec::new(),
+                };
+                // Best-effort persistence; ignore failures.
+                let _ = store.append_message(&session_id, &user);
+                let _ = store.append_message(&session_id, &assistant_msg);
+            })
+            .await
+            .ok();
+        }
 
         Ok(200)
+    }
+
+    async fn handle_serve_list_sessions(
+        &self,
+        stream: &mut TcpStream,
+    ) -> Result<u16, ExecutionError> {
+        let store = SessionStore::open_default();
+        let root = store.root().display().to_string();
+        let sessions_result = tokio::task::spawn_blocking(move || store.list_sessions())
+            .await
+            .map_err(|err| ExecutionError::Executor(format!("list sessions join error: {err}")))?;
+
+        let sessions = match sessions_result {
+            Ok(sessions) => sessions,
+            Err(err) => {
+                let payload = serde_json::json!({
+                    "error": "internal",
+                    "message": err.to_string(),
+                })
+                .to_string();
+                write_http_json(stream, 500, "Internal Server Error", &(payload + "\n")).await?;
+                return Ok(500);
+            }
+        };
+
+        let payload = serde_json::json!({
+            "schema_version": 1,
+            "sessions_root": root,
+            "sessions": sessions,
+        })
+        .to_string();
+        write_http_json(stream, 200, "OK", &(payload + "\n")).await?;
+        Ok(200)
+    }
+
+    async fn handle_serve_create_session(
+        &self,
+        stream: &mut TcpStream,
+        body: Vec<u8>,
+        context: &CommandContext,
+    ) -> Result<u16, ExecutionError> {
+        #[derive(serde::Deserialize)]
+        struct CreateSessionRequest {
+            #[serde(default)]
+            schema_version: Option<u16>,
+            #[serde(default)]
+            title: Option<String>,
+        }
+
+        let request: CreateSessionRequest = match serde_json::from_slice(&body) {
+            Ok(value) => value,
+            Err(err) => {
+                let payload = serde_json::json!({
+                    "error": "bad request",
+                    "message": format!("invalid json body: {err}"),
+                })
+                .to_string();
+                write_http_json(stream, 400, "Bad Request", &(payload + "\n")).await?;
+                return Ok(400);
+            }
+        };
+        if let Some(schema) = request.schema_version {
+            if schema != 1 {
+                let payload = serde_json::json!({
+                    "error": "bad request",
+                    "message": format!("unsupported schema_version={schema}"),
+                })
+                .to_string();
+                write_http_json(stream, 400, "Bad Request", &(payload + "\n")).await?;
+                return Ok(400);
+            }
+        }
+
+        let title = request.title;
+        let workspace_root = context.config.workspace_root.clone();
+        let model = context.config.model.clone();
+        let cwd = std::env::current_dir()
+            .map_err(|err| ExecutionError::Executor(format!("failed to resolve cwd: {err}")))?;
+
+        let store = SessionStore::open_default();
+        let session_result = tokio::task::spawn_blocking(move || {
+            store.create_session(title, None, &cwd, &workspace_root, &model)
+        })
+        .await
+        .map_err(|err| ExecutionError::Executor(format!("create session join error: {err}")))?;
+
+        let session = match session_result {
+            Ok(session) => session,
+            Err(rustcode_state::StateError::Validation(message)) => {
+                let payload = serde_json::json!({
+                    "error": "bad request",
+                    "message": message,
+                })
+                .to_string();
+                write_http_json(stream, 400, "Bad Request", &(payload + "\n")).await?;
+                return Ok(400);
+            }
+            Err(err) => {
+                let payload = serde_json::json!({
+                    "error": "internal",
+                    "message": err.to_string(),
+                })
+                .to_string();
+                write_http_json(stream, 500, "Internal Server Error", &(payload + "\n")).await?;
+                return Ok(500);
+            }
+        };
+
+        let payload = serde_json::json!({
+            "schema_version": 1,
+            "session": session,
+        })
+        .to_string();
+        write_http_json(stream, 201, "Created", &(payload + "\n")).await?;
+        Ok(201)
+    }
+
+    async fn handle_serve_show_session(
+        &self,
+        stream: &mut TcpStream,
+        session_id: &str,
+    ) -> Result<u16, ExecutionError> {
+        let store = SessionStore::open_default();
+        let session_id = session_id.to_string();
+        let result: Result<_, rustcode_state::StateError> =
+            tokio::task::spawn_blocking(move || {
+                let session = store.get_session(&session_id)?;
+                let messages = store.load_messages(&session_id)?;
+                Ok::<_, rustcode_state::StateError>((session, messages))
+            })
+            .await
+            .map_err(|err| ExecutionError::Executor(format!("show session join error: {err}")))?;
+
+        match result {
+            Ok((session, messages)) => {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "session": session,
+                    "messages": messages,
+                })
+                .to_string();
+                write_http_json(stream, 200, "OK", &(payload + "\n")).await?;
+                Ok(200)
+            }
+            Err(rustcode_state::StateError::NotFound(_)) => {
+                let payload = serde_json::json!({
+                    "error": "not found",
+                    "message": "session not found",
+                })
+                .to_string();
+                write_http_json(stream, 404, "Not Found", &(payload + "\n")).await?;
+                Ok(404)
+            }
+            Err(rustcode_state::StateError::Validation(message)) => {
+                let payload = serde_json::json!({
+                    "error": "bad request",
+                    "message": message,
+                })
+                .to_string();
+                write_http_json(stream, 400, "Bad Request", &(payload + "\n")).await?;
+                Ok(400)
+            }
+            Err(err) => {
+                let payload = serde_json::json!({
+                    "error": "internal",
+                    "message": err.to_string(),
+                })
+                .to_string();
+                write_http_json(stream, 500, "Internal Server Error", &(payload + "\n")).await?;
+                Ok(500)
+            }
+        }
     }
 
     async fn agent_tool_glob(
@@ -2069,6 +2420,8 @@ mod tests {
     use rustcode_plugins::{Plugin, PluginError, PluginRegistry};
 
     use super::*;
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     struct CancelledProcess;
     struct StubProcess {
@@ -2844,6 +3197,20 @@ mod tests {
 
     #[tokio::test]
     async fn serve_v1_run_streams_events_over_sse() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let sessions_root = std::env::temp_dir().join(format!(
+            "rustcode-engine-serve-sessions-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&sessions_root);
+        std::fs::create_dir_all(&sessions_root).expect("create sessions root");
+        let prev_sessions_dir = std::env::var("RUSTCODE_SESSIONS_DIR").ok();
+        std::env::set_var("RUSTCODE_SESSIONS_DIR", &sessions_root);
+
         let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
         let port = listener.local_addr().expect("addr").port();
         drop(listener);
@@ -2935,6 +3302,180 @@ mod tests {
 
         cancellation.cancel();
         let _ = task.await.expect("server task join");
+
+        if let Some(prev) = prev_sessions_dir {
+            std::env::set_var("RUSTCODE_SESSIONS_DIR", prev);
+        } else {
+            std::env::remove_var("RUSTCODE_SESSIONS_DIR");
+        }
+    }
+
+    #[tokio::test]
+    async fn serve_sessions_endpoints_create_list_show_and_persist_run() {
+        let _guard = ENV_LOCK.lock().expect("lock");
+        let sessions_root = std::env::temp_dir().join(format!(
+            "rustcode-engine-serve-sessions-api-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&sessions_root);
+        std::fs::create_dir_all(&sessions_root).expect("create sessions root");
+        let prev_sessions_dir = std::env::var("RUSTCODE_SESSIONS_DIR").ok();
+        std::env::set_var("RUSTCODE_SESSIONS_DIR", &sessions_root);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        drop(listener);
+
+        let cancellation = CancellationToken::new();
+        let context = CommandContext::with_cancellation(
+            Arc::new(ResolvedConfig::default()),
+            SessionMeta {
+                session_id: "serve-sessions-s1".to_string(),
+                request_id: "serve-sessions-r1".to_string(),
+                started_at: SystemTime::now(),
+            },
+            cancellation.clone(),
+        );
+
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+        let publisher = Arc::new(CollectingPublisher::default());
+
+        let task = tokio::spawn({
+            let publisher = publisher.clone();
+            async move {
+                engine
+                    .execute(
+                        Command::Serve {
+                            listen: format!("127.0.0.1:{port}"),
+                        },
+                        context,
+                        publisher,
+                    )
+                    .await
+            }
+        });
+
+        for _ in 0..50 {
+            let events = publisher.events.lock().await.clone();
+            let configured = events.iter().any(|event| {
+                matches!(
+                    &event.payload,
+                    EventPayload::Warning { message }
+                    if message.contains("serve endpoint configured")
+                )
+            });
+            if configured {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        // POST /v1/sessions
+        let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let body = serde_json::json!({"schema_version": 1, "title": "t1"}).to_string();
+        let request = format!(
+            "POST /v1/sessions HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        socket.write_all(request.as_bytes()).await.expect("write");
+        let mut response = Vec::new();
+        timeout(Duration::from_secs(5), socket.read_to_end(&mut response))
+            .await
+            .expect("read")
+            .expect("read");
+        let response = String::from_utf8_lossy(&response).to_string();
+        assert!(response.contains("201 Created"), "response={response}");
+        let json_start = response.find("\r\n\r\n").expect("header end") + 4;
+        let payload: serde_json::Value =
+            serde_json::from_str(response[json_start..].trim()).expect("json");
+        let session_id = payload["session"]["id"].as_str().expect("id").to_string();
+
+        // GET /v1/sessions
+        let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = "GET /v1/sessions HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        socket.write_all(request.as_bytes()).await.expect("write");
+        let mut response = Vec::new();
+        timeout(Duration::from_secs(5), socket.read_to_end(&mut response))
+            .await
+            .expect("read")
+            .expect("read");
+        let response = String::from_utf8_lossy(&response).to_string();
+        assert!(response.contains("200 OK"), "response={response}");
+        assert!(response.contains(&session_id), "response={response}");
+
+        // POST /v1/run (attach to existing session)
+        let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let body = serde_json::json!({
+            "schema_version": 1,
+            "prompt": "hello",
+            "session_id": session_id.clone(),
+        })
+        .to_string();
+        let request = format!(
+            "POST /v1/run HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        socket.write_all(request.as_bytes()).await.expect("write");
+        let mut response = Vec::new();
+        timeout(Duration::from_secs(5), socket.read_to_end(&mut response))
+            .await
+            .expect("read")
+            .expect("read");
+        let response = String::from_utf8_lossy(&response).to_string();
+        assert!(
+            response.contains("text/event-stream"),
+            "response={response}"
+        );
+
+        // GET /v1/sessions/<id> should now include messages
+        let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let request = format!("GET /v1/sessions/{session_id} HTTP/1.1\r\nHost: localhost\r\n\r\n");
+        socket.write_all(request.as_bytes()).await.expect("write");
+        let mut response = Vec::new();
+        timeout(Duration::from_secs(5), socket.read_to_end(&mut response))
+            .await
+            .expect("read")
+            .expect("read");
+        let response = String::from_utf8_lossy(&response).to_string();
+        let json_start = response.find("\r\n\r\n").expect("header end") + 4;
+        let payload: serde_json::Value =
+            serde_json::from_str(response[json_start..].trim()).expect("json");
+        let message_count = payload["messages"]
+            .as_array()
+            .map(|items| items.len())
+            .unwrap_or(0);
+        assert!(message_count >= 2, "payload={payload}");
+
+        cancellation.cancel();
+        let _ = task.await.expect("server task join");
+
+        if let Some(prev) = prev_sessions_dir {
+            std::env::set_var("RUSTCODE_SESSIONS_DIR", prev);
+        } else {
+            std::env::remove_var("RUSTCODE_SESSIONS_DIR");
+        }
     }
 
     #[tokio::test]

@@ -11,6 +11,7 @@ rustcode-io = { path = "../rustcode-io" }
 rustcode-llm = { path = "../rustcode-llm" }
 rustcode-mcp = { path = "../rustcode-mcp" }
 rustcode-plugins = { path = "../rustcode-plugins" }
+rustcode-state = { path = "../rustcode-state" }
 async-trait.workspace = true
 futures-util.workspace = true
 reqwest.workspace = true

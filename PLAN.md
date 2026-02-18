@@ -1296,8 +1296,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - stable protocol schema versioning + fixtures
   - integration tests for attach mode
  - Progress:
-  - Added `/v1/run` SSE endpoint (streams `Event` JSON via `data: ...` frames)
-  - Added `rustcode run --attach <url>` client mode for consuming SSE events
+ - Added `/v1/run` SSE endpoint (streams `Event` JSON via `data: ...` frames)
+ - Added `rustcode run --attach <url>` client mode for consuming SSE events
+  - Added `/v1/sessions` API (create/list/show) backed by the on-disk `SessionStore`
+  - `/v1/run` now creates/validates sessions and persists prompt/assistant messages when possible
 
 61. TUI v2 (Interactive UX, Session Picker, Approvals)
 - Status: pending
