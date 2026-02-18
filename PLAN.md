@@ -1212,7 +1212,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - normalized `PLAN.md` validation commands to use `rustcode` consistently.
   - Provider matrix validation fix:
     - rewired `scripts/provider_matrix.sh` to use `rustcode --json models` diagnostics (no giant per-provider model lists).
-    - observed status totals on local models index: `needs_api_key=81`, `needs_base_url=10`, `error=0`.
+    - observed status totals on local models index (with isolated auth store): `needs_api_key=84`, `needs_base_url=10`, `error=0`.
   - Re-validation:
     - Pass: `cargo test --workspace` (2026-02-18)
     - Pass: `./scripts/ci_matrix.sh` (2026-02-18)
