@@ -20,6 +20,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
+use tokio_util::sync::CancellationToken;
 use tracing::debug;
 
 use rustcode_core::command::{AgentOptions, Command};
@@ -46,6 +47,163 @@ const WEBFETCH_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const WEBFETCH_DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const WEBFETCH_MAX_TIMEOUT: Duration = Duration::from_secs(120);
 const WEBFETCH_MAX_BODY_BYTES: usize = 1_000_000;
+
+struct HttpRequest {
+    method: String,
+    path: String,
+    body: Vec<u8>,
+}
+
+enum ReadHttpRequestError {
+    Timeout,
+    BadRequest(String),
+    Io(std::io::Error),
+}
+
+async fn read_http_request(stream: &mut TcpStream) -> Result<HttpRequest, ReadHttpRequestError> {
+    const MAX_HEADER_BYTES: usize = 16 * 1024;
+    const MAX_BODY_BYTES: usize = 1024 * 1024;
+
+    let mut buffer = Vec::with_capacity(2048);
+    let mut temp = [0u8; 2048];
+
+    let header_end = loop {
+        if buffer.len() > MAX_HEADER_BYTES {
+            return Err(ReadHttpRequestError::BadRequest(
+                "request headers too large".to_string(),
+            ));
+        }
+        match timeout(Duration::from_secs(2), stream.read(&mut temp)).await {
+            Ok(Ok(0)) => {
+                return Err(ReadHttpRequestError::BadRequest(
+                    "empty request".to_string(),
+                ));
+            }
+            Ok(Ok(n)) => {
+                buffer.extend_from_slice(&temp[..n]);
+                if let Some(pos) = find_header_end(&buffer) {
+                    break pos;
+                }
+            }
+            Ok(Err(err)) => return Err(ReadHttpRequestError::Io(err)),
+            Err(_) => return Err(ReadHttpRequestError::Timeout),
+        }
+    };
+
+    let (header_bytes, rest) = buffer.split_at(header_end);
+    let header_str = std::str::from_utf8(header_bytes)
+        .map_err(|_| ReadHttpRequestError::BadRequest("headers must be utf-8".to_string()))?;
+    let mut lines = header_str.split("\r\n");
+    let request_line = lines
+        .next()
+        .ok_or_else(|| ReadHttpRequestError::BadRequest("missing request line".to_string()))?;
+    let mut parts = request_line.split_whitespace();
+    let method = parts
+        .next()
+        .ok_or_else(|| ReadHttpRequestError::BadRequest("missing method".to_string()))?
+        .to_string();
+    let path = parts
+        .next()
+        .ok_or_else(|| ReadHttpRequestError::BadRequest("missing path".to_string()))?
+        .to_string();
+
+    let mut headers = std::collections::BTreeMap::new();
+    for line in lines {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
+    }
+
+    let content_length = headers
+        .get("content-length")
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0);
+    if content_length > MAX_BODY_BYTES {
+        return Err(ReadHttpRequestError::BadRequest(
+            "request body too large".to_string(),
+        ));
+    }
+
+    let mut body = Vec::with_capacity(content_length);
+    if content_length > 0 {
+        let already = rest.len().min(content_length);
+        body.extend_from_slice(&rest[..already]);
+        while body.len() < content_length {
+            let remaining = content_length - body.len();
+            let chunk = remaining.min(temp.len());
+            let n = stream
+                .read(&mut temp[..chunk])
+                .await
+                .map_err(ReadHttpRequestError::Io)?;
+            if n == 0 {
+                return Err(ReadHttpRequestError::BadRequest(
+                    "unexpected EOF reading body".to_string(),
+                ));
+            }
+            body.extend_from_slice(&temp[..n]);
+        }
+    }
+
+    Ok(HttpRequest { method, path, body })
+}
+
+fn find_header_end(bytes: &[u8]) -> Option<usize> {
+    bytes
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .map(|pos| pos + 4)
+}
+
+async fn write_http_json(
+    stream: &mut TcpStream,
+    status_code: u16,
+    status_text: &str,
+    body: &str,
+) -> Result<(), ExecutionError> {
+    let response = format!(
+        "HTTP/1.1 {status_code} {status_text}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream
+        .write_all(response.as_bytes())
+        .await
+        .map_err(|err| ExecutionError::Executor(format!("failed to write response: {err}")))?;
+    stream
+        .shutdown()
+        .await
+        .map_err(|err| ExecutionError::Executor(format!("failed to shutdown stream: {err}")))?;
+    Ok(())
+}
+
+struct SsePublisher {
+    stream: tokio::sync::Mutex<TcpStream>,
+}
+
+#[async_trait]
+impl EventPublisher for SsePublisher {
+    async fn publish(&self, event: Event) -> Result<(), PublishError> {
+        let json = serde_json::to_string(&event).map_err(|_| PublishError::SinkClosed)?;
+        let frame = format!("data: {json}\n\n");
+        let mut stream = self.stream.lock().await;
+        stream
+            .write_all(frame.as_bytes())
+            .await
+            .map_err(|_| PublishError::SinkClosed)?;
+        stream.flush().await.map_err(|_| PublishError::SinkClosed)?;
+        Ok(())
+    }
+}
+
+fn unix_ms() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
 
 #[derive(Clone)]
 pub struct ChannelPublisher {
@@ -1192,28 +1350,16 @@ When you are done, respond with a final plain-text answer."
         context: &CommandContext,
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
-        let mut buffer = [0u8; 2048];
-        let bytes = match timeout(Duration::from_secs(2), stream.read(&mut buffer)).await {
-            Ok(Ok(bytes)) => bytes,
-            Ok(Err(err)) => {
-                return Err(ExecutionError::Executor(format!(
-                    "failed to read request: {err}"
-                )));
-            }
-            Err(_) => {
-                let body = "{\"error\":\"request timeout\"}\n";
-                let response = format!(
-                    "HTTP/1.1 408 Request Timeout\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-                    body.len()
-                );
-
-                stream.write_all(response.as_bytes()).await.map_err(|err| {
-                    ExecutionError::Executor(format!("failed to write timeout response: {err}"))
-                })?;
-                stream.shutdown().await.map_err(|err| {
-                    ExecutionError::Executor(format!("failed to shutdown stream: {err}"))
-                })?;
-
+        let request = match read_http_request(&mut stream).await {
+            Ok(request) => request,
+            Err(ReadHttpRequestError::Timeout) => {
+                write_http_json(
+                    &mut stream,
+                    408,
+                    "Request Timeout",
+                    "{\"error\":\"request timeout\"}\n",
+                )
+                .await?;
                 self.emit(
                     publisher,
                     EventScope::System,
@@ -1227,33 +1373,59 @@ When you are done, respond with a final plain-text answer."
                 .await?;
                 return Ok(());
             }
+            Err(ReadHttpRequestError::BadRequest(message)) => {
+                let payload = serde_json::json!({
+                    "error": "bad request",
+                    "message": message,
+                })
+                .to_string();
+                write_http_json(&mut stream, 400, "Bad Request", &(payload + "\n")).await?;
+                self.emit(
+                    publisher,
+                    EventScope::System,
+                    EventPayload::ServeRequest {
+                        method: String::new(),
+                        path: String::new(),
+                        status: 400,
+                    },
+                    context,
+                )
+                .await?;
+                return Ok(());
+            }
+            Err(ReadHttpRequestError::Io(err)) => {
+                return Err(ExecutionError::Executor(format!(
+                    "failed to read request: {err}"
+                )));
+            }
         };
 
-        let request = String::from_utf8_lossy(&buffer[..bytes]);
-        let request_line = request.lines().next().unwrap_or_default();
-        let mut parts = request_line.split_whitespace();
-        let method = parts.next().unwrap_or_default().to_string();
-        let path = parts.next().unwrap_or_default().to_string();
+        let method = request.method.clone();
+        let path = request.path.clone();
 
-        let (status_code, status_line, body) = match (method.as_str(), path.as_str()) {
-            ("GET", "/health") => (200u16, "200 OK", "{\"ok\":true}\n"),
-            ("", "") => (400u16, "400 Bad Request", "{\"error\":\"bad request\"}\n"),
-            _ => (404u16, "404 Not Found", "{\"error\":\"not found\"}\n"),
+        if method == "POST" && path == "/v1/run" {
+            let status = self
+                .handle_serve_run_request(stream, request.body, context)
+                .await?;
+            self.emit(
+                publisher,
+                EventScope::System,
+                EventPayload::ServeRequest {
+                    method,
+                    path,
+                    status,
+                },
+                context,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let (status_code, status_text, body) = match (method.as_str(), path.as_str()) {
+            ("GET", "/health") => (200u16, "OK", "{\"ok\":true}\n"),
+            _ => (404u16, "Not Found", "{\"error\":\"not found\"}\n"),
         };
-
-        let response = format!(
-            "HTTP/1.1 {status_line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-            body.len()
-        );
-
-        stream
-            .write_all(response.as_bytes())
-            .await
-            .map_err(|err| ExecutionError::Executor(format!("failed to write response: {err}")))?;
-        stream
-            .shutdown()
-            .await
-            .map_err(|err| ExecutionError::Executor(format!("failed to shutdown stream: {err}")))?;
+        write_http_json(&mut stream, status_code, status_text, body).await?;
 
         self.emit(
             publisher,
@@ -1266,6 +1438,101 @@ When you are done, respond with a final plain-text answer."
             context,
         )
         .await
+    }
+
+    async fn handle_serve_run_request(
+        &self,
+        mut stream: TcpStream,
+        body: Vec<u8>,
+        serve_context: &CommandContext,
+    ) -> Result<u16, ExecutionError> {
+        #[derive(serde::Deserialize)]
+        struct RunRequest {
+            #[serde(default)]
+            schema_version: Option<u16>,
+            prompt: String,
+            #[serde(default)]
+            session_id: Option<String>,
+        }
+
+        let request: RunRequest = match serde_json::from_slice(&body) {
+            Ok(value) => value,
+            Err(err) => {
+                let payload = serde_json::json!({
+                    "error": "bad request",
+                    "message": format!("invalid json body: {err}"),
+                })
+                .to_string();
+                write_http_json(&mut stream, 400, "Bad Request", &(payload + "\n")).await?;
+                return Ok(400);
+            }
+        };
+        if request.prompt.trim().is_empty() {
+            let payload = serde_json::json!({
+                "error": "bad request",
+                "message": "prompt must not be empty",
+            })
+            .to_string();
+            write_http_json(&mut stream, 400, "Bad Request", &(payload + "\n")).await?;
+            return Ok(400);
+        }
+        if let Some(schema) = request.schema_version {
+            if schema != rustcode_core::event::EVENT_SCHEMA_VERSION {
+                let payload = serde_json::json!({
+                    "error": "bad request",
+                    "message": format!("unsupported schema_version={schema}"),
+                })
+                .to_string();
+                write_http_json(&mut stream, 400, "Bad Request", &(payload + "\n")).await?;
+                return Ok(400);
+            }
+        }
+
+        let response = concat!(
+            "HTTP/1.1 200 OK\r\n",
+            "content-type: text/event-stream\r\n",
+            "cache-control: no-cache\r\n",
+            "connection: close\r\n",
+            "\r\n"
+        );
+        stream.write_all(response.as_bytes()).await.map_err(|err| {
+            ExecutionError::Executor(format!("failed to write sse headers: {err}"))
+        })?;
+
+        let sse_publisher = Arc::new(SsePublisher {
+            stream: tokio::sync::Mutex::new(stream),
+        });
+
+        let now_ms = unix_ms();
+        let session_id = request
+            .session_id
+            .unwrap_or_else(|| format!("session-{now_ms}"));
+        let request_id = format!("request-{now_ms}");
+
+        let cancellation = CancellationToken::new();
+        let serve_cancel = serve_context.cancellation.clone();
+        let cancellation_clone = cancellation.clone();
+        tokio::spawn(async move {
+            serve_cancel.cancelled().await;
+            cancellation_clone.cancel();
+        });
+
+        let context = CommandContext::with_cancellation(
+            serve_context.config.clone(),
+            rustcode_core::context::SessionMeta {
+                session_id,
+                request_id,
+                started_at: SystemTime::now(),
+            },
+            cancellation,
+        );
+
+        let command = Command::Run {
+            prompt: request.prompt,
+        };
+        let _ = self.execute(command, context, sse_publisher).await;
+
+        Ok(200)
     }
 
     async fn agent_tool_glob(
@@ -2573,6 +2840,101 @@ mod tests {
             }
             other => panic!("unexpected serve result: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn serve_v1_run_streams_events_over_sse() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        drop(listener);
+
+        let cancellation = CancellationToken::new();
+        let context = CommandContext::with_cancellation(
+            Arc::new(ResolvedConfig::default()),
+            SessionMeta {
+                session_id: "serve-run-s1".to_string(),
+                request_id: "serve-run-r1".to_string(),
+                started_at: SystemTime::now(),
+            },
+            cancellation.clone(),
+        );
+
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+        let publisher = Arc::new(CollectingPublisher::default());
+
+        let task = tokio::spawn({
+            let publisher = publisher.clone();
+            async move {
+                engine
+                    .execute(
+                        Command::Serve {
+                            listen: format!("127.0.0.1:{port}"),
+                        },
+                        context,
+                        publisher,
+                    )
+                    .await
+            }
+        });
+
+        // Wait for the server to bind.
+        for _ in 0..50 {
+            let events = publisher.events.lock().await.clone();
+            let configured = events.iter().any(|event| {
+                matches!(
+                    &event.payload,
+                    EventPayload::Warning { message }
+                    if message.contains("serve endpoint configured")
+                )
+            });
+            if configured {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+
+        let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .expect("connect");
+        let body = serde_json::json!({
+            "schema_version": 1,
+            "prompt": "hello",
+        })
+        .to_string();
+        let request = format!(
+            "POST /v1/run HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        socket.write_all(request.as_bytes()).await.expect("write");
+
+        let mut response = Vec::new();
+        timeout(Duration::from_secs(5), socket.read_to_end(&mut response))
+            .await
+            .expect("read must complete")
+            .expect("read");
+        let response = String::from_utf8_lossy(&response).to_string();
+        assert!(response.contains("200 OK"), "response={response}");
+        assert!(
+            response.to_ascii_lowercase().contains("text/event-stream"),
+            "response={response}"
+        );
+        assert!(response.contains("data:"), "response={response}");
+        assert!(
+            response.contains("null-llm response"),
+            "response={response}"
+        );
+
+        cancellation.cancel();
+        let _ = task.await.expect("server task join");
     }
 
     #[tokio::test]

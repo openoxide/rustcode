@@ -20,6 +20,8 @@ rustcode-state = { path = "../rustcode-state" }
 rustcode-tui = { path = "../rustcode-tui" }
 serde.workspace = true
 serde_json.workspace = true
+reqwest.workspace = true
+futures-util.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true

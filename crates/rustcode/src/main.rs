@@ -6,6 +6,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use futures_util::StreamExt;
+use reqwest::header::ACCEPT;
 use rustcode_auth::{
     complete_browser_oauth_flow, complete_mcp_browser_oauth_flow, discover_mcp_oauth,
     known_oauth_providers, methods_for_provider, oauth_login_hint,
@@ -24,7 +26,7 @@ use rustcode_config::{
 use rustcode_core::config::{McpServerConfig as CoreMcpServerConfig, ResolvedConfig};
 use rustcode_core::context::{CommandContext, SessionMeta};
 use rustcode_core::error::ExecutionError;
-use rustcode_core::event::EventPayload;
+use rustcode_core::event::{Event, EventPayload};
 use rustcode_core::ports::CommandExecutor;
 use rustcode_engine::mcp::McpRegistry;
 use rustcode_engine::{ChannelPublisher, Engine, WorkspacePermissionPolicy};
@@ -150,17 +152,41 @@ async fn main() -> Result<()> {
     let launch_tui = matches!(&cli.command, TopCommand::Tui);
     let requires_llm = matches!(
         &cli.command,
-        TopCommand::Run { .. } | TopCommand::Agent { .. } | TopCommand::Serve { .. }
+        TopCommand::Agent { .. } | TopCommand::Serve { .. } | TopCommand::Run { attach: None, .. }
     );
     let output_format = OutputFormat::from_json_flag(cli.json);
     let event_debug = cli.event_debug;
 
     let config = load_effective_config(&cli)?;
 
+    if let TopCommand::Run {
+        prompt,
+        attach: Some(url),
+        session,
+        fork,
+        title,
+        ..
+    } = &cli.command
+    {
+        if !config.allow_network {
+            anyhow::bail!("run --attach requires allow_network (set RUSTCODE_ALLOW_NETWORK=1 or --allow-network)");
+        }
+        if *fork || title.is_some() {
+            anyhow::bail!("run --attach does not support local session flags like --fork/--title");
+        }
+        return run_attached(url, prompt, session.as_deref(), output_format, event_debug).await;
+    }
+
     let session_store = SessionStore::open_default();
     let (session_info, run_history, agent_history) = match &cli.command {
         TopCommand::Run {
             prompt: _,
+            attach: Some(_),
+            ..
+        } => (None, Vec::new(), Vec::new()),
+        TopCommand::Run {
+            prompt: _,
+            attach: None,
             continue_session,
             session,
             fork,
@@ -203,7 +229,11 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|| "session-1".to_string());
 
     let run_user_prompt = match &cli.command {
-        TopCommand::Run { prompt, .. } => Some(prompt.clone()),
+        TopCommand::Run {
+            prompt,
+            attach: None,
+            ..
+        } => Some(prompt.clone()),
         _ => None,
     };
     let run_session_id = if run_user_prompt.is_some() {
@@ -257,7 +287,7 @@ async fn main() -> Result<()> {
 
     let mcp_registry = if matches!(
         &cli.command,
-        TopCommand::Agent { .. } | TopCommand::Run { .. }
+        TopCommand::Agent { .. } | TopCommand::Run { attach: None, .. }
     ) && config.allow_network
     {
         Some(build_mcp_registry(&config).await?)
@@ -293,7 +323,11 @@ async fn main() -> Result<()> {
         engine = engine.with_mcp(registry);
     }
     let command = match cli.command {
-        TopCommand::Run { prompt, .. } => {
+        TopCommand::Run {
+            prompt,
+            attach: None,
+            ..
+        } => {
             let prompt = if run_history.is_empty() {
                 prompt
             } else {
@@ -319,6 +353,11 @@ async fn main() -> Result<()> {
                 rendered
             };
             rustcode_core::Command::Run { prompt }
+        }
+        TopCommand::Run {
+            attach: Some(_), ..
+        } => {
+            anyhow::bail!("internal error: attach runs must be handled before engine dispatch")
         }
         TopCommand::Agent {
             prompt,
@@ -2774,6 +2813,123 @@ fn write_stdout_raw(text: &str) -> Result<bool> {
         }
         Err(err) if err.kind() == std::io::ErrorKind::BrokenPipe => Ok(false),
         Err(err) => Err(anyhow::anyhow!("stdout write failed: {err}")),
+    }
+}
+
+async fn run_attached(
+    server_url: &str,
+    prompt: &str,
+    session_id: Option<&str>,
+    output_format: OutputFormat,
+    event_debug: bool,
+) -> Result<()> {
+    let endpoint = format!("{}/v1/run", server_url.trim_end_matches('/'));
+    let request = serde_json::json!({
+        "schema_version": rustcode_core::event::EVENT_SCHEMA_VERSION,
+        "prompt": prompt,
+        "session_id": session_id,
+    });
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&endpoint)
+        .header(ACCEPT, "text/event-stream")
+        .json(&request)
+        .send()
+        .await
+        .context("failed to send attach request")?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("attach failed ({status}): {body}");
+    }
+
+    let mut buffer = String::new();
+    let mut streamed_text_open = false;
+    let mut stream = response.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.context("attach stream read failed")?;
+        let text = String::from_utf8_lossy(&chunk).replace("\r\n", "\n");
+        buffer.push_str(&text);
+
+        while let Some(block) = pop_sse_block(&mut buffer) {
+            let Some(data) = extract_sse_data(&block) else {
+                continue;
+            };
+            if data.trim().is_empty() {
+                continue;
+            }
+            let event: Event = match serde_json::from_str(&data) {
+                Ok(event) => event,
+                Err(err) => {
+                    if output_format == OutputFormat::Human {
+                        let _ = write_stdout_line(&format!("warning: invalid event json: {err}"));
+                    }
+                    continue;
+                }
+            };
+
+            if matches!(output_format, OutputFormat::Human) && !event_debug {
+                match &event.payload {
+                    EventPayload::OutputChunk { text } => {
+                        if !write_stdout_raw(text)? {
+                            return Ok(());
+                        }
+                        streamed_text_open = true;
+                        continue;
+                    }
+                    EventPayload::Completed => {
+                        if streamed_text_open {
+                            if !write_stdout_raw("\n")? {
+                                return Ok(());
+                            }
+                            streamed_text_open = false;
+                        }
+                        continue;
+                    }
+                    _ => {
+                        if streamed_text_open {
+                            if !write_stdout_raw("\n")? {
+                                return Ok(());
+                            }
+                            streamed_text_open = false;
+                        }
+                    }
+                }
+            }
+
+            let rendered = render_event(&event, output_format)?;
+            if !write_stdout_line(&rendered)? {
+                return Ok(());
+            }
+        }
+    }
+
+    if streamed_text_open {
+        let _ = write_stdout_raw("\n")?;
+    }
+    Ok(())
+}
+
+fn pop_sse_block(buffer: &mut String) -> Option<String> {
+    let idx = buffer.find("\n\n")?;
+    let block = buffer[..idx].to_string();
+    buffer.drain(..idx + 2);
+    Some(block)
+}
+
+fn extract_sse_data(block: &str) -> Option<String> {
+    let mut lines = Vec::new();
+    for line in block.lines() {
+        let Some(rest) = line.strip_prefix("data:") else {
+            continue;
+        };
+        lines.push(rest.trim_start());
+    }
+    if lines.is_empty() {
+        None
+    } else {
+        Some(lines.join("\n"))
     }
 }
 

@@ -1283,7 +1283,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `RUSTFLAGS='-Dwarnings' cargo check --workspace` (2026-02-18)
 
 60. Local Server + Attach API (Events + Sessions Over HTTP)
-- Status: pending
+- Status: in_progress
 - Scope:
   - Expand `serve` into a real API server that can host sessions and stream events.
   - Add `run --attach <url>` to connect to a running server.
@@ -1295,6 +1295,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - HTTP API + SSE (or websocket) event streaming
   - stable protocol schema versioning + fixtures
   - integration tests for attach mode
+ - Progress:
+  - Added `/v1/run` SSE endpoint (streams `Event` JSON via `data: ...` frames)
+  - Added `rustcode run --attach <url>` client mode for consuming SSE events
 
 61. TUI v2 (Interactive UX, Session Picker, Approvals)
 - Status: pending

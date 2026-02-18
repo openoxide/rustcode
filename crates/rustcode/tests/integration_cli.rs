@@ -5,6 +5,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
+use rustcode_core::event::{Event, EventPayload, EventScope};
 use serde_json::Value;
 
 fn rustcode_bin() -> &'static str {
@@ -227,6 +228,72 @@ fn human_run_output_is_plain_text_by_default() {
         !stdout.contains("OutputChunk"),
         "stdout should be coalesced"
     );
+}
+
+#[test]
+fn run_attach_streams_output_chunks_from_server() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+
+    let handle = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().expect("accept");
+        let mut buf = [0_u8; 8192];
+        let n = socket.read(&mut buf).expect("read");
+        let request = String::from_utf8_lossy(&buf[..n]).to_string();
+        assert!(request.contains("POST /v1/run"), "request={request}");
+        assert!(
+            request
+                .to_ascii_lowercase()
+                .contains("accept: text/event-stream"),
+            "request={request}"
+        );
+        assert!(
+            request.contains("\"prompt\":\"hello\""),
+            "request={request}"
+        );
+
+        let chunk_event = Event::new(
+            1,
+            EventScope::Command,
+            EventPayload::OutputChunk {
+                text: "hello-from-attach".to_string(),
+            },
+        );
+        let completed_event = Event::new(2, EventScope::Command, EventPayload::Completed);
+        let chunk_json = serde_json::to_string(&chunk_event).expect("chunk json");
+        let completed_json = serde_json::to_string(&completed_event).expect("completed json");
+
+        let body = format!("data: {chunk_json}\n\ndata: {completed_json}\n\n");
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        socket.write_all(response.as_bytes()).expect("write");
+        socket.flush().expect("flush");
+    });
+
+    let output = Command::new(rustcode_bin())
+        .args([
+            "--allow-network",
+            "run",
+            "--attach",
+            &format!("http://127.0.0.1:{port}"),
+            "hello",
+        ])
+        .output()
+        .expect("must run rustcode binary");
+
+    handle.join().expect("server should join");
+
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    assert_eq!(stdout.trim_end(), "hello-from-attach");
 }
 
 #[test]

@@ -53,6 +53,9 @@ pub enum TopCommand {
     Run {
         prompt: String,
 
+        #[arg(long, value_name = "URL", conflicts_with = "continue_session")]
+        attach: Option<String>,
+
         #[arg(long = "continue", default_value_t = false, conflicts_with = "session")]
         continue_session: bool,
 
@@ -301,6 +304,31 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("unexpected argument '--not-a-flag'"));
         assert!(message.contains("use '-- --not-a-flag'"));
+    }
+
+    #[test]
+    fn run_accepts_attach_url() {
+        let cli = Cli::try_parse_from([
+            "rustcode",
+            "run",
+            "--attach",
+            "http://127.0.0.1:4317",
+            "hello",
+        ])
+        .expect("cli should parse");
+        match cli.command {
+            TopCommand::Run {
+                prompt,
+                attach,
+                continue_session,
+                ..
+            } => {
+                assert_eq!(prompt, "hello");
+                assert_eq!(attach.as_deref(), Some("http://127.0.0.1:4317"));
+                assert!(!continue_session);
+            }
+            _ => panic!("expected run command"),
+        }
     }
 
     #[test]
