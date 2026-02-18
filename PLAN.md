@@ -1324,6 +1324,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added basic session actions: new (`n`) and fork (`f`)
   - Added local agent runner inside TUI (prompt composer + activity pane) with tool approval modal
   - Added `rustcode tui` start flags (`--continue`, `--session`, `--fork`, `--prompt`) to jump into a session and optionally auto-submit
+  - Added activity list selection + details modal for tool calls/results and output chunks
   - `rustcode tui` now launches interactive UI only when running in a real terminal (no-op when piped)
 
 62. Export/Import/Share
