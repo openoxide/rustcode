@@ -30,13 +30,11 @@ ALLOW_MISSING_SERVE_TELEMETRY="$allow_serve_telemetry" ./scripts/assert_serve_te
 
 echo "[ci] benchmark assert"
 allow_missing=0
-max_rss_limit=8000000
+max_rss_limit=14000000
 if [[ "$(uname -s)" == "Darwin" ]]; then
   # macOS sandboxed runners may not expose detailed time/ps memory metrics.
   allow_missing=1
-else
-  # Linux CI includes rustls/reqwest auth dependencies that raise steady-state RSS.
-  # Keep the gate conservative but aligned with measured baseline.
+  # macOS uses the same limit as Linux since auth dependencies raise steady-state RSS.
   max_rss_limit=14000000
 fi
 ALLOW_MISSING_METRICS="$allow_missing" \

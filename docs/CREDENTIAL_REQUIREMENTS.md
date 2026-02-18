@@ -20,8 +20,8 @@ Some sandboxed executions do not have working DNS/network. For any live provider
 | `openai` | `oauth_device_code` | none | none | Uses built-in client ID from opencode/codex-compatible flow. |
 | `openai` | `oauth_browser` | none | none | Uses built-in client ID; callback port set by `--oauth-port`. |
 | `openai` | `api_key` | `--from-env <ENV_VAR>` value | none | Stored as API key credential. |
-| `github-copilot` | `oauth_device_code` | none | `--domain` for enterprise variants | Uses built-in Copilot client ID `Ov23li8tweQw6odWQebz`. |
-| `github-copilot-enterprise` | `oauth_device_code` | none | `--domain` recommended | Domain should target enterprise host. |
+| `github-copilot` | `oauth_device_code` | none | `--domain` for enterprise variants | Uses built-in Copilot client ID `Ov23li8tweQw6odWQebz`. Default base URL `https://api.githubcopilot.com`; required headers (`Openai-Intent`, `x-initiator`, `User-Agent`) are applied automatically. |
+| `github-copilot-enterprise` | `oauth_device_code` | none | `--domain` recommended | Domain should target enterprise host. Uses same base URL and header defaults as `github-copilot`. |
 | `github-copilot` / `github-copilot-enterprise` | `api_key` | `--from-env <ENV_VAR>` value | none | Manual token mode. |
 | `gitlab` | `oauth_browser` | none for `gitlab.com`; `GITLAB_OAUTH_CLIENT_ID` for self-hosted instances | `GITLAB_OAUTH_CLIENT_SECRET`, `GITLAB_INSTANCE_URL` | Uses PKCE + localhost callback + `/oauth/token`; defaults to bundled OpenCode-compatible client ID on `gitlab.com`. |
 | `gitlab` | `api_key` | `--from-env <ENV_VAR>` value | none | Personal Access Token mode. |

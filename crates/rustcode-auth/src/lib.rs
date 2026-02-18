@@ -1034,7 +1034,12 @@ async fn complete_gitlab_browser_oauth_flow(
     let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
     let code = wait_for_oauth_callback(&callback, &flow.state, timeout).await?;
 
-    let token_url = format!("https://{}/oauth/token", flow.domain);
+    let scheme = if flow.domain.starts_with("127.0.0.1:") || flow.domain.starts_with("localhost:") {
+        "http"
+    } else {
+        "https"
+    };
+    let token_url = format!("{scheme}://{}/oauth/token", flow.domain);
     let client = auth_http_client()?;
     let mut form_params = BTreeMap::new();
     form_params.insert("client_id".to_string(), flow.client_id.clone());
@@ -1093,7 +1098,12 @@ async fn complete_openai_browser_oauth_flow(
     let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
     let code = wait_for_oauth_callback(&callback, &flow.state, timeout).await?;
 
-    let token_url = format!("https://{}/oauth/token", flow.domain);
+    let scheme = if flow.domain.starts_with("127.0.0.1:") || flow.domain.starts_with("localhost:") {
+        "http"
+    } else {
+        "https"
+    };
+    let token_url = format!("{scheme}://{}/oauth/token", flow.domain);
     let client = auth_http_client()?;
     let response = client
         .post(token_url)
@@ -1929,30 +1939,41 @@ mod tests {
         let mut request = Vec::new();
         let mut content_length = 0_usize;
         let mut header_end_index: Option<usize> = None;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
-            let read = stream.read(&mut buffer).expect("must read request");
-            if read == 0 {
+            if std::time::Instant::now() > deadline {
                 break;
             }
-            request.extend_from_slice(&buffer[..read]);
-            if header_end_index.is_none() {
-                if let Some(index) = request.windows(4).position(|chunk| chunk == b"\r\n\r\n") {
-                    let end = index + 4;
-                    header_end_index = Some(end);
-                    let headers = String::from_utf8_lossy(&request[..end]);
-                    for line in headers.lines() {
-                        let lower = line.to_ascii_lowercase();
-                        if let Some(value) = lower.strip_prefix("content-length:") {
-                            content_length = value.trim().parse::<usize>().unwrap_or(0);
+            match stream.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => {
+                    request.extend_from_slice(&buffer[..read]);
+                    if header_end_index.is_none() {
+                        if let Some(index) =
+                            request.windows(4).position(|chunk| chunk == b"\r\n\r\n")
+                        {
+                            let end = index + 4;
+                            header_end_index = Some(end);
+                            let headers = String::from_utf8_lossy(&request[..end]);
+                            for line in headers.lines() {
+                                let lower = line.to_ascii_lowercase();
+                                if let Some(value) = lower.strip_prefix("content-length:") {
+                                    content_length = value.trim().parse::<usize>().unwrap_or(0);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if let Some(end) = header_end_index {
+                        if request.len() >= end + content_length {
                             break;
                         }
                     }
                 }
-            }
-            if let Some(end) = header_end_index {
-                if request.len() >= end + content_length {
-                    break;
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10));
                 }
+                Err(err) => panic!("must read request: {err}"),
             }
         }
         String::from_utf8(request).expect("request must be utf8")

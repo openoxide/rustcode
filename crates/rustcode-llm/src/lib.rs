@@ -337,10 +337,9 @@ pub fn diagnose_provider(
     }
 
     let resolved = resolve_provider(&effective)?;
-    let endpoint = resolved
-        .base_url
-        .as_ref()
-        .map(|base| normalize_endpoint(resolved.protocol, base));
+    let endpoint = resolved.base_url.as_ref().map(|base| {
+        normalize_endpoint_for_provider(resolved.protocol, base, &resolved.provider_id)
+    });
     let mut missing = Vec::new();
     if resolved.base_url.is_none() && !matches!(resolved.protocol, ProviderProtocol::Null) {
         missing.push("base_url".to_string());
@@ -561,6 +560,19 @@ fn normalize_endpoint(protocol: ProviderProtocol, base_url: &str) -> String {
     }
 }
 
+fn normalize_endpoint_for_provider(
+    protocol: ProviderProtocol,
+    base_url: &str,
+    provider_id: &str,
+) -> String {
+    if matches!(provider_id, "github-copilot" | "github-copilot-enterprise")
+        && matches!(protocol, ProviderProtocol::OpenAiCompatible)
+    {
+        return normalize_copilot_chat_endpoint(base_url);
+    }
+    normalize_endpoint(protocol, base_url)
+}
+
 fn read_config_or_env(config: &ResolvedConfig, name: &str) -> Option<(String, ApiKeySource)> {
     if let Some(value) = config.env.get(name) {
         if !value.trim().is_empty() {
@@ -678,7 +690,7 @@ fn provider_preset(provider_id: &str) -> ProviderPreset {
         },
         "github-copilot" | "github-copilot-enterprise" => ProviderPreset {
             protocol: ProviderProtocol::OpenAiCompatible,
-            default_base_url: None,
+            default_base_url: Some("https://api.githubcopilot.com".to_string()),
             default_api_key_envs: vec![
                 "GITHUB_TOKEN".to_string(),
                 "GITHUB_COPILOT_TOKEN".to_string(),
@@ -831,9 +843,18 @@ impl OpenAiCompatibleClient {
         base_url: String,
         api_key: Option<String>,
     ) -> Result<Self, LlmError> {
+        let endpoint = if matches!(
+            provider_id.as_str(),
+            "github-copilot" | "github-copilot-enterprise"
+        ) {
+            normalize_copilot_chat_endpoint(&base_url)
+        } else {
+            normalize_openai_chat_endpoint(&base_url)
+        };
+
         Ok(Self {
             provider_id,
-            endpoint: normalize_openai_chat_endpoint(&base_url),
+            endpoint,
             api_key,
             http: llm_http_client()?,
         })
@@ -1634,6 +1655,20 @@ fn apply_provider_default_headers(
                 HeaderValue::from_static("opencode"),
             );
         }
+        "github-copilot" | "github-copilot-enterprise" => {
+            headers.insert(
+                HeaderName::from_static("openai-intent"),
+                HeaderValue::from_static("conversation-edits"),
+            );
+            headers.insert(
+                HeaderName::from_static("x-initiator"),
+                HeaderValue::from_static("user"),
+            );
+            let user_agent = format!("rustcode/{}", env!("CARGO_PKG_VERSION"));
+            let value = HeaderValue::from_str(&user_agent)
+                .map_err(|err| format!("invalid user-agent header: {err}"))?;
+            headers.insert(HeaderName::from_static("user-agent"), value);
+        }
         _ => {}
     }
     Ok(())
@@ -1647,6 +1682,17 @@ fn normalize_openai_chat_endpoint(base_url: &str) -> String {
         format!("{trimmed}/chat/completions")
     } else {
         format!("{trimmed}/v1/chat/completions")
+    }
+}
+
+fn normalize_copilot_chat_endpoint(base_url: &str) -> String {
+    let trimmed = base_url.trim_end_matches('/');
+    let trimmed = trimmed.strip_suffix("/v1").unwrap_or(trimmed);
+    let trimmed = trimmed.trim_end_matches('/');
+    if trimmed.ends_with("/chat/completions") {
+        trimmed.to_string()
+    } else {
+        format!("{trimmed}/chat/completions")
     }
 }
 
@@ -2084,16 +2130,34 @@ fn google_tools_from_specs(tools: &[ToolSpec]) -> Vec<Value> {
     let declarations = tools
         .iter()
         .map(|tool| {
+            let parameters = sanitize_google_schema(&tool.parameters);
             json!({
                 "name": tool.name,
                 "description": tool.description,
-                "parameters": tool.parameters,
+                "parameters": parameters,
             })
         })
         .collect::<Vec<_>>();
     vec![json!({
         "functionDeclarations": declarations
     })]
+}
+
+fn sanitize_google_schema(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut sanitized = serde_json::Map::new();
+            for (key, child) in map {
+                if key == "additionalProperties" {
+                    continue;
+                }
+                sanitized.insert(key.clone(), sanitize_google_schema(child));
+            }
+            Value::Object(sanitized)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(sanitize_google_schema).collect()),
+        _ => value.clone(),
+    }
 }
 
 fn google_contents_from_chat(request: &ChatRequest) -> Result<(String, Vec<Value>), LlmError> {
@@ -2450,6 +2514,36 @@ mod tests {
     }
 
     #[test]
+    fn google_schema_sanitizer_drops_additional_properties() {
+        let schema = json!({
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "path": { "type": "string" }
+            },
+            "definitions": {
+                "nested": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "properties": {
+                        "value": { "type": "string" }
+                    }
+                }
+            },
+            "items": [
+                { "type": "object", "additionalProperties": false }
+            ]
+        });
+
+        let sanitized = sanitize_google_schema(&schema);
+        assert!(sanitized.get("additionalProperties").is_none());
+        assert!(sanitized
+            .pointer("/definitions/nested/additionalProperties")
+            .is_none());
+        assert!(sanitized.pointer("/items/0/additionalProperties").is_none());
+    }
+
+    #[test]
     fn parses_openai_stream_deltas() {
         let string_delta = json!({
             "choices": [{"delta": {"content": "hello"}}]
@@ -2652,6 +2746,88 @@ mod tests {
         assert!(!openai.policy_selected);
 
         std::env::remove_var("OPENROUTER_API_KEY");
+    }
+
+    #[test]
+    fn github_copilot_provider_has_default_base_url() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        std::env::set_var("GITHUB_COPILOT_TOKEN", "copilot-test-token");
+
+        let cfg = ResolvedConfig {
+            allow_network: true,
+            llm_provider: "github-copilot".to_string(),
+            ..ResolvedConfig::default()
+        };
+
+        let provider = resolve_provider(&cfg).expect("provider must resolve");
+        assert_eq!(provider.provider_id, "github-copilot");
+        assert_eq!(provider.protocol, ProviderProtocol::OpenAiCompatible);
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://api.githubcopilot.com")
+        );
+        assert_eq!(provider.api_key.as_deref(), Some("copilot-test-token"));
+
+        std::env::remove_var("GITHUB_COPILOT_TOKEN");
+    }
+
+    #[test]
+    fn github_copilot_headers_include_required_defaults() {
+        let mut headers = HeaderMap::new();
+        apply_provider_default_headers("github-copilot", &mut headers)
+            .expect("headers should apply");
+
+        assert_eq!(
+            headers.get("openai-intent").and_then(|v| v.to_str().ok()),
+            Some("conversation-edits")
+        );
+        assert_eq!(
+            headers.get("x-initiator").and_then(|v| v.to_str().ok()),
+            Some("user")
+        );
+        assert!(headers.contains_key("user-agent"));
+    }
+
+    #[test]
+    fn github_copilot_enterprise_uses_same_defaults() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        std::env::set_var("GITHUB_COPILOT_TOKEN", "enterprise-token");
+
+        let cfg = ResolvedConfig {
+            allow_network: true,
+            llm_provider: "github-copilot-enterprise".to_string(),
+            ..ResolvedConfig::default()
+        };
+
+        let provider = resolve_provider(&cfg).expect("provider must resolve");
+        assert_eq!(provider.provider_id, "github-copilot-enterprise");
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://api.githubcopilot.com")
+        );
+
+        std::env::remove_var("GITHUB_COPILOT_TOKEN");
+    }
+
+    #[test]
+    fn github_copilot_endpoint_uses_chat_completions_without_v1_prefix() {
+        let _guard = ENV_MUTEX.lock().expect("env mutex must lock");
+        std::env::set_var("GITHUB_COPILOT_TOKEN", "copilot-test-token");
+
+        let cfg = ResolvedConfig {
+            allow_network: true,
+            llm_provider: "github-copilot".to_string(),
+            ..ResolvedConfig::default()
+        };
+
+        let diag =
+            diagnose_provider(&cfg, Some("github-copilot")).expect("diagnostic should resolve");
+        assert_eq!(
+            diag.endpoint.as_deref(),
+            Some("https://api.githubcopilot.com/chat/completions")
+        );
+
+        std::env::remove_var("GITHUB_COPILOT_TOKEN");
     }
 
     fn make_temp_file_path(name: &str) -> PathBuf {

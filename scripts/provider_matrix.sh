@@ -19,34 +19,86 @@ cat >"$tmp_dir/rustcode.toml" <<'EOF'
 allow_network = true
 EOF
 
-providers="$(node -e 'const fs=require("fs"); const p=process.argv[1]; const data=JSON.parse(fs.readFileSync(p,"utf8")); console.log(Object.keys(data).sort().join("\n"));' "$MODELS_PATH")"
+summary_json="$tmp_dir/models_summary.json"
+summary_err="$tmp_dir/models_summary.err"
+
+RUSTCODE_USER_CONFIG="$tmp_dir/rustcode.toml" \
+RUSTCODE_TRUST_PROJECT=1 \
+RUSTCODE_MODELS_PATH="$MODELS_PATH" \
+cargo run -q -p rustcode -- --json models >"$summary_json" 2>"$summary_err" || true
 
 printf "provider\tstatus\tdetail\n"
-while IFS= read -r provider; do
-  [[ -z "$provider" ]] && continue
-  output="$(
-    RUSTCODE_USER_CONFIG="$tmp_dir/rustcode.toml" \
-    RUSTCODE_TRUST_PROJECT=1 \
-    cargo run -q -p rustcode-cli -- --llm-provider "$provider" --model "$provider/smoke-model" version 2>&1 || true
-  )"
+node - "$MODELS_PATH" "$summary_json" "$summary_err" <<'NODE'
+const fs = require('fs');
 
-  if [[ "$output" == *"rustcode 0.1.0"* ]]; then
-    printf "%s\tready\tinit-ok\n" "$provider"
-    continue
-  fi
-  if [[ "$output" == *"requires an LLM base URL"* ]]; then
-    printf "%s\tneeds_base_url\tmissing-default-endpoint\n" "$provider"
-    continue
-  fi
-  if [[ "$output" == *"requires an API key"* || "$output" == *"requires ANTHROPIC_API_KEY"* ]]; then
-    printf "%s\tneeds_api_key\tmissing-secret\n" "$provider"
-    continue
-  fi
-  if [[ "$output" == *"network access is disabled"* ]]; then
-    printf "%s\terror\tnetwork-gate\n" "$provider"
-    continue
-  fi
+const modelsPath = process.argv[2];
+const summaryPath = process.argv[3];
+const summaryErrPath = process.argv[4];
 
-  detail="$(printf "%s" "$output" | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | cut -c1-180)"
-  printf "%s\terror\t%s\n" "$provider" "$detail"
-done <<<"$providers"
+function safeRead(path) {
+  try {
+    return fs.readFileSync(path, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+const modelsRaw = safeRead(modelsPath);
+if (!modelsRaw.trim()) {
+  console.error(`models file is empty: ${modelsPath}`);
+  process.exit(1);
+}
+
+let providers;
+try {
+  const index = JSON.parse(modelsRaw);
+  providers = Object.keys(index).sort();
+} catch (err) {
+  console.error(`failed to parse models file ${modelsPath}: ${err}`);
+  process.exit(1);
+}
+
+const summaryRaw = safeRead(summaryPath);
+if (!summaryRaw.trim()) {
+  const err = safeRead(summaryErrPath).replace(/\s+/g, ' ').trim();
+  const detail = err ? err.slice(0, 180) : 'missing-summary-json';
+  for (const provider of providers) {
+    console.log(`${provider}\terror\t${detail}`);
+  }
+  process.exit(0);
+}
+
+let summary;
+try {
+  summary = JSON.parse(summaryRaw);
+} catch (err) {
+  const detail = String(summaryRaw).replace(/\s+/g, ' ').trim().slice(0, 180);
+  for (const provider of providers) {
+    console.log(`${provider}\terror\tinvalid-json:${detail}`);
+  }
+  process.exit(0);
+}
+
+const rows = Array.isArray(summary.providers) ? summary.providers : [];
+const rowMap = new Map(rows.map((row) => [row.id, row]));
+
+for (const provider of providers) {
+  const row = rowMap.get(provider);
+  if (!row) {
+    console.log(`${provider}\terror\tmissing-from-summary`);
+    continue;
+  }
+
+  const missing = Array.isArray(row.missing) ? row.missing : [];
+  if (missing.includes('base_url')) {
+    console.log(`${provider}\tneeds_base_url\tmissing-default-endpoint`);
+    continue;
+  }
+  if (missing.includes('api_key')) {
+    console.log(`${provider}\tneeds_api_key\tmissing-secret`);
+    continue;
+  }
+
+  console.log(`${provider}\tready\tinit-ok`);
+}
+NODE

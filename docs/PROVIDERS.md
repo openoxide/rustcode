@@ -74,6 +74,12 @@ base_url = "https://openrouter.ai/api/v1"
 api_key_env = "OPENROUTER_API_KEY"
 ```
 
+You can also enable network access for a single run via env (no config file edit):
+
+```bash
+RUSTCODE_ALLOW_NETWORK=1 rustcode models
+```
+
 ```bash
 OPENROUTER_API_KEY=... rustcode run "hello"
 ```

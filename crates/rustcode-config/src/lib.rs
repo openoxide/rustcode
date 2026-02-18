@@ -170,6 +170,9 @@ impl ConfigLoader {
             if let Ok(model) = std::env::var("RUSTCODE_MODEL") {
                 cfg.model = model;
             }
+            if let Ok(allow_network) = std::env::var("RUSTCODE_ALLOW_NETWORK") {
+                cfg.allow_network = parse_boolish_env("RUSTCODE_ALLOW_NETWORK", &allow_network)?;
+            }
             if let Ok(llm_provider) = std::env::var("RUSTCODE_LLM_PROVIDER") {
                 cfg.llm_provider = llm_provider;
             }
@@ -199,6 +202,17 @@ impl ConfigLoader {
 
         validate(&cfg)?;
         Ok(cfg)
+    }
+}
+
+fn parse_boolish_env(key: &str, value: &str) -> Result<bool, ConfigError> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(ConfigError::Validation(format!(
+            "{key} must be a boolean (accepted: true/false/1/0/on/off/yes/no)"
+        ))),
     }
 }
 
@@ -684,9 +698,12 @@ fn validate_provider_id(field: &str, value: &str) -> Result<(), ConfigError> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn defaults_validate() {
@@ -810,6 +827,35 @@ disabled_providers = ["openai"]
             !cfg.provider_allowed("anthropic"),
             "enabled_providers allow-list should exclude non-listed providers"
         );
+    }
+
+    #[test]
+    fn process_env_can_override_allow_network() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+
+        let temp_root = make_temp_dir("env-allow-network");
+        let cwd = temp_root.join("project");
+        fs::create_dir_all(&cwd).expect("must create cwd");
+
+        let global = temp_root.join("global.toml");
+        let user = temp_root.join("user.toml");
+
+        std::env::set_var("RUSTCODE_GLOBAL_CONFIG", global.as_os_str());
+        std::env::set_var("RUSTCODE_USER_CONFIG", user.as_os_str());
+        std::env::set_var("RUSTCODE_ALLOW_NETWORK", "1");
+        std::env::remove_var("RUSTCODE_PROFILE");
+        std::env::remove_var("RUSTCODE_MODEL");
+        std::env::remove_var("RUSTCODE_LLM_PROVIDER");
+        std::env::remove_var("RUSTCODE_LLM_BASE_URL");
+        std::env::remove_var("RUSTCODE_LLM_API_KEY_ENV");
+
+        let sources = ConfigSources::new(cwd);
+        let cfg = ConfigLoader::load(&sources).expect("config should load");
+        assert!(cfg.allow_network);
+
+        std::env::remove_var("RUSTCODE_ALLOW_NETWORK");
+        std::env::remove_var("RUSTCODE_GLOBAL_CONFIG");
+        std::env::remove_var("RUSTCODE_USER_CONFIG");
     }
 
     #[test]
