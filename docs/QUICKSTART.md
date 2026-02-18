@@ -14,6 +14,7 @@ cargo test --workspace
 ## Core Commands
 ```bash
 cargo run -q -p rustcode -- --help
+cargo run -q -p rustcode -- --version
 cargo run -q -p rustcode -- run "hello"
 cargo run -q -p rustcode -- agent "scan the repo and summarize key modules"
 cargo run -q -p rustcode -- --json run "hello"

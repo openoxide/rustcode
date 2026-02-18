@@ -3,7 +3,11 @@ use clap::{Parser, Subcommand};
 use rustcode_core::command::{AgentOptions, Command};
 
 #[derive(Debug, Parser)]
-#[command(name = "rustcode", about = "Production-grade CLI/TUI systems tool")]
+#[command(
+    name = "rustcode",
+    about = "Production-grade CLI/TUI systems tool",
+    version
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: TopCommand,

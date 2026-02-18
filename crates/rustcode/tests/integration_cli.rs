@@ -106,6 +106,33 @@ fn version_does_not_require_trusted_project_config_or_llm_init() {
 }
 
 #[test]
+fn version_flag_does_not_require_trusted_project_config_or_llm_init() {
+    let seed = make_temp_file_path("version-flag-untrusted");
+    let stem = seed
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("rustcode-version-flag-untrusted");
+    let project_root = std::env::temp_dir().join(stem);
+    let _ = std::fs::remove_dir_all(&project_root);
+    std::fs::create_dir_all(&project_root).expect("create project dir");
+
+    // Create an untrusted project config that would normally trip the trust gate.
+    std::fs::write(project_root.join("rustcode.toml"), "allow_network = true\n")
+        .expect("write project config");
+
+    let output = Command::new(rustcode_bin())
+        .current_dir(&project_root)
+        .arg("--version")
+        .output()
+        .expect("run rustcode --version");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("0."), "stdout={stdout}");
+
+    let _ = std::fs::remove_dir_all(&project_root);
+}
+
+#[test]
 fn list_does_not_require_llm_provider_even_when_allow_network_true() {
     let seed = make_temp_file_path("list-no-llm-init");
     let stem = seed
