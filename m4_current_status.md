@@ -1,6 +1,6 @@
 # M4 Progress Summary
 
-## Completed (from previous session)
+## Completed ✅
 
 ### 1. Instructions System ✅
 - Created `instructions.rs` (330 LOC)
@@ -30,22 +30,23 @@
 - Computes git diff stats (files changed, additions, deletions)
 - Formats human-readable output
 - 3 unit tests
+- **NOW WIRED**: Emits summary after successful agent runs in `engine_commands.rs`
 
 ## Status
-- All 4 modules created and tested
+- All 4 modules created, tested, and integrated
 - 310 tests passing (22 new from M4)
 - Build clean
-- **Next step**: Wire session_summary into engine_commands.rs to emit summary after agent runs
+- Committed as f9b2ae3
 
 ## Remaining M4 Items
-- [ ] Message v2 format
-- [ ] Prompt construction improvements
-- [ ] Revert logic
-- [ ] Status tracking
-- [ ] Snapshot/share support
-- [ ] Wire session summary into engine
+- [ ] Message v2 format (reference: opencode `session/message-v2.ts`)
+- [ ] Prompt construction improvements (reference: opencode `session/prompt.ts`)
+- [ ] Revert logic (reference: opencode `session/revert.ts`)
+- [ ] Status tracking (reference: opencode `session/status.ts`)
+- [ ] Snapshot/share support (reference: opencode `snapshot/`, `share/`)
 
 ## Notes
 - All branding uses "rustcode" (never "opencode")
 - Following dual-reference rule (opencode + codex)
 - All files under 600 LOC limit
+- Ready to continue with remaining M4 items or move to M5

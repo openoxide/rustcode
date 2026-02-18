@@ -27,6 +27,7 @@ use rustcode_plugins::{Plugin, PluginError, PluginRegistry};
 mod approvals;
 mod core;
 mod fixtures;
+mod session_management;
 mod mcp;
 mod serve;
 mod tool_validation;
