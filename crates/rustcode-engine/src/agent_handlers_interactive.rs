@@ -104,3 +104,42 @@ pub struct PlanStep {
     pub description: String,
     pub status: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn question_item_construction() {
+        let q = QuestionItem {
+            question: "What color?".to_string(),
+            options: vec!["red".to_string(), "blue".to_string()],
+            default: Some("blue".to_string()),
+        };
+        assert_eq!(q.question, "What color?");
+        assert_eq!(q.options.len(), 2);
+        assert_eq!(q.default.as_deref(), Some("blue"));
+    }
+
+    #[test]
+    fn question_item_no_options() {
+        let q = QuestionItem {
+            question: "Explain your reasoning".to_string(),
+            options: vec![],
+            default: None,
+        };
+        assert!(q.options.is_empty());
+        assert!(q.default.is_none());
+    }
+
+    #[test]
+    fn plan_step_statuses() {
+        for status in &["pending", "in_progress", "completed", "blocked"] {
+            let step = PlanStep {
+                description: "Test step".to_string(),
+                status: status.to_string(),
+            };
+            assert_eq!(step.status, *status);
+        }
+    }
+}

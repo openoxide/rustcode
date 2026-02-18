@@ -101,3 +101,59 @@ pub struct MultiEditOp {
     pub new_string: String,
     pub replace_all: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn multiedit_op_basic() {
+        let op = MultiEditOp {
+            old_string: "foo".to_string(),
+            new_string: "bar".to_string(),
+            replace_all: false,
+        };
+        assert_eq!(op.old_string, "foo");
+        assert_eq!(op.new_string, "bar");
+        assert!(!op.replace_all);
+    }
+
+    #[test]
+    fn multiedit_op_replace_all() {
+        let op = MultiEditOp {
+            old_string: "hello".to_string(),
+            new_string: "world".to_string(),
+            replace_all: true,
+        };
+        assert!(op.replace_all);
+    }
+
+    #[test]
+    fn multiedit_logic_single_replace() {
+        // Simulate the core replace logic from agent_tool_multiedit
+        let content = "hello world hello";
+        let old = "hello";
+        let new = "hi";
+        // First occurrence only
+        if let Some(pos) = content.find(old) {
+            let result = format!("{}{}{}", &content[..pos], new, &content[pos + old.len()..]);
+            assert_eq!(result, "hi world hello");
+        }
+    }
+
+    #[test]
+    fn multiedit_logic_replace_all() {
+        let content = "hello world hello";
+        let result = content.replace("hello", "hi");
+        assert_eq!(result, "hi world hi");
+    }
+
+    #[test]
+    fn multiedit_logic_sequential_edits() {
+        // Verify sequential edit application
+        let mut content = "aaa bbb ccc".to_string();
+        content = content.replace("aaa", "xxx");
+        content = content.replace("ccc", "zzz");
+        assert_eq!(content, "xxx bbb zzz");
+    }
+}

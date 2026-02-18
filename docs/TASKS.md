@@ -41,13 +41,13 @@
   - [x] `multiedit` — sequential multi-edit operations on a single file
   - [x] `batch` — parallel tool execution (up to 25 calls)
   - [x] `question` — ask user questions during agent loop
-- [/] **Phase 2 — Advanced tools:**
-  - [ ] `task` — sub-agent delegation (requires M4 session infra)
+- [/] **Phase 2 — Advanced tools (deferred — unblock as prerequisites land):**
+  - [ ] `task` — sub-agent delegation *(blocked on M4: session/sub-agent infra)*
   - [x] `plan` — task planning tool
   - [x] `websearch` — web search integration (DDG Lite)
-  - [ ] `lsp` — LSP-powered tool (requires M7 LSP)
-  - [ ] `skill` — skill invocation (requires M7 skills)
-  - [ ] `codesearch` — AST-aware code search (requires tree-sitter)
+  - [ ] `lsp` — LSP-powered tool *(blocked on M7: LSP integration)*
+  - [ ] `skill` — skill invocation *(blocked on M7: skill system)*
+  - [ ] `codesearch` — AST-aware code search *(blocked on tree-sitter dep)*
 - [x] Tool specs extracted to `agent_tool_specs.rs` (LOC compliance)
 
 ## Milestone 3: Context Window Management & Compaction
