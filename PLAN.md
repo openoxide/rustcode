@@ -1333,6 +1333,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added chat render test coverage for tool transcript modes
   - Added render tests for approval modal and activity details modal
   - Added live streaming assistant output in transcript during runs
+  - Refactored TUI to use a sessions backend trait (prep for remote/attach mode)
   - `rustcode tui` now launches interactive UI only when running in a real terminal (no-op when piped)
 
 62. Export/Import/Share
