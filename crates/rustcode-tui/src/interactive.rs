@@ -358,7 +358,7 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 state.defaults.workspace_root.as_path(),
                 state.defaults.model.as_str(),
             ) {
-                Ok(_session) => {
+                Ok(session) => {
                     state.sessions = state
                         .store
                         .list_sessions()
@@ -367,7 +367,32 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                             state.status = Some(err.to_string());
                             Vec::new()
                         });
-                    state.selected = 0;
+                    if let Some(idx) = state
+                        .sessions
+                        .iter()
+                        .position(|candidate| candidate.id == session.id)
+                    {
+                        state.selected = idx;
+                    } else {
+                        state.selected = 0;
+                    }
+
+                    let messages = state
+                        .store
+                        .load_messages(&session.id)
+                        .map_err(|err| TuiError::State(err.to_string()))
+                        .unwrap_or_else(|err| {
+                            state.status = Some(err.to_string());
+                            Vec::new()
+                        });
+                    state.screen = Screen::Chat(ChatState {
+                        session,
+                        messages,
+                        scroll: 0,
+                        composer: String::new(),
+                        activity: Vec::new(),
+                        running: None,
+                    });
                 }
                 Err(err) => {
                     state.status = Some(format!("failed to create session: {err}"));
@@ -380,7 +405,7 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 return false;
             };
             match state.store.fork_session(&session.id, None) {
-                Ok(_forked) => {
+                Ok(forked) => {
                     state.sessions = state
                         .store
                         .list_sessions()
@@ -389,7 +414,32 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                             state.status = Some(err.to_string());
                             Vec::new()
                         });
-                    state.selected = 0;
+                    if let Some(idx) = state
+                        .sessions
+                        .iter()
+                        .position(|candidate| candidate.id == forked.id)
+                    {
+                        state.selected = idx;
+                    } else {
+                        state.selected = 0;
+                    }
+
+                    let messages = state
+                        .store
+                        .load_messages(&forked.id)
+                        .map_err(|err| TuiError::State(err.to_string()))
+                        .unwrap_or_else(|err| {
+                            state.status = Some(err.to_string());
+                            Vec::new()
+                        });
+                    state.screen = Screen::Chat(ChatState {
+                        session: forked,
+                        messages,
+                        scroll: 0,
+                        composer: String::new(),
+                        activity: Vec::new(),
+                        running: None,
+                    });
                 }
                 Err(err) => {
                     state.status = Some(format!("failed to fork session: {err}"));
