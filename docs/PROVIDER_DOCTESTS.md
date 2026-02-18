@@ -25,6 +25,8 @@ RUSTCODE_MODELS_PATH=docs/fixtures/models_min.json rustcode --json models openro
 RUSTCODE_MODELS_PATH=docs/fixtures/models_min.json rustcode --json models github-copilot
 RUSTCODE_MODELS_PATH=docs/fixtures/models_min.json rustcode --json models google
 
+RUSTCODE_MODELS_PATH=docs/fixtures/models_min.json rustcode --json models github-copilot-enterprise
+
 RUSTCODE_MODELS_PATH=docs/fixtures/models_min.json rustcode models
 RUSTCODE_MODELS_PATH=docs/fixtures/models_min.json rustcode models openai
 ```
@@ -34,4 +36,6 @@ RUSTCODE_MODELS_PATH=docs/fixtures/models_min.json rustcode models openai
 ```bash rustcode-doctest
 RUSTCODE_MODELS_PATH=/this/path/does/not/exist/models.json rustcode --json models
 RUSTCODE_MODELS_PATH=/this/path/does/not/exist/models.json rustcode --json models openai
+RUSTCODE_MODELS_PATH=/this/path/does/not/exist/models.json rustcode --json models anthropic
+RUSTCODE_MODELS_PATH=/this/path/does/not/exist/models.json rustcode --json models vercel
 ```
