@@ -28,10 +28,12 @@ pub struct TuiApp {
 }
 
 impl TuiApp {
+    #[must_use]
     pub fn new(receiver: mpsc::Receiver<UiInput>) -> Self {
         Self { receiver }
     }
 
+    #[must_use]
     pub fn from_domain_receiver(mut receiver: mpsc::Receiver<Event>) -> Self {
         let (ui_tx, ui_rx) = mpsc::channel(512);
 
@@ -47,6 +49,11 @@ impl TuiApp {
         Self::new(ui_rx)
     }
 
+    /// Run the TUI event loop.
+    ///
+    /// # Errors
+    /// Returns `TuiError::ChannelClosed` if the input channel closes without an explicit
+    /// `UiInput::Shutdown` message.
     pub async fn run(mut self) -> Result<UiSummary, TuiError> {
         let mut events_processed = 0usize;
         let mut resize_events = 0usize;
@@ -65,6 +72,10 @@ impl TuiApp {
                     break;
                 }
             }
+        }
+
+        if !shutdown_received {
+            return Err(TuiError::ChannelClosed);
         }
 
         Ok(UiSummary {

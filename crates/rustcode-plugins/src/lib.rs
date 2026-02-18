@@ -29,6 +29,10 @@ pub struct PluginRegistry {
 }
 
 impl PluginRegistry {
+    /// Register a plugin by name.
+    ///
+    /// # Errors
+    /// Returns `PluginError::Duplicate` if a plugin with the same name is already registered.
     pub fn register(&mut self, plugin: Arc<dyn Plugin>) -> Result<(), PluginError> {
         let key = plugin.name().to_string();
         if self.plugins.contains_key(&key) {
@@ -45,11 +49,11 @@ impl PluginRegistry {
     pub fn unregister(&mut self, name: &str) -> bool {
         self.plugins.remove(name).is_some()
     }
-
+    #[must_use]
     pub fn len(&self) -> usize {
         self.plugins.len()
     }
-
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.plugins.is_empty()
     }

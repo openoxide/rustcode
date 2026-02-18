@@ -46,7 +46,22 @@ Safety defaults:
 - `agent` runs are read-only by default. To allow mutation tools:
   - `--allow-write` for creating/overwriting files
   - `--allow-edit` for in-place edits
+  - Mutating tools require approval in interactive terminals, or an explicit allow rule in config.
 - Overwriting an existing file requires reading it first (agent refuses blind overwrites).
+
+Permissions rules (optional) can auto-allow/deny/ask for specific tool targets:
+
+```toml
+[[permissions]]
+permission = "exec"
+action = "deny"
+pattern = "rm*"
+
+[[permissions]]
+permission = "write"
+action = "allow"
+pattern = "docs/**"
+```
 
 ## Auth Commands
 ```bash

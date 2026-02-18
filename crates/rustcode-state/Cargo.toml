@@ -1,17 +1,18 @@
 [package]
-name = "rustcode-config"
+name = "rustcode-state"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-globset.workspace = true
-rustcode-core = { path = "../rustcode-core" }
+async-trait.workspace = true
+rand.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
-toml.workspace = true
-toml_edit.workspace = true
+tokio.workspace = true
+rustcode-core = { path = "../rustcode-core" }
 
 [lints]
 workspace = true

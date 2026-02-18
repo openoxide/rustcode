@@ -6,27 +6,44 @@ use std::sync::{
 use std::{
     env,
     path::{Component, Path, PathBuf},
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 use async_trait::async_trait;
+use futures_util::StreamExt;
+use reqwest::header::CONTENT_TYPE;
 use serde_json::{json, Value};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 use tracing::debug;
+use globset::Glob;
+use regex::Regex;
 
 use rustcode_core::command::{AgentOptions, Command};
 use rustcode_core::context::CommandContext;
 use rustcode_core::error::{ExecutionError, PublishError};
 use rustcode_core::event::{Event, EventPayload, EventScope};
-use rustcode_core::ports::{CommandExecutor, EventPublisher, PathOperation, PermissionPolicy};
+use rustcode_core::permissions::PermissionAction;
+use rustcode_core::ports::{
+    CommandExecutor, EventPublisher, PathOperation, PermissionPolicy, ToolApprover,
+    TranscriptRecorder,
+};
+use rustcode_core::session::{MessageRole, StoredMessage, StoredToolCall};
+use rustcode_core::ToolApprovalRequest;
 use rustcode_io::{FileSystemPort, IoError, ProcessOutput, ProcessPort};
 use rustcode_llm::{
-    ChatMessage, ChatRequest, ChatRole, LlmClient, LlmRequest, RequestInitiator, ToolSpec,
+    ChatMessage, ChatRequest, ChatRole, LlmClient, LlmRequest, RequestInitiator, ToolCall,
 };
 use rustcode_plugins::PluginRegistry;
+
+mod agent_tools;
+
+const WEBFETCH_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+const WEBFETCH_DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+const WEBFETCH_MAX_TIMEOUT: Duration = Duration::from_secs(120);
+const WEBFETCH_MAX_BODY_BYTES: usize = 1_000_000;
 
 #[derive(Clone)]
 pub struct ChannelPublisher {
@@ -76,11 +93,14 @@ pub struct Engine {
     process: Arc<dyn ProcessPort>,
     permission_policy: Arc<dyn PermissionPolicy>,
     plugins: PluginRegistry,
+    recorder: Option<Arc<dyn TranscriptRecorder>>,
+    approver: Option<Arc<dyn ToolApprover>>,
     next_event_id: AtomicU64,
+    next_message_id: AtomicU64,
 }
 
 #[derive(Debug, Default)]
-struct AgentState {
+pub(crate) struct AgentState {
     read_paths: HashSet<PathBuf>,
 }
 
@@ -91,6 +111,8 @@ impl Engine {
         process: Arc<dyn ProcessPort>,
         permission_policy: Arc<dyn PermissionPolicy>,
         plugins: PluginRegistry,
+        recorder: Option<Arc<dyn TranscriptRecorder>>,
+        approver: Option<Arc<dyn ToolApprover>>,
     ) -> Self {
         Self {
             llm,
@@ -98,8 +120,33 @@ impl Engine {
             process,
             permission_policy,
             plugins,
+            recorder,
+            approver,
             next_event_id: AtomicU64::new(1),
+            next_message_id: AtomicU64::new(1),
         }
+    }
+
+    fn new_message_id(&self) -> String {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        let seq = self.next_message_id.fetch_add(1, Ordering::Relaxed);
+        format!("m-{now}-{seq}")
+    }
+
+    async fn record_message(
+        &self,
+        context: &CommandContext,
+        message: StoredMessage,
+    ) -> Result<(), ExecutionError> {
+        let Some(recorder) = self.recorder.as_ref() else {
+            return Ok(());
+        };
+        recorder
+            .append_message(&context.session.session_id, message)
+            .await
     }
 
     async fn emit(
@@ -166,6 +213,24 @@ impl Engine {
         context: &CommandContext,
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
+        let user_message_id = self.new_message_id();
+        self.record_message(
+            context,
+            StoredMessage {
+                id: user_message_id,
+                role: MessageRole::User,
+                created_at_unix_ms: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0),
+                content: Value::String(prompt.clone()),
+                tool_call_id: None,
+                tool_name: None,
+                tool_calls: Vec::new(),
+            },
+        )
+        .await?;
+
         let response = tokio::select! {
             _ = context.cancellation.cancelled() => {
                 return Err(ExecutionError::Cancelled);
@@ -180,13 +245,32 @@ impl Engine {
         .map_err(|err| ExecutionError::Executor(err.to_string()))?;
 
         if response.chunks.is_empty() {
+            let text = response.text;
             self.emit(
                 publisher,
                 EventScope::Command,
                 EventPayload::OutputChunk {
-                    text: response.text,
+                    text: text.clone(),
                 },
                 context,
+            )
+            .await?;
+
+            let assistant_message_id = self.new_message_id();
+            self.record_message(
+                context,
+                StoredMessage {
+                    id: assistant_message_id,
+                    role: MessageRole::Assistant,
+                    created_at_unix_ms: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_millis() as i64)
+                        .unwrap_or(0),
+                    content: Value::String(text),
+                    tool_call_id: None,
+                    tool_name: None,
+                    tool_calls: Vec::new(),
+                },
             )
             .await?;
             return Ok(());
@@ -202,6 +286,24 @@ impl Engine {
             .await?;
         }
 
+        let assistant_message_id = self.new_message_id();
+        self.record_message(
+            context,
+            StoredMessage {
+                id: assistant_message_id,
+                role: MessageRole::Assistant,
+                created_at_unix_ms: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0),
+                content: Value::String(response.text),
+                tool_call_id: None,
+                tool_name: None,
+                tool_calls: Vec::new(),
+            },
+        )
+        .await?;
+
         Ok(())
     }
 
@@ -209,34 +311,88 @@ impl Engine {
         &self,
         prompt: String,
         options: AgentOptions,
+        history: Vec<StoredMessage>,
         context: &CommandContext,
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
-        let tools = agent_tool_specs(&options);
+        let tools =
+            agent_tools::AgentToolRegistry::tool_specs(&options, context.config.allow_network);
         let mut state = AgentState::default();
-        let mut messages = vec![
-            ChatMessage {
-                role: ChatRole::System,
-                content: Value::String(
-                    "You are rustcode, a production-grade coding agent.\n\
+
+        let system_prompt = "You are rustcode, a production-grade coding agent.\n\
 Use tools when you need filesystem context.\n\
 Prefer: list -> read.\n\
 Only modify files via write/edit when explicitly required.\n\
 When you are done, respond with a final plain-text answer."
-                        .to_string(),
-                ),
+            .to_string();
+
+        let mut messages = Vec::new();
+        if history.is_empty() {
+            let system_id = self.new_message_id();
+            self.record_message(
+                context,
+                StoredMessage {
+                    id: system_id,
+                    role: MessageRole::System,
+                    created_at_unix_ms: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_millis() as i64)
+                        .unwrap_or(0),
+                    content: Value::String(system_prompt.clone()),
+                    tool_call_id: None,
+                    tool_name: None,
+                    tool_calls: Vec::new(),
+                },
+            )
+            .await?;
+            messages.push(ChatMessage {
+                role: ChatRole::System,
+                content: Value::String(system_prompt),
+                tool_call_id: None,
+                tool_name: None,
+                tool_calls: Vec::new(),
+            });
+        } else {
+            messages.extend(stored_messages_to_chat(history));
+            if !matches!(messages.first().map(|m| m.role), Some(ChatRole::System)) {
+                messages.insert(
+                    0,
+                    ChatMessage {
+                        role: ChatRole::System,
+                        content: Value::String(system_prompt),
+                        tool_call_id: None,
+                        tool_name: None,
+                        tool_calls: Vec::new(),
+                    },
+                );
+            }
+        }
+
+        let user_id = self.new_message_id();
+        self.record_message(
+            context,
+            StoredMessage {
+                id: user_id.clone(),
+                role: MessageRole::User,
+                created_at_unix_ms: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0),
+                content: Value::String(prompt.clone()),
                 tool_call_id: None,
                 tool_name: None,
                 tool_calls: Vec::new(),
             },
-            ChatMessage {
-                role: ChatRole::User,
-                content: Value::String(prompt),
-                tool_call_id: None,
-                tool_name: None,
-                tool_calls: Vec::new(),
-            },
-        ];
+        )
+        .await?;
+
+        messages.push(ChatMessage {
+            role: ChatRole::User,
+            content: Value::String(prompt),
+            tool_call_id: None,
+            tool_name: None,
+            tool_calls: Vec::new(),
+        });
 
         for _step in 0..options.max_steps {
             let request = ChatRequest {
@@ -268,6 +424,36 @@ When you are done, respond with a final plain-text answer."
                 tool_name: None,
                 tool_calls: response.tool_calls.clone(),
             });
+
+            let assistant_id = self.new_message_id();
+            self.record_message(
+                context,
+                StoredMessage {
+                    id: assistant_id,
+                    role: MessageRole::Assistant,
+                    created_at_unix_ms: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_millis() as i64)
+                        .unwrap_or(0),
+                    content: if response.text.is_empty() {
+                        Value::Null
+                    } else {
+                        Value::String(response.text.clone())
+                    },
+                    tool_call_id: None,
+                    tool_name: None,
+                    tool_calls: response
+                        .tool_calls
+                        .iter()
+                        .map(|call| StoredToolCall {
+                            id: call.id.clone(),
+                            name: call.name.clone(),
+                            arguments: call.arguments.clone(),
+                        })
+                        .collect(),
+                },
+            )
+            .await?;
 
             if !response.text.is_empty() {
                 self.emit(
@@ -333,6 +519,24 @@ When you are done, respond with a final plain-text answer."
                 )
                 .await?;
 
+                let tool_msg_id = self.new_message_id();
+                self.record_message(
+                    context,
+                    StoredMessage {
+                        id: tool_msg_id,
+                        role: MessageRole::Tool,
+                        created_at_unix_ms: SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .map(|d| d.as_millis() as i64)
+                            .unwrap_or(0),
+                        content: Value::String(result_payload.clone()),
+                        tool_call_id: Some(call.id.clone()),
+                        tool_name: Some(call.name.clone()),
+                        tool_calls: Vec::new(),
+                    },
+                )
+                .await?;
+
                 messages.push(ChatMessage {
                     role: ChatRole::Tool,
                     content: Value::String(result_payload),
@@ -363,88 +567,44 @@ When you are done, respond with a final plain-text answer."
             ExecutionError::Dispatch(format!("tool arguments are not valid JSON: {err}"))
         })?;
 
-        match name {
-            "list" => {
-                let path = args
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .map(|s| s.to_string());
-                self.agent_tool_list(path, context, options).await
-            }
-            "read" => {
-                let path = args.get("path").and_then(Value::as_str).ok_or_else(|| {
-                    ExecutionError::Dispatch("read tool requires path".to_string())
-                })?;
-                self.agent_tool_read(path, context, options, state).await
-            }
-            "write" => {
-                if !options.allow_write && !options.allow_edit {
-                    return Err(ExecutionError::Dispatch(
-                        "agent write is disabled; rerun with --allow-write".to_string(),
-                    ));
+        if is_mutating_tool(name) {
+            let (permission, pattern, reason) = approval_fields(name, &args);
+            let decision = resolve_permission_action(&context.config.permission_rules, &permission, &pattern)?;
+
+            match decision {
+                Some(PermissionAction::Deny) => {
+                    return Err(ExecutionError::Dispatch(format!(
+                        "tool permission denied by rule: tool={name} permission={permission} target={pattern}"
+                    )));
                 }
-                let path = args.get("path").and_then(Value::as_str).ok_or_else(|| {
-                    ExecutionError::Dispatch("write tool requires path".to_string())
-                })?;
-                let contents = args
-                    .get("contents")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| {
-                        ExecutionError::Dispatch("write tool requires contents".to_string())
-                    })?;
-                self.agent_tool_write(path, contents, context, options, state)
-                    .await
-            }
-            "edit" => {
-                if !options.allow_edit {
-                    return Err(ExecutionError::Dispatch(
-                        "agent edit is disabled; rerun with --allow-edit".to_string(),
-                    ));
+                Some(PermissionAction::Allow) => {
+                    // Explicit allow: proceed without prompting.
                 }
-                let path = args.get("path").and_then(Value::as_str).ok_or_else(|| {
-                    ExecutionError::Dispatch("edit tool requires path".to_string())
-                })?;
-                let from = args.get("from").and_then(Value::as_str).ok_or_else(|| {
-                    ExecutionError::Dispatch("edit tool requires from".to_string())
-                })?;
-                if from.is_empty() {
-                    return Err(ExecutionError::Dispatch(
-                        "edit tool requires non-empty from".to_string(),
-                    ));
+                Some(PermissionAction::Ask) | None => {
+                    let Some(approver) = self.approver.as_ref() else {
+                        return Err(ExecutionError::Dispatch(format!(
+                            "tool approval required but no interactive approver is available: tool={name} permission={permission} target={pattern}"
+                        )));
+                    };
+                    let approved = approver
+                        .approve(ToolApprovalRequest {
+                            tool: name.to_string(),
+                            permission,
+                            pattern,
+                            arguments: args.clone(),
+                            reason,
+                        })
+                        .await?;
+                    if !approved {
+                        return Err(ExecutionError::Dispatch(
+                            "tool execution rejected by user".to_string(),
+                        ));
+                    }
                 }
-                let to = args
-                    .get("to")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| ExecutionError::Dispatch("edit tool requires to".to_string()))?;
-                self.agent_tool_edit(path, from, to, context, options, state)
-                    .await
             }
-            "exec" => {
-                if !options.allow_exec {
-                    return Err(ExecutionError::Dispatch(
-                        "agent exec is disabled; rerun with --allow-exec".to_string(),
-                    ));
-                }
-                let command = args
-                    .get("command")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| ExecutionError::Dispatch("exec tool requires command".to_string()))?;
-                let args_list = args
-                    .get("args")
-                    .and_then(Value::as_array)
-                    .map(|items| {
-                        items
-                            .iter()
-                            .filter_map(|item| item.as_str().map(|s| s.to_string()))
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                self.agent_tool_exec(command, &args_list, context).await
-            }
-            _ => Err(ExecutionError::Dispatch(format!(
-                "unknown tool call: {name}"
-            ))),
         }
+
+        agent_tools::AgentToolRegistry::execute(self, name, args, context, options, state).await
     }
 
     async fn agent_tool_exec(
@@ -487,6 +647,124 @@ When you are done, respond with a final plain-text answer."
         }
 
         if output.code == 0 {
+            Ok(rendered)
+        } else {
+            Err(ExecutionError::Executor(rendered))
+        }
+    }
+
+    async fn agent_tool_webfetch(
+        &self,
+        url: &str,
+        format: Option<&str>,
+        timeout_secs: Option<u64>,
+        context: &CommandContext,
+    ) -> Result<String, ExecutionError> {
+        if !context.config.allow_network {
+            return Err(ExecutionError::Dispatch(
+                "network access is disabled; set allow_network=true (or RUSTCODE_ALLOW_NETWORK=1) to enable webfetch"
+                    .to_string(),
+            ));
+        }
+
+        let parsed = reqwest::Url::parse(url).map_err(|err| {
+            ExecutionError::Dispatch(format!("webfetch url is invalid: {err}"))
+        })?;
+        match parsed.scheme() {
+            "http" | "https" => {}
+            other => {
+                return Err(ExecutionError::Dispatch(format!(
+                    "webfetch url must use http or https (got scheme={other})"
+                )));
+            }
+        }
+
+        let timeout = timeout_secs
+            .map(Duration::from_secs)
+            .unwrap_or(WEBFETCH_DEFAULT_TIMEOUT)
+            .clamp(Duration::from_secs(1), WEBFETCH_MAX_TIMEOUT);
+
+        let client = reqwest::Client::builder()
+            .connect_timeout(WEBFETCH_CONNECT_TIMEOUT)
+            .timeout(timeout)
+            .redirect(reqwest::redirect::Policy::limited(10))
+            .no_proxy()
+            .build()
+            .map_err(|err| {
+                ExecutionError::Executor(format!("failed to build webfetch http client: {err}"))
+            })?;
+
+        let response = tokio::select! {
+            _ = context.cancellation.cancelled() => {
+                return Err(ExecutionError::Cancelled);
+            }
+            result = client.get(parsed.clone()).send() => {
+                result.map_err(|err| ExecutionError::Executor(format!("webfetch request failed: {err}")))?
+            }
+        };
+
+        let status = response.status();
+        let final_url = response.url().clone();
+        let content_type = response
+            .headers()
+            .get(CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
+        let is_html = content_type.to_ascii_lowercase().contains("text/html");
+        let output_format = format.unwrap_or("markdown").trim().to_ascii_lowercase();
+
+        let mut stream = response.bytes_stream();
+        let mut body: Vec<u8> = Vec::new();
+        let mut body_truncated = false;
+        while let Some(chunk) = tokio::select! {
+            _ = context.cancellation.cancelled() => {
+                return Err(ExecutionError::Cancelled);
+            }
+            next = stream.next() => next
+        } {
+            let chunk = chunk.map_err(|err| {
+                ExecutionError::Executor(format!("webfetch response stream failed: {err}"))
+            })?;
+            if body.len().saturating_add(chunk.len()) > WEBFETCH_MAX_BODY_BYTES {
+                let remaining = WEBFETCH_MAX_BODY_BYTES.saturating_sub(body.len());
+                body.extend_from_slice(&chunk[..remaining.min(chunk.len())]);
+                body_truncated = true;
+                break;
+            }
+            body.extend_from_slice(&chunk);
+        }
+
+        let raw = String::from_utf8_lossy(&body).to_string();
+        let content = if is_html && output_format != "html" {
+            html_to_plainish_text(&raw)
+        } else {
+            raw
+        };
+
+        let mut rendered = String::new();
+        rendered.push_str("status=");
+        rendered.push_str(status.as_str());
+        rendered.push('\n');
+        rendered.push_str("final_url=");
+        rendered.push_str(final_url.as_str());
+        rendered.push('\n');
+        if !content_type.is_empty() {
+            rendered.push_str("content_type=");
+            rendered.push_str(&content_type);
+            rendered.push('\n');
+        }
+        rendered.push_str("body_truncated=");
+        rendered.push_str(if body_truncated { "true" } else { "false" });
+        rendered.push('\n');
+        rendered.push_str("content:\n");
+        rendered.push_str(&content);
+        if !rendered.ends_with('\n') {
+            rendered.push('\n');
+        }
+
+        if status.is_success() {
             Ok(rendered)
         } else {
             Err(ExecutionError::Executor(rendered))
@@ -896,6 +1174,138 @@ When you are done, respond with a final plain-text answer."
         )
         .await
     }
+
+    async fn agent_tool_glob(
+        &self,
+        pattern: &str,
+        root: Option<&str>,
+        context: &CommandContext,
+        options: &AgentOptions,
+    ) -> Result<String, ExecutionError> {
+        let root = root.unwrap_or(".");
+        let resolved_root = self.resolve_workspace_path(context, root, PathOperation::List)?;
+        let matcher = Glob::new(pattern)
+            .map_err(|err| ExecutionError::Dispatch(format!("invalid glob pattern: {err}")))?
+            .compile_matcher();
+        let workspace_root = absolute_normalized(&context.config.workspace_root)
+            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+
+        let candidates = self
+            .fs
+            .walk_dir_limited(&resolved_root, options.max_list_entries)
+            .await
+            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+
+        let mut rendered = String::new();
+        let mut count = 0usize;
+        for path in candidates {
+            let rel_for_match = path
+                .strip_prefix(&resolved_root)
+                .unwrap_or(path.as_path())
+                .display()
+                .to_string()
+                .replace('\\', "/");
+            if !matcher.is_match(&rel_for_match) {
+                continue;
+            }
+
+            let relative = path
+                .strip_prefix(&workspace_root)
+                .unwrap_or(path.as_path())
+                .display()
+                .to_string();
+            rendered.push_str(&relative);
+            rendered.push('\n');
+            count += 1;
+            if count >= options.max_list_entries {
+                break;
+            }
+        }
+
+        Ok(rendered)
+    }
+
+    async fn agent_tool_grep(
+        &self,
+        pattern: &str,
+        root: Option<&str>,
+        include: Option<&str>,
+        context: &CommandContext,
+        options: &AgentOptions,
+    ) -> Result<String, ExecutionError> {
+        let root = root.unwrap_or(".");
+        let resolved_root = self.resolve_workspace_path(context, root, PathOperation::List)?;
+        let workspace_root = absolute_normalized(&context.config.workspace_root)
+            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+
+        let re = Regex::new(pattern)
+            .map_err(|err| ExecutionError::Dispatch(format!("invalid regex pattern: {err}")))?;
+        let include_matcher = if let Some(include) = include {
+            Some(
+                Glob::new(include)
+                    .map_err(|err| ExecutionError::Dispatch(format!("invalid include glob: {err}")))?
+                    .compile_matcher(),
+            )
+        } else {
+            None
+        };
+
+        let candidates = self
+            .fs
+            .walk_dir_limited(&resolved_root, options.max_list_entries)
+            .await
+            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+
+        let mut rendered = String::new();
+        let mut matches = 0usize;
+        for path in candidates {
+            let meta = self
+                .fs
+                .metadata(&path)
+                .await
+                .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+            if !meta.is_file {
+                continue;
+            }
+
+            let relative = path
+                .strip_prefix(&workspace_root)
+                .unwrap_or(path.as_path())
+                .display()
+                .to_string();
+            if let Some(include) = include_matcher.as_ref() {
+                let normalized = relative.replace('\\', "/");
+                if !include.is_match(&normalized) {
+                    continue;
+                }
+            }
+
+            let content = self
+                .fs
+                .read_to_string_limited(&path, options.max_read_bytes)
+                .await
+                .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+
+            for (idx, line) in content.lines().enumerate() {
+                if !re.is_match(line) {
+                    continue;
+                }
+                let line_no = idx + 1;
+                rendered.push_str(&relative);
+                rendered.push(':');
+                rendered.push_str(&line_no.to_string());
+                rendered.push_str(": ");
+                rendered.push_str(line);
+                rendered.push('\n');
+                matches += 1;
+                if matches >= 2000 {
+                    return Ok(rendered);
+                }
+            }
+        }
+
+        Ok(rendered)
+    }
 }
 
 fn absolute_normalized(path: &Path) -> Result<PathBuf, std::io::Error> {
@@ -944,8 +1354,12 @@ impl CommandExecutor for Engine {
 
         let command_result = match command {
             Command::Run { prompt } => self.run_prompt(prompt, &context, publisher.clone()).await,
-            Command::Agent { prompt, options } => {
-                self.run_agent(prompt, options, &context, publisher.clone())
+            Command::Agent {
+                prompt,
+                options,
+                history,
+            } => {
+                self.run_agent(prompt, options, history, &context, publisher.clone())
                     .await
             }
             Command::Exec { command, args } => {
@@ -1025,87 +1439,32 @@ impl CommandExecutor for Engine {
     }
 }
 
-fn agent_tool_specs(options: &AgentOptions) -> Vec<ToolSpec> {
-    let mut specs = vec![
-        ToolSpec {
-            name: "list".to_string(),
-            description: "List files and directories under a workspace-relative path.".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Workspace-relative path (default: .)" }
-                },
-                "additionalProperties": false
-            }),
-        },
-        ToolSpec {
-            name: "read".to_string(),
-            description: "Read a UTF-8 text file from the workspace.".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Workspace-relative file path" }
-                },
-                "required": ["path"],
-                "additionalProperties": false
-            }),
-        },
-    ];
+// Tool specs are defined in `agent_tools::AgentToolRegistry`.
 
-    if options.allow_write || options.allow_edit {
-        specs.push(ToolSpec {
-            name: "write".to_string(),
-            description: "Write a UTF-8 text file to the workspace.".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Workspace-relative file path" },
-                    "contents": { "type": "string", "description": "Full file contents" }
-                },
-                "required": ["path", "contents"],
-                "additionalProperties": false
-            }),
-        });
-    }
-
-    if options.allow_edit {
-        specs.push(ToolSpec {
-            name: "edit".to_string(),
-            description: "Replace a substring in a workspace file.".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "path": { "type": "string", "description": "Workspace-relative file path" },
-                    "from": { "type": "string", "description": "Exact text to replace" },
-                    "to": { "type": "string", "description": "Replacement text" }
-                },
-                "required": ["path", "from", "to"],
-                "additionalProperties": false
-            }),
-        });
-    }
-
-    if options.allow_exec {
-        specs.push(ToolSpec {
-            name: "exec".to_string(),
-            description: "Execute a command in the workspace.".to_string(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "command": { "type": "string", "description": "Program name" },
-                    "args": {
-                        "type": "array",
-                        "items": { "type": "string" },
-                        "description": "Command arguments"
-                    }
-                },
-                "required": ["command"],
-                "additionalProperties": false
-            }),
-        });
-    }
-
-    specs
+fn stored_messages_to_chat(history: Vec<StoredMessage>) -> Vec<ChatMessage> {
+    history
+        .into_iter()
+        .map(|msg| ChatMessage {
+            role: match msg.role {
+                MessageRole::System => ChatRole::System,
+                MessageRole::User => ChatRole::User,
+                MessageRole::Assistant => ChatRole::Assistant,
+                MessageRole::Tool => ChatRole::Tool,
+            },
+            content: msg.content,
+            tool_call_id: msg.tool_call_id,
+            tool_name: msg.tool_name,
+            tool_calls: msg
+                .tool_calls
+                .into_iter()
+                .map(|call| ToolCall {
+                    id: call.id,
+                    name: call.name,
+                    arguments: call.arguments,
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 fn tool_payload_json(ok: bool, output: String, max_bytes: usize) -> String {
@@ -1154,14 +1513,123 @@ fn truncate_utf8_bytes(input: &str, max_bytes: usize) -> String {
     format!("{prefix}\n...[truncated]...\n")
 }
 
+fn resolve_permission_action(
+    rules: &[rustcode_core::PermissionRule],
+    permission: &str,
+    target: &str,
+) -> Result<Option<PermissionAction>, ExecutionError> {
+    let normalized_target = target.replace('\\', "/");
+    for rule in rules.iter().rev() {
+        if !rule.permission.eq_ignore_ascii_case(permission) {
+            continue;
+        }
+        let matcher = Glob::new(&rule.pattern)
+            .map_err(|err| {
+                ExecutionError::Dispatch(format!(
+                    "invalid permissions glob pattern {}: {err}",
+                    rule.pattern
+                ))
+            })?
+            .compile_matcher();
+        if matcher.is_match(&normalized_target) {
+            return Ok(Some(rule.action));
+        }
+    }
+    Ok(None)
+}
+
+fn html_to_plainish_text(html: &str) -> String {
+    // Intentionally lightweight: no additional deps, deterministic output.
+    // Removes scripts/styles, inserts line breaks for common block tags, strips remaining tags,
+    // decodes a handful of common entities, and normalizes whitespace.
+    let re_script = Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap();
+    let re_style = Regex::new(r"(?is)<style[^>]*>.*?</style>").unwrap();
+    let re_br = Regex::new(r"(?is)<br\s*/?>").unwrap();
+    let re_block_end = Regex::new(r"(?is)</\s*(p|div|li|h[1-6]|tr|table|ul|ol)\s*>").unwrap();
+    let re_li = Regex::new(r"(?is)<\s*li\b[^>]*>").unwrap();
+    let re_tags = Regex::new(r"(?is)<[^>]+>").unwrap();
+    let re_ws = Regex::new(r"[ \t\x0B\x0C\r]+\n").unwrap();
+    let re_many_newlines = Regex::new(r"\n{3,}").unwrap();
+
+    let mut s = re_script.replace_all(html, "").to_string();
+    s = re_style.replace_all(&s, "").to_string();
+    s = re_br.replace_all(&s, "\n").to_string();
+    s = re_block_end.replace_all(&s, "\n").to_string();
+    s = re_li.replace_all(&s, "- ").to_string();
+    s = re_tags.replace_all(&s, "").to_string();
+
+    s = s
+        .replace("&nbsp;", " ")
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'");
+
+    s = re_ws.replace_all(&s, "\n").to_string();
+    s = re_many_newlines.replace_all(&s, "\n\n").to_string();
+
+    s.trim().to_string()
+}
+
+fn is_mutating_tool(name: &str) -> bool {
+    matches!(name, "write" | "edit" | "exec")
+}
+
+fn approval_fields(tool: &str, args: &Value) -> (String, String, String) {
+    let permission = tool.to_string();
+    let (pattern, reason) = match tool {
+        "write" => {
+            let path = args
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            (
+                path.to_string(),
+                format!("agent requests permission to write {path}"),
+            )
+        }
+        "edit" => {
+            let path = args
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            (
+                path.to_string(),
+                format!("agent requests permission to edit {path}"),
+            )
+        }
+        "exec" => {
+            let command = args
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            (
+                command.to_string(),
+                format!("agent requests permission to execute {command}"),
+            )
+        }
+        _ => (
+            "*".to_string(),
+            "agent requests permission for tool execution".to_string(),
+        ),
+    };
+
+    (permission, pattern, reason)
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
 
     use async_trait::async_trait;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
     use tokio::sync::Mutex;
+    use tokio::time::timeout;
     use tokio_util::sync::CancellationToken;
 
     use rustcode_core::config::ResolvedConfig;
@@ -1182,6 +1650,10 @@ mod tests {
         stdout: String,
         stderr: String,
         code: i32,
+    }
+    struct CountingApprover {
+        approved: bool,
+        calls: AtomicUsize,
     }
     struct DummyFs;
     struct StreamingLlmClient;
@@ -1225,6 +1697,18 @@ mod tests {
         ) -> Result<Vec<PathBuf>, IoError> {
             Err(IoError::Io("not used".to_string()))
         }
+
+        async fn metadata(&self, _path: &Path) -> Result<rustcode_io::FsMetadata, IoError> {
+            Err(IoError::Io("not used".to_string()))
+        }
+
+        async fn walk_dir_limited(
+            &self,
+            _path: &Path,
+            _max_entries: usize,
+        ) -> Result<Vec<PathBuf>, IoError> {
+            Err(IoError::Io("not used".to_string()))
+        }
     }
 
     #[async_trait]
@@ -1254,6 +1738,23 @@ mod tests {
         }
 
         async fn list_dir_limited(
+            &self,
+            _path: &Path,
+            _max_entries: usize,
+        ) -> Result<Vec<PathBuf>, IoError> {
+            Ok(vec![self.root.join("a.txt"), self.root.join("dir")])
+        }
+
+        async fn metadata(&self, path: &Path) -> Result<rustcode_io::FsMetadata, IoError> {
+            let is_dir = path.ends_with("dir");
+            Ok(rustcode_io::FsMetadata {
+                is_dir,
+                is_file: !is_dir,
+                len: 0,
+            })
+        }
+
+        async fn walk_dir_limited(
             &self,
             _path: &Path,
             _max_entries: usize,
@@ -1320,6 +1821,14 @@ mod tests {
                 stdout: self.stdout.clone(),
                 stderr: self.stderr.clone(),
             })
+        }
+    }
+
+    #[async_trait]
+    impl ToolApprover for CountingApprover {
+        async fn approve(&self, _request: ToolApprovalRequest) -> Result<bool, ExecutionError> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            Ok(self.approved)
         }
     }
 
@@ -1422,6 +1931,8 @@ mod tests {
             Arc::new(CancelledProcess),
             Arc::new(WorkspacePermissionPolicy),
             PluginRegistry::default(),
+            None,
+            None,
         );
         let publisher = Arc::new(CollectingPublisher::default());
         let context = CommandContext::new(
@@ -1479,6 +1990,8 @@ mod tests {
             Arc::new(CancelledProcess),
             Arc::new(WorkspacePermissionPolicy),
             PluginRegistry::default(),
+            None,
+            None,
         );
         let publisher = Arc::new(CollectingPublisher::default());
         let context = CommandContext::new(
@@ -1498,6 +2011,7 @@ mod tests {
                 Command::Agent {
                     prompt: "hi".to_string(),
                     options: AgentOptions::default(),
+                    history: Vec::new(),
                 },
                 context,
                 publisher.clone(),
@@ -1584,11 +2098,18 @@ mod tests {
             }),
             Arc::new(WorkspacePermissionPolicy),
             PluginRegistry::default(),
+            None,
+            None,
         );
         let publisher = Arc::new(CollectingPublisher::default());
         let context = CommandContext::new(
             Arc::new(ResolvedConfig {
                 workspace_root,
+                permission_rules: vec![rustcode_core::PermissionRule {
+                    permission: "exec".to_string(),
+                    action: PermissionAction::Allow,
+                    pattern: "echo".to_string(),
+                }],
                 ..ResolvedConfig::default()
             }),
             SessionMeta {
@@ -1606,6 +2127,7 @@ mod tests {
                         allow_exec: true,
                         ..AgentOptions::default()
                     },
+                    history: Vec::new(),
                 },
                 context,
                 publisher.clone(),
@@ -1637,6 +2159,8 @@ mod tests {
             Arc::new(CancelledProcess),
             Arc::new(WorkspacePermissionPolicy),
             PluginRegistry::default(),
+            None,
+            None,
         );
         let publisher = Arc::new(CollectingPublisher::default());
         let context = CommandContext::new(
@@ -1687,6 +2211,8 @@ mod tests {
             Arc::new(CancelledProcess),
             Arc::new(WorkspacePermissionPolicy),
             registry,
+            None,
+            None,
         );
         let publisher = Arc::new(CollectingPublisher::default());
         let context = CommandContext::new(
@@ -1713,6 +2239,8 @@ mod tests {
             Arc::new(CancelledProcess),
             Arc::new(WorkspacePermissionPolicy),
             PluginRegistry::default(),
+            None,
+            None,
         );
         let publisher = Arc::new(CollectingPublisher::default());
         let context = CommandContext::new(
@@ -1765,6 +2293,8 @@ mod tests {
             Arc::new(CancelledProcess),
             Arc::new(WorkspacePermissionPolicy),
             PluginRegistry::default(),
+            None,
+            None,
         );
         let publisher = Arc::new(CollectingPublisher::default());
 
@@ -1817,5 +2347,411 @@ mod tests {
             }
             other => panic!("unexpected serve result: {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn mutating_tools_require_approval_when_no_allow_rule_and_no_approver() {
+        let mut cfg = ResolvedConfig::default();
+        cfg.permission_rules.clear();
+        let context = CommandContext::new(
+            Arc::new(cfg),
+            SessionMeta {
+                session_id: "s-approve-1".to_string(),
+                request_id: "r-approve-1".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(StubProcess {
+                stdout: "ok".to_string(),
+                stderr: String::new(),
+                code: 0,
+            }),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+
+        let options = AgentOptions {
+            max_steps: 1,
+            max_tool_calls_per_step: 1,
+            allow_write: false,
+            allow_edit: false,
+            allow_exec: true,
+            max_read_bytes: 1024,
+            max_list_entries: 100,
+            max_tool_result_bytes: 1024,
+            max_write_bytes: 1024,
+        };
+        let mut state = AgentState::default();
+        let result = engine
+            .execute_agent_tool_call(
+                "exec",
+                r#"{"command":"echo","args":["hi"]}"#,
+                &context,
+                &options,
+                &mut state,
+            )
+            .await;
+        match result {
+            Err(ExecutionError::Dispatch(message)) => {
+                assert!(message.contains("approval required"), "message={message}");
+            }
+            other => panic!("expected dispatch error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn mutating_tools_can_be_allowed_by_permissions_without_prompt() {
+        let mut cfg = ResolvedConfig::default();
+        cfg.permission_rules = vec![rustcode_core::PermissionRule {
+            permission: "exec".to_string(),
+            action: PermissionAction::Allow,
+            pattern: "echo".to_string(),
+        }];
+        let context = CommandContext::new(
+            Arc::new(cfg),
+            SessionMeta {
+                session_id: "s-approve-2".to_string(),
+                request_id: "r-approve-2".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(StubProcess {
+                stdout: "hello".to_string(),
+                stderr: String::new(),
+                code: 0,
+            }),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+
+        let options = AgentOptions {
+            max_steps: 1,
+            max_tool_calls_per_step: 1,
+            allow_write: false,
+            allow_edit: false,
+            allow_exec: true,
+            max_read_bytes: 1024,
+            max_list_entries: 100,
+            max_tool_result_bytes: 4096,
+            max_write_bytes: 1024,
+        };
+        let mut state = AgentState::default();
+        let output = engine
+            .execute_agent_tool_call(
+                "exec",
+                r#"{"command":"echo","args":["hi"]}"#,
+                &context,
+                &options,
+                &mut state,
+            )
+            .await
+            .expect("exec should be allowed");
+        assert!(output.contains("exit_code=0"), "output={output}");
+    }
+
+    #[tokio::test]
+    async fn mutating_tools_can_be_denied_by_permissions_without_prompt() {
+        let mut cfg = ResolvedConfig::default();
+        cfg.permission_rules = vec![rustcode_core::PermissionRule {
+            permission: "exec".to_string(),
+            action: PermissionAction::Deny,
+            pattern: "echo".to_string(),
+        }];
+        let context = CommandContext::new(
+            Arc::new(cfg),
+            SessionMeta {
+                session_id: "s-approve-3".to_string(),
+                request_id: "r-approve-3".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let approver = Arc::new(CountingApprover {
+            approved: true,
+            calls: AtomicUsize::new(0),
+        });
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(StubProcess {
+                stdout: "hello".to_string(),
+                stderr: String::new(),
+                code: 0,
+            }),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            Some(approver.clone()),
+        );
+
+        let options = AgentOptions {
+            max_steps: 1,
+            max_tool_calls_per_step: 1,
+            allow_write: false,
+            allow_edit: false,
+            allow_exec: true,
+            max_read_bytes: 1024,
+            max_list_entries: 100,
+            max_tool_result_bytes: 1024,
+            max_write_bytes: 1024,
+        };
+        let mut state = AgentState::default();
+        let result = engine
+            .execute_agent_tool_call(
+                "exec",
+                r#"{"command":"echo"}"#,
+                &context,
+                &options,
+                &mut state,
+            )
+            .await;
+        assert!(matches!(result, Err(ExecutionError::Dispatch(_))));
+        assert_eq!(approver.calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn mutating_tools_ask_rule_triggers_approver() {
+        let mut cfg = ResolvedConfig::default();
+        cfg.permission_rules = vec![rustcode_core::PermissionRule {
+            permission: "exec".to_string(),
+            action: PermissionAction::Ask,
+            pattern: "echo".to_string(),
+        }];
+        let context = CommandContext::new(
+            Arc::new(cfg),
+            SessionMeta {
+                session_id: "s-approve-4".to_string(),
+                request_id: "r-approve-4".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let approver = Arc::new(CountingApprover {
+            approved: true,
+            calls: AtomicUsize::new(0),
+        });
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(StubProcess {
+                stdout: "hello".to_string(),
+                stderr: String::new(),
+                code: 0,
+            }),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            Some(approver.clone()),
+        );
+
+        let options = AgentOptions {
+            max_steps: 1,
+            max_tool_calls_per_step: 1,
+            allow_write: false,
+            allow_edit: false,
+            allow_exec: true,
+            max_read_bytes: 1024,
+            max_list_entries: 100,
+            max_tool_result_bytes: 4096,
+            max_write_bytes: 1024,
+        };
+        let mut state = AgentState::default();
+        let output = engine
+            .execute_agent_tool_call(
+                "exec",
+                r#"{"command":"echo"}"#,
+                &context,
+                &options,
+                &mut state,
+            )
+            .await
+            .expect("exec should be approved");
+        assert!(output.contains("exit_code=0"), "output={output}");
+        assert_eq!(approver.calls.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test]
+    async fn webfetch_rejects_when_network_disabled() {
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+        let context = CommandContext::new(
+            Arc::new(ResolvedConfig {
+                allow_network: false,
+                ..ResolvedConfig::default()
+            }),
+            SessionMeta {
+                session_id: "s-webfetch-1".to_string(),
+                request_id: "r-webfetch-1".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let options = AgentOptions::default();
+        let mut state = AgentState::default();
+        let result = engine
+            .execute_agent_tool_call(
+                "webfetch",
+                r#"{"url":"http://127.0.0.1/"}"#,
+                &context,
+                &options,
+                &mut state,
+            )
+            .await;
+        match result {
+            Err(ExecutionError::Dispatch(message)) => {
+                assert!(message.contains("network access is disabled"), "message={message}");
+            }
+            other => panic!("expected dispatch error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn webfetch_fetches_local_http_and_simplifies_html_by_default() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener must bind");
+        let addr = listener.local_addr().expect("listener addr");
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = timeout(Duration::from_secs(1), socket.read(&mut buf)).await;
+
+            let body = "<html><body><h1>Hello</h1><p>World</p></body></html>";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write response");
+        });
+
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+        let context = CommandContext::new(
+            Arc::new(ResolvedConfig {
+                allow_network: true,
+                ..ResolvedConfig::default()
+            }),
+            SessionMeta {
+                session_id: "s-webfetch-2".to_string(),
+                request_id: "r-webfetch-2".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let url = format!("http://{}/", addr);
+        let options = AgentOptions::default();
+        let mut state = AgentState::default();
+        let output = engine
+            .execute_agent_tool_call(
+                "webfetch",
+                &format!(r#"{{"url":"{url}"}}"#),
+                &context,
+                &options,
+                &mut state,
+            )
+            .await
+            .expect("webfetch should succeed");
+
+        server.await.expect("server must join");
+
+        assert!(output.contains("status=200"), "output={output}");
+        assert!(output.contains("Hello"), "output={output}");
+        assert!(output.contains("World"), "output={output}");
+        assert!(!output.contains("<html>"), "output={output}");
+    }
+
+    #[tokio::test]
+    async fn webfetch_format_html_returns_raw_html() {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("listener must bind");
+        let addr = listener.local_addr().expect("listener addr");
+
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept");
+            let mut buf = [0u8; 1024];
+            let _ = timeout(Duration::from_secs(1), socket.read(&mut buf)).await;
+
+            let body = "<html><body>ok</body></html>";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket
+                .write_all(response.as_bytes())
+                .await
+                .expect("write response");
+        });
+
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+        let context = CommandContext::new(
+            Arc::new(ResolvedConfig {
+                allow_network: true,
+                ..ResolvedConfig::default()
+            }),
+            SessionMeta {
+                session_id: "s-webfetch-3".to_string(),
+                request_id: "r-webfetch-3".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let url = format!("http://{}/", addr);
+        let options = AgentOptions::default();
+        let mut state = AgentState::default();
+        let output = engine
+            .execute_agent_tool_call(
+                "webfetch",
+                &format!(r#"{{"url":"{url}","format":"html"}}"#),
+                &context,
+                &options,
+                &mut state,
+            )
+            .await
+            .expect("webfetch should succeed");
+
+        server.await.expect("server must join");
+
+        assert!(output.contains("<html>"), "output={output}");
     }
 }

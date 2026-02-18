@@ -39,6 +39,24 @@ pub trait FileSystemPort: Send + Sync {
         path: &Path,
         max_entries: usize,
     ) -> Result<Vec<PathBuf>, IoError>;
+
+    async fn metadata(&self, path: &Path) -> Result<FsMetadata, IoError>;
+
+    /// Recursively walks a directory tree and returns entries in deterministic order.
+    ///
+    /// Implementations must not follow symlinks.
+    async fn walk_dir_limited(
+        &self,
+        path: &Path,
+        max_entries: usize,
+    ) -> Result<Vec<PathBuf>, IoError>;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FsMetadata {
+    pub is_dir: bool,
+    pub is_file: bool,
+    pub len: u64,
 }
 
 #[async_trait]
@@ -164,6 +182,66 @@ impl FileSystemPort for LocalIo {
         paths.sort();
         Ok(paths)
     }
+
+    async fn metadata(&self, path: &Path) -> Result<FsMetadata, IoError> {
+        let metadata = tokio::fs::metadata(path)
+            .await
+            .map_err(|err| IoError::Io(format!("{}: {err}", path.display())))?;
+        Ok(FsMetadata {
+            is_dir: metadata.is_dir(),
+            is_file: metadata.is_file(),
+            len: metadata.len(),
+        })
+    }
+
+    async fn walk_dir_limited(
+        &self,
+        path: &Path,
+        max_entries: usize,
+    ) -> Result<Vec<PathBuf>, IoError> {
+        let mut out = Vec::new();
+        let mut queue = vec![path.to_path_buf()];
+
+        while let Some(dir) = queue.pop() {
+            let mut entries = tokio::fs::read_dir(&dir)
+                .await
+                .map_err(|err| IoError::Io(format!("{}: {err}", dir.display())))?;
+
+            let mut paths = Vec::new();
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(|err| IoError::Io(format!("{}: {err}", dir.display())))?
+            {
+                paths.push(entry);
+            }
+
+            // Deterministic traversal: sort by full path and always enqueue subdirs after.
+            paths.sort_by(|a, b| a.path().cmp(&b.path()));
+            for entry in paths {
+                let entry_path = entry.path();
+                out.push(entry_path.clone());
+                if out.len() >= max_entries {
+                    out.sort();
+                    return Ok(out);
+                }
+
+                let file_type = entry
+                    .file_type()
+                    .await
+                    .map_err(|err| IoError::Io(format!("{}: {err}", entry_path.display())))?;
+                if file_type.is_symlink() {
+                    continue;
+                }
+                if file_type.is_dir() {
+                    queue.push(entry_path);
+                }
+            }
+        }
+
+        out.sort();
+        Ok(out)
+    }
 }
 
 #[async_trait]
@@ -205,7 +283,7 @@ impl ProcessPort for LocalIo {
             result = command.output() => {
                 result.map_err(|err| IoError::Io(format!("{program}: {err}")))?
             }
-            _ = cancellation.cancelled() => {
+            () = cancellation.cancelled() => {
                 return Err(IoError::Cancelled);
             }
         };
@@ -218,6 +296,7 @@ impl ProcessPort for LocalIo {
     }
 }
 
+#[must_use]
 pub fn normalize_path(root: &Path, candidate: &Path) -> PathBuf {
     if candidate.is_absolute() {
         candidate.to_path_buf()

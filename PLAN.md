@@ -1202,6 +1202,133 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass (provider quota): live LLM run reached Copilot API and returned `429 quota exceeded` (2026-02-18)
 
 
+56. Session Store + Resume/Fork (Opencode Parity Baseline)
+- Status: pending
+- Scope:
+  - Add durable local sessions (threads) with:
+    - create
+    - list
+    - resume/continue
+    - fork
+  - Teach `run`/`agent` to operate within a session and persist transcript so subsequent turns can load history.
+- References (opencode + codex):
+  - `opencode/packages/opencode/src/cli/cmd/run.ts` (session selection: continue/session/fork/title + streaming events)
+  - `opencode/packages/opencode/src/session/prompt.ts` (session loop lifecycle + message stream model)
+  - `codex/codex-rs/cli/src/main.rs` (resume/fork CLI patterns + config override precedence)
+- Deliverables:
+  - `rustcode-core`:
+    - session + transcript domain types (stable serialization)
+  - New crate: session persistence adapter (file-based, atomic writes, XDG data path)
+  - `crates/rustcode`:
+    - add `session` command surface (`list`, `new`, `fork`, `show`)
+    - add `--continue/--session/--fork/--title` to `run` and `agent`
+  - Tests:
+    - unit tests for store round-trips and fork semantics
+    - integration tests for CLI resume/fork flows
+- Validation:
+  - `cargo test --workspace`
+  - `./scripts/ci_matrix.sh`
+
+57. Tool Runtime v2 (Registry + Schema + Truncation)
+- Status: in_progress
+- Scope:
+  - Replace ad-hoc tool handling with a registry and a single validation/truncation boundary.
+  - Support opt-in parallel tool calls when safe.
+- References (opencode + codex):
+  - `opencode/packages/opencode/src/tool/tool.ts` (argument validation + centralized truncation)
+  - `codex/codex-rs/core/src/tools/registry.rs` (dispatch + mutating gate + hook surface)
+  - `codex/codex-rs/core/src/tools/orchestrator.rs` (approval + sandbox selection + retry semantics)
+- Deliverables:
+  - `rustcode-engine`:
+    - ToolRegistry + ToolHandler traits
+    - centralized tool argument parsing errors
+    - deterministic output truncation and structured tool result envelope
+  - New/expanded tools (opencode baseline): `glob`, `grep`, `webfetch`, `task` (subagent), `todowrite` (plan/todos)
+  - Tests for each tool and registry/orchestrator behavior
+
+58. Permission + Approval UX (Best-of Opencode + Codex)
+- Status: in_progress
+- Scope:
+  - Opencode-style pattern rulesets for permissions.
+  - Codex-style interactive approvals for mutating/sensitive operations.
+  - Non-interactive default: safe auto-deny (matching opencode `run` behavior).
+- References:
+  - `opencode/packages/opencode/src/permission/next.ts` (ruleset evaluation + ask/reply bus)
+  - `codex/codex-rs/core/src/tools/orchestrator.rs` (approval policy + retry gating)
+- Deliverables:
+  - `rustcode-core`: permission/approval types
+  - `rustcode-config`: parse `[[permissions]]` rules + validate glob patterns
+  - `rustcode-engine`: evaluate rules (allow/deny/ask) for mutating tools; non-interactive default is safe deny unless explicitly allowed
+  - `crates/rustcode`: interactive approvals via `StdioToolApprover` (TTY)
+  - Tests: config parsing/validation + engine gating behavior
+
+59. MCP Runtime (Tool + Resource Integration)
+- Status: pending
+- Scope:
+  - Connect to configured MCP servers, expose MCP tools to the agent, and support reading MCP resources.
+  - Integrate OAuth flows via existing `rustcode-auth` primitives.
+- References:
+  - `opencode/packages/opencode/src/session/prompt.ts` (MCP tool wrapping + attachments)
+  - `opencode/packages/opencode/src/cli/cmd/mcp.ts` (MCP command UX)
+  - `codex/codex-rs/cli/src/mcp_cmd.rs` (MCP CLI patterns)
+- Deliverables:
+  - MCP client runtime with stdio transport
+  - tool schema transformation/sanitization for provider compatibility
+  - tests using mocked MCP servers
+
+60. Local Server + Attach API (Events + Sessions Over HTTP)
+- Status: pending
+- Scope:
+  - Expand `serve` into a real API server that can host sessions and stream events.
+  - Add `run --attach <url>` to connect to a running server.
+- References:
+  - `opencode/packages/opencode/src/cli/cmd/run.ts` (attach vs internal server)
+  - `opencode/packages/opencode/src/index.ts` (process lifecycle + shutdown discipline)
+  - `codex/codex-rs/app-server*` (protocol discipline, schema generation, transport handling)
+- Deliverables:
+  - HTTP API + SSE (or websocket) event streaming
+  - stable protocol schema versioning + fixtures
+  - integration tests for attach mode
+
+61. TUI v2 (Interactive UX, Session Picker, Approvals)
+- Status: pending
+- Scope:
+  - Replace the event-consumer-only TUI with a real interactive app:
+    - session picker
+    - streaming transcript view
+    - tool call panels
+    - approval prompts
+    - resume/fork within TUI
+- References:
+  - `codex/codex-rs/tui/src/lib.rs` (interactive app lifecycle + safety guards)
+  - `opencode/packages/opencode/src/cli/cmd/tui/*` (thread/attach flows)
+- Deliverables:
+  - ratatui-based UI with snapshot tests
+
+62. Export/Import/Share
+- Status: pending
+- Scope:
+  - Export/import sessions and optionally share read-only artifacts.
+- References:
+  - `opencode/packages/opencode/src/cli/cmd/export.ts`
+  - `opencode/packages/opencode/src/cli/cmd/import.ts`
+- Deliverables:
+  - `export`/`import` commands
+  - deterministic archive format + tests
+
+63. GitHub + PR Workflows
+- Status: pending
+- Scope:
+  - Implement opencode-style GitHub helpers and PR creation flows.
+- References:
+  - `opencode/packages/opencode/src/cli/cmd/github.ts`
+  - `opencode/packages/opencode/src/cli/cmd/pr.ts`
+  - `codex` apply/review workflows (where superior)
+- Deliverables:
+  - `github` command group + `pr` command group
+  - integration tests using `gh` when available (skip when missing)
+
+
 ## Update Log
 - 2026-02-18:
   - CLI binary/package rename:

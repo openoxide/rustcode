@@ -1,6 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
+use crate::permissions::PermissionRule;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedConfig {
     pub profile: String,
@@ -19,6 +21,7 @@ pub struct ResolvedConfig {
     pub plugins: Vec<String>,
     pub env: BTreeMap<String, String>,
     pub backend_selection: BackendSelectionPolicy,
+    pub permission_rules: Vec<PermissionRule>,
     pub project_config_path: Option<PathBuf>,
     pub project_config_trusted: bool,
 }
@@ -85,6 +88,7 @@ impl Default for ResolvedConfig {
             plugins: Vec::new(),
             env: BTreeMap::new(),
             backend_selection: BackendSelectionPolicy::default(),
+            permission_rules: Vec::new(),
             project_config_path: None,
             project_config_trusted: false,
         }
@@ -92,6 +96,7 @@ impl Default for ResolvedConfig {
 }
 
 impl ResolvedConfig {
+    #[must_use]
     pub fn provider_allowed(&self, provider_id: &str) -> bool {
         if provider_id.eq_ignore_ascii_case("null") {
             return true;

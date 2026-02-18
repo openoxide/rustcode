@@ -74,26 +74,37 @@ pub struct AuthStore {
 }
 
 impl AuthStore {
+    #[must_use]
     pub fn open_default() -> Self {
         Self {
             path: default_auth_path(),
         }
     }
 
+    #[must_use]
     pub fn with_path(path: PathBuf) -> Self {
         Self { path }
     }
 
+    #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
     }
 
+    /// Load the stored credential for `provider`.
+    ///
+    /// # Errors
+    /// Returns `AuthError` if `provider` is invalid, or if the auth store cannot be read/parsed.
     pub fn get(&self, provider: &str) -> Result<Option<StoredCredential>, AuthError> {
         validate_provider(provider)?;
         let auth = self.read_file()?;
         Ok(auth.providers.get(provider).cloned())
     }
 
+    /// Load the stored API key for `provider`, if present.
+    ///
+    /// # Errors
+    /// Returns `AuthError` if `provider` is invalid, or if the auth store cannot be read/parsed.
     pub fn get_api_key(&self, provider: &str) -> Result<Option<String>, AuthError> {
         let Some(credential) = self.get(provider)? else {
             return Ok(None);
@@ -104,10 +115,18 @@ impl AuthStore {
         }
     }
 
+    /// Store an API key credential for `provider`.
+    ///
+    /// # Errors
+    /// Returns `AuthError` if input validation fails or if the auth store cannot be written.
     pub fn set_api_key(&self, provider: &str, key: &str) -> Result<(), AuthError> {
         self.set_api_key_with_domain(provider, key, None)
     }
 
+    /// Store an API key credential for `provider` with an optional domain override.
+    ///
+    /// # Errors
+    /// Returns `AuthError` if input validation fails or if the auth store cannot be written.
     pub fn set_api_key_with_domain(
         &self,
         provider: &str,
@@ -134,6 +153,10 @@ impl AuthStore {
         self.write_file(&auth)
     }
 
+    /// Store an OAuth credential for `provider`.
+    ///
+    /// # Errors
+    /// Returns `AuthError` if input validation fails or if the auth store cannot be written.
     pub fn set_oauth(
         &self,
         provider: &str,
@@ -163,6 +186,10 @@ impl AuthStore {
         self.write_file(&auth)
     }
 
+    /// Remove the stored credential for `provider` (if any).
+    ///
+    /// # Errors
+    /// Returns `AuthError` if `provider` is invalid, or if the auth store cannot be read/written.
     pub fn remove(&self, provider: &str) -> Result<bool, AuthError> {
         validate_provider(provider)?;
         let mut auth = self.read_file()?;
@@ -171,6 +198,10 @@ impl AuthStore {
         Ok(removed)
     }
 
+    /// List provider ids currently present in the auth store.
+    ///
+    /// # Errors
+    /// Returns `AuthError` if the auth store cannot be read/parsed.
     pub fn providers(&self) -> Result<Vec<String>, AuthError> {
         let mut providers: Vec<String> = self.read_file()?.providers.keys().cloned().collect();
         providers.sort();
@@ -228,6 +259,7 @@ pub enum AuthMethod {
 }
 
 impl AuthMethod {
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Self::ApiKey => "api_key",
@@ -243,6 +275,7 @@ pub struct OAuthLoginHint {
     pub instructions: String,
 }
 
+#[must_use]
 pub fn methods_for_provider(provider_id: &str) -> Vec<AuthMethod> {
     let provider = provider_id.to_ascii_lowercase();
     match provider.as_str() {
@@ -259,6 +292,7 @@ pub fn methods_for_provider(provider_id: &str) -> Vec<AuthMethod> {
     }
 }
 
+#[must_use]
 pub fn oauth_login_hint(provider_id: &str) -> Option<OAuthLoginHint> {
     let provider = provider_id.to_ascii_lowercase();
     let (url, instructions) = match provider.as_str() {
@@ -282,6 +316,7 @@ pub fn oauth_login_hint(provider_id: &str) -> Option<OAuthLoginHint> {
     })
 }
 
+#[must_use]
 pub fn known_oauth_providers() -> &'static [&'static str] {
     OAUTH_PROVIDERS
 }
@@ -302,6 +337,10 @@ struct McpOAuthDiscoveryMetadata {
     token_endpoint: Option<String>,
 }
 
+/// Discover MCP OAuth metadata endpoints for a server URL.
+///
+/// # Errors
+/// Returns `AuthError` if the URL is invalid, the server is unreachable, or metadata parsing fails.
 pub async fn discover_mcp_oauth(url: &str) -> Result<McpOAuthDiscovery, AuthError> {
     let base_url = reqwest::Url::parse(url)
         .map_err(|err| AuthError::Validation(format!("invalid MCP URL `{url}`: {err}")))?;
@@ -392,6 +431,10 @@ pub struct DeviceCodeFlowStart {
     pub expires_in_secs: u64,
 }
 
+/// Start an OAuth device-code flow for the given provider.
+///
+/// # Errors
+/// Returns `AuthError` if the provider does not support this flow, input is invalid, or network requests fail.
 pub async fn start_device_code_flow(
     provider: &str,
     domain: Option<&str>,
@@ -408,6 +451,10 @@ pub async fn start_device_code_flow(
     }
 }
 
+/// Poll a previously-started device-code flow until an access token is issued.
+///
+/// # Errors
+/// Returns `AuthError` if the flow expires, times out, or the provider returns an error.
 pub async fn poll_device_code_flow_for_api_key(
     flow: &DeviceCodeFlowStart,
     timeout: Duration,
@@ -450,7 +497,14 @@ pub struct McpBrowserOAuthFlowStart {
     code_verifier: String,
 }
 
-pub async fn start_browser_oauth_flow(
+/// Build a browser OAuth flow challenge (authorize URL + local callback redirect).
+///
+/// This does not perform any network requests; it only constructs the authorization URL and
+/// PKCE parameters for the given provider.
+///
+/// # Errors
+/// Returns `AuthError` if input validation fails or the provider is unsupported.
+pub fn start_browser_oauth_flow(
     provider: &str,
     domain: Option<&str>,
     client_id: Option<&str>,
@@ -465,20 +519,28 @@ pub async fn start_browser_oauth_flow(
     }
 }
 
+/// Complete a browser OAuth flow by waiting for the local callback and exchanging the code.
+///
+/// # Errors
+/// Returns `AuthError` if the callback is not received in time or token exchange fails.
 pub async fn complete_browser_oauth_flow(
     flow: &BrowserOAuthFlowStart,
     timeout: Duration,
     client_secret: Option<&str>,
 ) -> Result<DeviceCodeFlowCredential, AuthError> {
     match flow.provider.as_str() {
-        "openai" => complete_openai_browser_oauth_flow(flow, timeout).await,
-        "gitlab" => complete_gitlab_browser_oauth_flow(flow, timeout, client_secret).await,
+        "openai" => Box::pin(complete_openai_browser_oauth_flow(flow, timeout)).await,
+        "gitlab" => Box::pin(complete_gitlab_browser_oauth_flow(flow, timeout, client_secret)).await,
         other => Err(AuthError::Validation(format!(
             "provider {other} does not support browser oauth completion"
         ))),
     }
 }
 
+/// Build an MCP browser OAuth flow challenge (authorize URL + local callback redirect).
+///
+/// # Errors
+/// Returns `AuthError` if discovery metadata is missing required endpoints or input validation fails.
 pub fn start_mcp_browser_oauth_flow(
     server_name: &str,
     server_url: &str,
@@ -546,13 +608,17 @@ pub fn start_mcp_browser_oauth_flow(
     })
 }
 
+/// Complete an MCP browser OAuth flow by waiting for the local callback and exchanging the code.
+///
+/// # Errors
+/// Returns `AuthError` if the callback is not received in time or token exchange fails.
 pub async fn complete_mcp_browser_oauth_flow(
     flow: &McpBrowserOAuthFlowStart,
     timeout: Duration,
     client_secret: Option<&str>,
 ) -> Result<DeviceCodeFlowCredential, AuthError> {
     let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
-    let code = wait_for_oauth_callback(&callback, &flow.state, timeout).await?;
+    let code = Box::pin(wait_for_oauth_callback(&callback, &flow.state, timeout)).await?;
 
     let client = auth_http_client()?;
     let mut form_params = BTreeMap::new();
@@ -605,6 +671,10 @@ pub async fn complete_mcp_browser_oauth_flow(
     })
 }
 
+/// Poll a previously-started device-code flow until a credential is issued.
+///
+/// # Errors
+/// Returns `AuthError` if the flow expires, times out, or the provider returns an error.
 pub async fn poll_device_code_flow_for_credential(
     flow: &DeviceCodeFlowStart,
     timeout: Duration,
@@ -1049,7 +1119,7 @@ async fn complete_gitlab_browser_oauth_flow(
     client_secret: Option<&str>,
 ) -> Result<DeviceCodeFlowCredential, AuthError> {
     let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
-    let code = wait_for_oauth_callback(&callback, &flow.state, timeout).await?;
+    let code = Box::pin(wait_for_oauth_callback(&callback, &flow.state, timeout)).await?;
 
     let scheme = if flow.domain.starts_with("127.0.0.1:") || flow.domain.starts_with("localhost:") {
         "http"
@@ -1113,7 +1183,7 @@ async fn complete_openai_browser_oauth_flow(
     timeout: Duration,
 ) -> Result<DeviceCodeFlowCredential, AuthError> {
     let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
-    let code = wait_for_oauth_callback(&callback, &flow.state, timeout).await?;
+    let code = Box::pin(wait_for_oauth_callback(&callback, &flow.state, timeout)).await?;
 
     let scheme = if flow.domain.starts_with("127.0.0.1:") || flow.domain.starts_with("localhost:") {
         "http"
@@ -1191,7 +1261,7 @@ async fn wait_for_oauth_callback(
             .map_err(|err| AuthError::Network(format!("oauth callback accept failed: {err}")))?;
         let (mut socket, _) = accepted;
         if let Some(code) =
-            handle_oauth_callback_connection(&mut socket, expected_state, &callback.path).await?
+            Box::pin(handle_oauth_callback_connection(&mut socket, expected_state, &callback.path)).await?
         {
             return Ok(code);
         }
@@ -1376,6 +1446,10 @@ where
     }
 }
 
+/// Normalize a user-provided domain or URL into a host[:port] form.
+///
+/// # Errors
+/// Returns `AuthError` if the input cannot be parsed into a valid domain.
 pub fn normalize_domain(raw: &str) -> Result<String, AuthError> {
     if raw.trim().is_empty() {
         return Err(AuthError::Validation(
@@ -1685,7 +1759,7 @@ mod tests {
         });
 
         let credential =
-            complete_mcp_browser_oauth_flow(&flow, Duration::from_secs(5), Some("shh"))
+            Box::pin(complete_mcp_browser_oauth_flow(&flow, Duration::from_secs(5), Some("shh")))
                 .await
                 .expect("flow should complete");
         assert_eq!(credential.access_token, "mcp-access-token");
@@ -1740,7 +1814,6 @@ mod tests {
     #[tokio::test]
     async fn openai_browser_flow_builds_authorize_url() {
         let flow = start_browser_oauth_flow("openai", None, None, 1455)
-            .await
             .expect("openai browser flow should start");
         assert_eq!(flow.provider, "openai");
         assert_eq!(flow.redirect_uri, "http://127.0.0.1:1455/auth/callback");
@@ -1756,7 +1829,6 @@ mod tests {
     #[tokio::test]
     async fn gitlab_browser_flow_uses_bundled_client_id_for_gitlab_com() {
         let flow = start_browser_oauth_flow("gitlab", None, None, 1456)
-            .await
             .expect("gitlab.com browser flow should start");
         let authorize_url =
             reqwest::Url::parse(&flow.authorize_url).expect("authorize url should parse");
@@ -1770,7 +1842,6 @@ mod tests {
     #[tokio::test]
     async fn gitlab_browser_flow_requires_client_id_for_self_hosted() {
         let error = start_browser_oauth_flow("gitlab", Some("gitlab.example.com"), None, 1457)
-            .await
             .expect_err("self-hosted gitlab flow should require client id");
         assert!(error.to_string().contains("GITLAB_OAUTH_CLIENT_ID"));
     }
@@ -1813,7 +1884,6 @@ mod tests {
             Some("client-123"),
             callback_port,
         )
-        .await
         .expect("flow should start");
         let authorize_url =
             reqwest::Url::parse(&flow.authorize_url).expect("authorize url should parse");
@@ -1835,7 +1905,7 @@ mod tests {
             let _ = client.get(callback_url).send().await;
         });
 
-        let credential = complete_browser_oauth_flow(&flow, Duration::from_secs(5), None)
+        let credential = Box::pin(complete_browser_oauth_flow(&flow, Duration::from_secs(5), None))
             .await
             .expect("flow should complete");
         assert_eq!(credential.access_token, "gitlab-access-token");

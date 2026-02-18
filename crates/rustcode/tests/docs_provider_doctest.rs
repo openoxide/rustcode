@@ -180,6 +180,9 @@ fn provider_docs_doctests() {
     let cache_home = temp_home.join("cache");
     std::fs::create_dir_all(&cache_home).expect("create cache dir");
 
+    let sessions_home = temp_home.join("sessions");
+    std::fs::create_dir_all(&sessions_home).expect("create sessions dir");
+
     for (block_i, block) in blocks.iter().enumerate() {
         for (line_i, line) in block.lines().enumerate() {
             let Some((envs, args)) = parse_env_and_args(line) else {
@@ -202,6 +205,7 @@ fn provider_docs_doctests() {
             // Force offline + isolated environment. Docs blocks must stay non-networked.
             cmd.env("RUSTCODE_ALLOW_NETWORK", "0");
             cmd.env("RUSTCODE_AUTH_FILE", &auth_file);
+            cmd.env("RUSTCODE_SESSIONS_DIR", &sessions_home);
             cmd.env("HOME", &temp_home);
             cmd.env("XDG_CACHE_HOME", &cache_home);
 

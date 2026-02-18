@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -33,12 +33,13 @@ use rustcode_llm::{
     ApiKeySource, ProviderProtocolName,
 };
 use rustcode_plugins::PluginRegistry;
+use rustcode_state::{FileTranscriptRecorder, SessionStore};
 use rustcode_tui::TuiApp;
 
 mod cli;
 mod render;
 
-use cli::{map_command, AuthCommand, Cli, McpCommand, TopCommand};
+use cli::{AuthCommand, Cli, McpCommand, SessionCommand, TopCommand};
 use render::{render_event, OutputFormat};
 
 #[tokio::main]
@@ -141,6 +142,10 @@ async fn main() -> Result<()> {
         let config = load_effective_config(&cli)?;
         return handle_models_command(provider.as_deref(), &config, cli.json);
     }
+    if let TopCommand::Session { command } = &cli.command {
+        let config = load_effective_config(&cli)?;
+        return handle_session_command(command.clone(), cli.json, &config);
+    }
     let launch_tui = matches!(&cli.command, TopCommand::Tui);
     let requires_llm = matches!(
         &cli.command,
@@ -150,6 +155,99 @@ async fn main() -> Result<()> {
     let event_debug = cli.event_debug;
 
     let config = load_effective_config(&cli)?;
+
+    let session_store = SessionStore::open_default();
+    let (session_info, run_history, agent_history) = match &cli.command {
+        TopCommand::Run {
+            prompt: _,
+            continue_session,
+            session,
+            fork,
+            title,
+        } => {
+            let (info, history) = resolve_session(
+                &session_store,
+                &config,
+                *continue_session,
+                session.as_deref(),
+                *fork,
+                title.clone(),
+            )?;
+            (Some(info), history, Vec::new())
+        }
+        TopCommand::Agent {
+            prompt: _,
+            continue_session,
+            session,
+            fork,
+            title,
+            ..
+        } => {
+            let (info, history) = resolve_session(
+                &session_store,
+                &config,
+                *continue_session,
+                session.as_deref(),
+                *fork,
+                title.clone(),
+            )?;
+            (Some(info), Vec::new(), history)
+        }
+        _ => (None, Vec::new(), Vec::new()),
+    };
+
+    let session_id = session_info
+        .as_ref()
+        .map(|info| info.id.clone())
+        .unwrap_or_else(|| "session-1".to_string());
+
+    let run_user_prompt = match &cli.command {
+        TopCommand::Run { prompt, .. } => Some(prompt.clone()),
+        _ => None,
+    };
+    let run_session_id = if run_user_prompt.is_some() {
+        session_info.as_ref().map(|info| info.id.clone())
+    } else {
+        None
+    };
+
+    let request_id = {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        format!("request-{now}")
+    };
+
+    let recorder: Option<Arc<dyn rustcode_core::TranscriptRecorder>> =
+        if matches!(&cli.command, TopCommand::Agent { .. }) {
+            Some(Arc::new(FileTranscriptRecorder::new(session_store.clone())))
+        } else {
+            None
+        };
+
+    let approver: Option<Arc<dyn rustcode_core::ToolApprover>> = if matches!(
+        &cli.command,
+        TopCommand::Agent {
+            allow_write: true,
+            ..
+        } | TopCommand::Agent {
+            allow_edit: true,
+            ..
+        } | TopCommand::Agent {
+            allow_exec: true,
+            ..
+        }
+    ) {
+        if is_interactive_terminal() {
+            Some(Arc::new(StdioToolApprover))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let llm_client = if requires_llm {
         build_client(&config).context("failed to initialize llm provider")?
     } else {
@@ -160,8 +258,8 @@ async fn main() -> Result<()> {
     let context = CommandContext::with_cancellation(
         Arc::new(config),
         SessionMeta {
-            session_id: "session-1".to_string(),
-            request_id: "request-1".to_string(),
+            session_id,
+            request_id,
             started_at: SystemTime::now(),
         },
         cancellation.clone(),
@@ -177,9 +275,85 @@ async fn main() -> Result<()> {
         io,
         Arc::new(WorkspacePermissionPolicy),
         PluginRegistry::default(),
+        recorder,
+        approver,
     );
-
-    let command = map_command(cli.command);
+    let command = match cli.command {
+        TopCommand::Run { prompt, .. } => {
+            let prompt = if run_history.is_empty() {
+                prompt
+            } else {
+                let mut rendered = String::new();
+                for msg in &run_history {
+                    let Some(text) = msg.content.as_str() else {
+                        continue;
+                    };
+                    let role = match msg.role {
+                        rustcode_core::MessageRole::System => "System",
+                        rustcode_core::MessageRole::User => "User",
+                        rustcode_core::MessageRole::Assistant => "Assistant",
+                        rustcode_core::MessageRole::Tool => "Tool",
+                    };
+                    rendered.push_str(role);
+                    rendered.push_str(": ");
+                    rendered.push_str(text);
+                    rendered.push('\n');
+                }
+                rendered.push_str("User: ");
+                rendered.push_str(&prompt);
+                rendered.push_str("\nAssistant:");
+                rendered
+            };
+            rustcode_core::Command::Run { prompt }
+        }
+        TopCommand::Agent {
+            prompt,
+            max_steps,
+            max_tool_calls_per_step,
+            allow_write,
+            allow_edit,
+            allow_exec,
+            max_read_bytes,
+            max_list_entries,
+            max_tool_result_bytes,
+            max_write_bytes,
+            ..
+        } => rustcode_core::Command::Agent {
+            prompt,
+            options: rustcode_core::command::AgentOptions {
+                max_steps,
+                max_tool_calls_per_step,
+                allow_write,
+                allow_edit,
+                allow_exec,
+                max_read_bytes,
+                max_list_entries,
+                max_tool_result_bytes,
+                max_write_bytes,
+            },
+            history: agent_history,
+        },
+        TopCommand::Exec { command, args } => rustcode_core::Command::Exec { command, args },
+        TopCommand::List { path } => rustcode_core::Command::List { path },
+        TopCommand::Read { path } => rustcode_core::Command::Read { path },
+        TopCommand::Write { path, contents } => rustcode_core::Command::Write { path, contents },
+        TopCommand::Edit { path, from, to } => rustcode_core::Command::Edit { path, from, to },
+        TopCommand::Tui => rustcode_core::Command::Tui,
+        TopCommand::Serve { listen } => rustcode_core::Command::Serve { listen },
+        TopCommand::Version => rustcode_core::Command::Version,
+        TopCommand::Models { .. } => {
+            anyhow::bail!("internal error: models command must be handled before engine dispatch");
+        }
+        TopCommand::Auth { .. } => {
+            anyhow::bail!("internal error: auth command must be handled before engine dispatch");
+        }
+        TopCommand::Mcp { .. } => {
+            anyhow::bail!("internal error: mcp command must be handled before engine dispatch");
+        }
+        TopCommand::Session { .. } => {
+            anyhow::bail!("internal error: session command must be handled before engine dispatch");
+        }
+    };
     let execution = engine.execute(command, context, publisher.clone());
     tokio::pin!(execution);
 
@@ -201,10 +375,16 @@ async fn main() -> Result<()> {
             .context("tui event loop failed")?;
     } else {
         let mut streamed_text_open = false;
+        let mut run_output_capture = String::new();
         while let Some(event) = event_rx.recv().await {
             if matches!(output_format, OutputFormat::Human) && !event_debug {
                 match &event.payload {
                     EventPayload::OutputChunk { text } => {
+                        if run_session_id.is_some()
+                            && matches!(event.scope, rustcode_core::EventScope::Command)
+                        {
+                            run_output_capture.push_str(text);
+                        }
                         if !write_stdout_raw(text)? {
                             return Ok(());
                         }
@@ -237,6 +417,39 @@ async fn main() -> Result<()> {
         }
         if streamed_text_open {
             let _ = write_stdout_raw("\n")?;
+        }
+
+        if let (Some(session_id), Some(user_prompt)) = (run_session_id.as_deref(), run_user_prompt)
+        {
+            if matches!(execution_result, Ok(())) {
+                let store = session_store.clone();
+                let user = rustcode_core::StoredMessage {
+                    id: store.new_message_id(),
+                    role: rustcode_core::MessageRole::User,
+                    created_at_unix_ms: now_unix_ms(),
+                    content: serde_json::Value::String(user_prompt),
+                    tool_call_id: None,
+                    tool_name: None,
+                    tool_calls: Vec::new(),
+                };
+                let assistant_text = run_output_capture.trim_end().to_string();
+                let assistant = rustcode_core::StoredMessage {
+                    id: store.new_message_id(),
+                    role: rustcode_core::MessageRole::Assistant,
+                    created_at_unix_ms: now_unix_ms(),
+                    content: serde_json::Value::String(assistant_text),
+                    tool_call_id: None,
+                    tool_name: None,
+                    tool_calls: Vec::new(),
+                };
+
+                store
+                    .append_message(session_id, &user)
+                    .context("failed to store run user message")?;
+                store
+                    .append_message(session_id, &assistant)
+                    .context("failed to store run assistant message")?;
+            }
         }
     }
 
@@ -827,8 +1040,7 @@ async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Result<
                         Some(&oauth_domain),
                         client_id.as_deref(),
                         oauth_port,
-                    )
-                    .await?;
+                    )?;
                     if json_output {
                         let payload = serde_json::json!({
                             "schema_version": 1,
@@ -2113,6 +2325,43 @@ fn is_interactive_terminal() -> bool {
     std::io::stdin().is_terminal() && std::io::stderr().is_terminal()
 }
 
+#[derive(Debug, Clone, Copy)]
+struct StdioToolApprover;
+
+#[async_trait::async_trait]
+impl rustcode_core::ToolApprover for StdioToolApprover {
+    async fn approve(
+        &self,
+        request: rustcode_core::ToolApprovalRequest,
+    ) -> std::result::Result<bool, rustcode_core::ExecutionError> {
+        tokio::task::spawn_blocking(move || {
+            let mut stderr = std::io::stderr().lock();
+            writeln!(stderr, "approval required: {}", request.reason)
+                .map_err(|err| rustcode_core::ExecutionError::Executor(err.to_string()))?;
+            writeln!(
+                stderr,
+                "tool={} permission={} pattern={}",
+                request.tool, request.permission, request.pattern
+            )
+            .map_err(|err| rustcode_core::ExecutionError::Executor(err.to_string()))?;
+            write!(stderr, "approve? [y/N]: ")
+                .map_err(|err| rustcode_core::ExecutionError::Executor(err.to_string()))?;
+            stderr
+                .flush()
+                .map_err(|err| rustcode_core::ExecutionError::Executor(err.to_string()))?;
+
+            let mut input = String::new();
+            std::io::stdin()
+                .read_line(&mut input)
+                .map_err(|err| rustcode_core::ExecutionError::Executor(err.to_string()))?;
+            let answer = input.trim();
+            Ok(answer.eq_ignore_ascii_case("y") || answer.eq_ignore_ascii_case("yes"))
+        })
+        .await
+        .map_err(|err| rustcode_core::ExecutionError::Executor(err.to_string()))?
+    }
+}
+
 fn prompt_for_login_method(provider: &str, available: &[AuthMethod]) -> Result<AuthMethod> {
     let mut stderr = std::io::stderr().lock();
     writeln!(
@@ -2596,6 +2845,181 @@ fn init_tracing() -> Result<()> {
         .with_target(false)
         .try_init()
         .map_err(|err| anyhow::anyhow!("failed to initialize tracing: {err}"))
+}
+
+fn now_unix_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
+fn resolve_session(
+    store: &SessionStore,
+    config: &ResolvedConfig,
+    continue_session: bool,
+    session_id: Option<&str>,
+    fork: bool,
+    title: Option<String>,
+) -> Result<(rustcode_core::SessionInfo, Vec<rustcode_core::StoredMessage>)> {
+    if fork && !continue_session && session_id.is_none() {
+        anyhow::bail!("--fork requires --continue or --session <SESSION_ID>");
+    }
+
+    let base = if continue_session {
+        let sessions = store
+            .list_sessions()
+            .context("failed to list sessions")?;
+        sessions
+            .into_iter()
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("no sessions exist to continue"))?
+    } else if let Some(session_id) = session_id {
+        store
+            .get_session(session_id)
+            .with_context(|| format!("failed to load session {session_id}"))?
+    } else {
+        let cwd = std::env::current_dir().context("failed to resolve cwd")?;
+        store
+            .create_session(
+                title.clone(),
+                None,
+                &cwd,
+                &config.workspace_root,
+                &config.model,
+            )
+            .context("failed to create session")?
+    };
+
+    let info = if fork {
+        store
+            .fork_session(&base.id, title)
+            .with_context(|| format!("failed to fork session {}", base.id))?
+    } else {
+        base
+    };
+
+    let history = store
+        .load_messages(&info.id)
+        .with_context(|| format!("failed to load transcript for session {}", info.id))?;
+
+    Ok((info, history))
+}
+
+fn handle_session_command(
+    command: SessionCommand,
+    json_output: bool,
+    config: &ResolvedConfig,
+) -> Result<()> {
+    let store = SessionStore::open_default();
+    match command {
+        SessionCommand::List => {
+            let sessions = store.list_sessions().context("failed to list sessions")?;
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "command": "session.list",
+                    "sessions": sessions,
+                    "sessions_root": store.root().display().to_string(),
+                });
+                write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize session list json")?,
+                )?;
+                return Ok(());
+            }
+
+            write_stdout_line(&format!("sessions={}", sessions.len()))?;
+            write_stdout_line(&format!("sessions_root={}", store.root().display()))?;
+            for session in sessions {
+                let title = session.title.as_deref().unwrap_or("-");
+                let parent = session.parent_id.as_deref().unwrap_or("-");
+                write_stdout_line(&format!(
+                    "id={}\tupdated_at={}\ttitle={}\tparent_id={}",
+                    session.id, session.updated_at_unix_ms, title, parent
+                ))?;
+            }
+        }
+        SessionCommand::New { title } => {
+            let cwd = std::env::current_dir().context("failed to resolve cwd")?;
+            let session = store
+                .create_session(
+                    title,
+                    None,
+                    &cwd,
+                    &config.workspace_root,
+                    &config.model,
+                )
+                .context("failed to create session")?;
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "command": "session.new",
+                    "session": session,
+                });
+                write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize session new json")?,
+                )?;
+                return Ok(());
+            }
+            write_stdout_line(&format!("id={}", session.id))?;
+        }
+        SessionCommand::Fork { session_id, title } => {
+            let forked = store
+                .fork_session(&session_id, title)
+                .with_context(|| format!("failed to fork session {session_id}"))?;
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "command": "session.fork",
+                    "session": forked,
+                });
+                write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize session fork json")?,
+                )?;
+                return Ok(());
+            }
+            write_stdout_line(&format!("id={}", forked.id))?;
+        }
+        SessionCommand::Show { session_id } => {
+            let session = store
+                .get_session(&session_id)
+                .with_context(|| format!("failed to load session {session_id}"))?;
+            let messages = store
+                .load_messages(&session_id)
+                .with_context(|| format!("failed to load transcript for session {session_id}"))?;
+
+            if json_output {
+                let payload = serde_json::json!({
+                    "schema_version": 1,
+                    "command": "session.show",
+                    "session": session,
+                    "messages": messages,
+                });
+                write_stdout_line(
+                    &serde_json::to_string(&payload)
+                        .context("failed to serialize session show json")?,
+                )?;
+                return Ok(());
+            }
+
+            write_stdout_line(&format!("id={}", session.id))?;
+            write_stdout_line(&format!(
+                "title={}",
+                session.title.as_deref().unwrap_or("-")
+            ))?;
+            write_stdout_line(&format!("parent_id={}", session.parent_id.as_deref().unwrap_or("-")))?;
+            write_stdout_line(&format!("created_at={}", session.created_at_unix_ms))?;
+            write_stdout_line(&format!("updated_at={}", session.updated_at_unix_ms))?;
+            write_stdout_line(&format!("cwd={}", session.cwd))?;
+            write_stdout_line(&format!("workspace_root={}", session.workspace_root))?;
+            write_stdout_line(&format!("model={}", session.model))?;
+            write_stdout_line(&format!("messages={}", messages.len()))?;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(unix)]

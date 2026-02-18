@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use rustcode_core::command::{AgentOptions, Command};
+use rustcode_core::command::AgentOptions;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -41,6 +41,18 @@ pub struct Cli {
 pub enum TopCommand {
     Run {
         prompt: String,
+
+        #[arg(long = "continue", default_value_t = false, conflicts_with = "session")]
+        continue_session: bool,
+
+        #[arg(long, value_name = "SESSION_ID")]
+        session: Option<String>,
+
+        #[arg(long, default_value_t = false)]
+        fork: bool,
+
+        #[arg(long)]
+        title: Option<String>,
     },
     Agent {
         prompt: String,
@@ -77,6 +89,18 @@ pub enum TopCommand {
             default_value_t = AgentOptions::default().max_write_bytes
         )]
         max_write_bytes: usize,
+
+        #[arg(long = "continue", default_value_t = false, conflicts_with = "session")]
+        continue_session: bool,
+
+        #[arg(long, value_name = "SESSION_ID")]
+        session: Option<String>,
+
+        #[arg(long, default_value_t = false)]
+        fork: bool,
+
+        #[arg(long)]
+        title: Option<String>,
     },
     Exec {
         command: String,
@@ -113,7 +137,29 @@ pub enum TopCommand {
         #[command(subcommand)]
         command: McpCommand,
     },
+    Session {
+        #[command(subcommand)]
+        command: SessionCommand,
+    },
     Version,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum SessionCommand {
+    #[command(alias = "ls")]
+    List,
+    New {
+        #[arg(long)]
+        title: Option<String>,
+    },
+    Fork {
+        session_id: String,
+        #[arg(long)]
+        title: Option<String>,
+    },
+    Show {
+        session_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -217,54 +263,6 @@ pub enum McpCommand {
     Logout {
         name: String,
     },
-}
-
-pub fn map_command(command: TopCommand) -> Command {
-    match command {
-        TopCommand::Run { prompt } => Command::Run { prompt },
-        TopCommand::Agent {
-            prompt,
-            max_steps,
-            max_tool_calls_per_step,
-            allow_write,
-            allow_edit,
-            allow_exec,
-            max_read_bytes,
-            max_list_entries,
-            max_tool_result_bytes,
-            max_write_bytes,
-        } => Command::Agent {
-            prompt,
-            options: AgentOptions {
-                max_steps,
-                max_tool_calls_per_step,
-                allow_write,
-                allow_edit,
-                allow_exec,
-                max_read_bytes,
-                max_list_entries,
-                max_tool_result_bytes,
-                max_write_bytes,
-            },
-        },
-        TopCommand::Exec { command, args } => Command::Exec { command, args },
-        TopCommand::List { path } => Command::List { path },
-        TopCommand::Models { .. } => {
-            panic!("models command is handled in cli main before engine dispatch")
-        }
-        TopCommand::Read { path } => Command::Read { path },
-        TopCommand::Write { path, contents } => Command::Write { path, contents },
-        TopCommand::Edit { path, from, to } => Command::Edit { path, from, to },
-        TopCommand::Tui => Command::Tui,
-        TopCommand::Serve { listen } => Command::Serve { listen },
-        TopCommand::Auth { .. } => {
-            panic!("auth command is handled in cli main before engine dispatch")
-        }
-        TopCommand::Mcp { .. } => {
-            panic!("mcp command is handled in cli main before engine dispatch")
-        }
-        TopCommand::Version => Command::Version,
-    }
 }
 
 #[cfg(test)]

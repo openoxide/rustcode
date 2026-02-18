@@ -11,10 +11,14 @@ rustcode-io = { path = "../rustcode-io" }
 rustcode-llm = { path = "../rustcode-llm" }
 rustcode-plugins = { path = "../rustcode-plugins" }
 async-trait.workspace = true
+futures-util.workspace = true
+reqwest.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 serde_json.workspace = true
+globset.workspace = true
+regex.workspace = true
 
 [lints]
 workspace = true

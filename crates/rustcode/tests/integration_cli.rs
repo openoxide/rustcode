@@ -20,6 +20,18 @@ fn make_temp_file_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("rustcode-{name}-{pid}-{now}.json"))
 }
 
+fn make_temp_dir_path(name: &str) -> PathBuf {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("time should be monotonic")
+        .as_nanos();
+    let pid = std::process::id();
+    let dir = std::env::temp_dir().join(format!("rustcode-{name}-{pid}-{now}"));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("create temp dir");
+    dir
+}
+
 fn http_request(port: u16, path: &str) -> std::io::Result<String> {
     let mut stream = TcpStream::connect(("127.0.0.1", port))?;
     let request = format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n");
@@ -162,8 +174,10 @@ fn list_does_not_require_llm_provider_even_when_allow_network_true() {
 
 #[test]
 fn json_stream_includes_schema_version_and_completion_event() {
+    let sessions_dir = make_temp_dir_path("sessions-json-stream");
     let output = Command::new(rustcode_bin())
         .args(["--json", "run", "integration-stream"])
+        .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
         .output()
         .expect("must run rustcode binary");
 
@@ -193,8 +207,10 @@ fn json_stream_includes_schema_version_and_completion_event() {
 
 #[test]
 fn human_run_output_is_plain_text_by_default() {
+    let sessions_dir = make_temp_dir_path("sessions-human-run");
     let output = Command::new(rustcode_bin())
         .args(["run", "integration-human"])
+        .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
         .output()
         .expect("must run rustcode binary");
 
@@ -215,8 +231,10 @@ fn human_run_output_is_plain_text_by_default() {
 
 #[test]
 fn human_run_output_uses_event_envelope_with_event_debug() {
+    let sessions_dir = make_temp_dir_path("sessions-human-run-debug");
     let output = Command::new(rustcode_bin())
         .args(["--event-debug", "run", "integration-human-debug"])
+        .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
         .output()
         .expect("must run rustcode binary");
 
@@ -230,6 +248,68 @@ fn human_run_output_uses_event_envelope_with_event_debug() {
     let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
     assert!(stdout.contains("OutputChunk"));
     assert!(stdout.contains("Completed"));
+}
+
+#[test]
+fn session_new_list_show_and_fork_round_trip() {
+    let sessions_dir = make_temp_dir_path("sessions-round-trip");
+
+    let new_output = Command::new(rustcode_bin())
+        .args(["session", "new", "--title", "t1"])
+        .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
+        .output()
+        .expect("run rustcode session new");
+    assert!(new_output.status.success());
+    let stdout = String::from_utf8(new_output.stdout).expect("stdout must be utf8");
+    let id = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("id=").map(str::to_string))
+        .expect("must print id=");
+
+    let list_output = Command::new(rustcode_bin())
+        .args(["session", "list"])
+        .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
+        .output()
+        .expect("run rustcode session list");
+    assert!(list_output.status.success());
+    let stdout = String::from_utf8(list_output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains(&format!("id={id}\t")), "stdout={stdout}");
+
+    let show_output = Command::new(rustcode_bin())
+        .args(["session", "show", &id])
+        .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
+        .output()
+        .expect("run rustcode session show");
+    assert!(show_output.status.success());
+    let stdout = String::from_utf8(show_output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains(&format!("id={id}")), "stdout={stdout}");
+    assert!(stdout.contains("title=t1"), "stdout={stdout}");
+
+    let fork_output = Command::new(rustcode_bin())
+        .args(["session", "fork", &id, "--title", "forked"])
+        .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
+        .output()
+        .expect("run rustcode session fork");
+    assert!(fork_output.status.success());
+    let stdout = String::from_utf8(fork_output.stdout).expect("stdout must be utf8");
+    let fork_id = stdout
+        .lines()
+        .find_map(|line| line.strip_prefix("id=").map(str::to_string))
+        .expect("must print id=");
+
+    let fork_show_output = Command::new(rustcode_bin())
+        .args(["session", "show", &fork_id])
+        .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
+        .output()
+        .expect("run rustcode session show fork");
+    assert!(fork_show_output.status.success());
+    let stdout = String::from_utf8(fork_show_output.stdout).expect("stdout must be utf8");
+    assert!(stdout.contains(&format!("id={fork_id}")), "stdout={stdout}");
+    assert!(stdout.contains("title=forked"), "stdout={stdout}");
+    assert!(
+        stdout.contains(&format!("parent_id={id}")),
+        "stdout={stdout}"
+    );
 }
 
 #[test]
@@ -2097,6 +2177,8 @@ fn sigint_cancels_hanging_llm_request_gracefully() {
         return;
     };
 
+    let sessions_dir = make_temp_dir_path("sessions-sigint-hanging-llm");
+
     let config_path = make_temp_file_path("sigint-hanging-llm");
     std::fs::write(
         &config_path,
@@ -2116,6 +2198,7 @@ api_key_env = "RUSTCODE_TEST_KEY"
 
     let mut child = Command::new(rustcode_bin())
         .args(["run", "hang"])
+        .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
         .env("RUSTCODE_USER_CONFIG", &config_path)
         .env("RUSTCODE_TRUST_PROJECT", "0")
         .env("RUSTCODE_TEST_KEY", "integration-secret")

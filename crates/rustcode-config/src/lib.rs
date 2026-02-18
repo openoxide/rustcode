@@ -2,10 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use globset::Glob;
 use rustcode_core::config::{
     BackendSelectionPolicy, McpOAuthConfig, McpServerConfig, ResolvedConfig,
 };
 use rustcode_core::error::ConfigError;
+use rustcode_core::permissions::PermissionRule;
 use serde::Deserialize;
 use toml_edit::{DocumentMut, Item, Table, Value};
 
@@ -25,6 +27,7 @@ pub struct ConfigSources {
 }
 
 impl ConfigSources {
+    #[must_use]
     pub fn new(cwd: PathBuf) -> Self {
         Self {
             cwd,
@@ -54,6 +57,7 @@ struct FileConfig {
     plugins: Option<Vec<String>>,
     env: Option<BTreeMap<String, String>>,
     policy: Option<PolicyConfig>,
+    permissions: Option<Vec<PermissionRule>>,
     trust: Option<TrustConfig>,
 }
 
@@ -120,6 +124,11 @@ struct BackendSelectionPolicyConfig {
 pub struct ConfigLoader;
 
 impl ConfigLoader {
+    /// Load and validate the effective configuration based on the provided sources.
+    ///
+    /// # Errors
+    /// Returns `ConfigError` when configuration layers cannot be read/parsed/validated, or when
+    /// a project config exists but is not trusted.
     pub fn load(sources: &ConfigSources) -> Result<ResolvedConfig, ConfigError> {
         let mut cfg = ResolvedConfig {
             workspace_root: sources.cwd.clone(),
@@ -185,13 +194,13 @@ impl ConfigLoader {
         }
 
         if let Some(profile) = &sources.profile_override {
-            cfg.profile = profile.clone();
+            cfg.profile.clone_from(profile);
         }
         if let Some(model) = &sources.model_override {
-            cfg.model = model.clone();
+            cfg.model.clone_from(model);
         }
         if let Some(provider) = &sources.llm_provider_override {
-            cfg.llm_provider = provider.clone();
+            cfg.llm_provider.clone_from(provider);
         }
         if let Some(base_url) = &sources.llm_base_url_override {
             cfg.llm_base_url = Some(base_url.clone());
@@ -273,7 +282,10 @@ pub enum ConfigEditScope {
     User,
     Project,
 }
-
+/// Add or update an MCP server in the selected config scope.
+///
+/// # Errors
+/// Returns `ConfigError` if the config file cannot be read/parsed/updated.
 pub fn edit_mcp_server(
     scope: ConfigEditScope,
     cwd: &Path,
@@ -322,13 +334,7 @@ pub fn edit_mcp_server(
 
     let oauth = &server.oauth;
     let has_settings = oauth.client_id.is_some() || oauth.client_secret_env.is_some();
-    if !has_settings {
-        if oauth.enabled {
-            server_table.remove("oauth");
-        } else {
-            server_table.insert("oauth", Item::Value(Value::from(false)));
-        }
-    } else {
+    if has_settings {
         let mut inline = toml_edit::InlineTable::new();
         inline.get_or_insert("enabled", oauth.enabled);
         if let Some(client_id) = oauth.client_id.as_ref() {
@@ -338,12 +344,19 @@ pub fn edit_mcp_server(
             inline.get_or_insert("client_secret_env", secret_env.clone());
         }
         server_table.insert("oauth", Item::Value(Value::InlineTable(inline)));
+    } else if oauth.enabled {
+        server_table.remove("oauth");
+    } else {
+        server_table.insert("oauth", Item::Value(Value::from(false)));
     }
 
     write_document_atomically(&path, &doc)?;
     Ok(path)
 }
-
+/// Remove an MCP server from the selected config scope.
+///
+/// # Errors
+/// Returns `ConfigError` if the config file cannot be read/parsed/updated.
 pub fn remove_mcp_server(
     scope: ConfigEditScope,
     cwd: &Path,
@@ -425,14 +438,14 @@ fn read_file_config(path: &Path) -> Result<Option<FileConfig>, ConfigError> {
 
 fn apply_file(cfg: &mut ResolvedConfig, file_cfg: &FileConfig) {
     if let Some(profile) = &file_cfg.profile {
-        cfg.profile = profile.clone();
+        cfg.profile.clone_from(profile);
     }
     if let Some(model) = &file_cfg.model {
-        cfg.model = model.clone();
+        cfg.model.clone_from(model);
     }
     if let Some(llm) = &file_cfg.llm {
         if let Some(provider) = &llm.provider {
-            cfg.llm_provider = provider.clone();
+            cfg.llm_provider.clone_from(provider);
         }
         if let Some(base_url) = &llm.base_url {
             cfg.llm_base_url = Some(base_url.clone());
@@ -478,6 +491,15 @@ fn apply_file(cfg: &mut ResolvedConfig, file_cfg: &FileConfig) {
             merge_backend_selection_policy(&mut cfg.backend_selection, backend_selection);
         }
     }
+    if let Some(rules) = &file_cfg.permissions {
+        for rule in rules {
+            cfg.permission_rules.push(PermissionRule {
+                permission: rule.permission.trim().to_string(),
+                action: rule.action,
+                pattern: rule.pattern.trim().to_string(),
+            });
+        }
+    }
 }
 
 fn merge_mcp_servers(
@@ -490,7 +512,7 @@ fn merge_mcp_servers(
             oauth: McpOAuthConfig::default(),
         });
         if server.url.is_some() {
-            entry.url = server.url.clone();
+            entry.url.clone_from(&server.url);
         }
         let oauth = match &server.oauth {
             None => entry.oauth.clone(),
@@ -548,19 +570,17 @@ fn merge_plugins(current: &mut Vec<String>, incoming: &[String]) {
 fn trusted_project_set(configs: &[Option<&FileConfig>], cwd: &Path) -> BTreeSet<PathBuf> {
     let mut trusted = BTreeSet::new();
 
-    for cfg in configs {
-        if let Some(cfg) = cfg {
-            if let Some(trust) = &cfg.trust {
-                if let Some(projects) = &trust.projects {
-                    for path in projects {
-                        let raw = PathBuf::from(path);
-                        let full = if raw.is_absolute() {
-                            raw
-                        } else {
-                            cwd.join(raw)
-                        };
-                        trusted.insert(normalize_path(&full));
-                    }
+    for cfg in configs.iter().flatten().copied() {
+        if let Some(trust) = &cfg.trust {
+            if let Some(projects) = &trust.projects {
+                for path in projects {
+                    let raw = PathBuf::from(path);
+                    let full = if raw.is_absolute() {
+                        raw
+                    } else {
+                        cwd.join(raw)
+                    };
+                    trusted.insert(normalize_path(&full));
                 }
             }
         }
@@ -667,6 +687,24 @@ fn validate(cfg: &ResolvedConfig) -> Result<(), ConfigError> {
         "policy.backend_selection.subscription_penalty",
         cfg.backend_selection.subscription_penalty,
     )?;
+
+    for (idx, rule) in cfg.permission_rules.iter().enumerate() {
+        if rule.permission.trim().is_empty() {
+            return Err(ConfigError::Validation(format!(
+                "permissions[{idx}].permission must not be empty"
+            )));
+        }
+        if rule.pattern.trim().is_empty() {
+            return Err(ConfigError::Validation(format!(
+                "permissions[{idx}].pattern must not be empty"
+            )));
+        }
+        Glob::new(&rule.pattern).map_err(|err| {
+            ConfigError::Validation(format!(
+                "permissions[{idx}].pattern is not a valid glob: {err}"
+            ))
+        })?;
+    }
     Ok(())
 }
 
@@ -1106,11 +1144,11 @@ url = "   "
 
         write_config(
             &global,
-            r#"
+            r"
 [policy.backend_selection]
 provider_agnostic_weight = 4
 automation_skills_weight = 2
-"#,
+",
         );
 
         write_config(
@@ -1152,10 +1190,10 @@ projects = ["{}"]
 
         write_config(
             &global,
-            r#"
+            r"
 [policy.backend_selection]
 privacy_weight = -1
-"#,
+",
         );
 
         let mut sources = ConfigSources::new(cwd);
@@ -1170,6 +1208,94 @@ privacy_weight = -1
             }
             _ => panic!("expected validation error"),
         }
+    }
+
+    #[test]
+    fn permissions_rules_load_in_layer_order_and_validate_globs() {
+        let temp_root = make_temp_dir("permissions");
+        let cwd = temp_root.join("project");
+        fs::create_dir_all(&cwd).expect("must create cwd");
+
+        let global = temp_root.join("global.toml");
+        let user = temp_root.join("user.toml");
+        let project = cwd.join("rustcode.toml");
+
+        write_config(
+            &global,
+            r#"
+[[permissions]]
+permission = "write"
+action = "allow"
+pattern = "docs/**"
+"#,
+        );
+        write_config(
+            &user,
+            &format!(
+                r#"
+[[permissions]]
+permission = "exec"
+action = "deny"
+pattern = "rm"
+
+[trust]
+projects = ["{}"]
+"#,
+                cwd.display()
+            ),
+        );
+        write_config(
+            &project,
+            r#"
+[[permissions]]
+permission = "write"
+action = "ask"
+pattern = "src/**"
+"#,
+        );
+
+        let mut sources = ConfigSources::new(cwd);
+        sources.read_process_env = false;
+        sources.global_config_path = Some(global);
+        sources.user_config_path = Some(user);
+        sources.project_config_path = Some(project);
+
+        let cfg = ConfigLoader::load(&sources).expect("config should load");
+        assert_eq!(cfg.permission_rules.len(), 3);
+        assert_eq!(cfg.permission_rules[0].permission, "write");
+        assert_eq!(cfg.permission_rules[0].pattern, "docs/**");
+        assert_eq!(cfg.permission_rules[1].permission, "exec");
+        assert_eq!(cfg.permission_rules[1].pattern, "rm");
+        assert_eq!(cfg.permission_rules[2].permission, "write");
+        assert_eq!(cfg.permission_rules[2].pattern, "src/**");
+    }
+
+    #[test]
+    fn permissions_rules_reject_invalid_glob_pattern() {
+        let temp_root = make_temp_dir("permissions-invalid");
+        let cwd = temp_root.join("project");
+        fs::create_dir_all(&cwd).expect("must create cwd");
+
+        let user = temp_root.join("user.toml");
+        write_config(
+            &user,
+            r#"
+[[permissions]]
+permission = "write"
+action = "allow"
+pattern = "["
+"#,
+        );
+
+        let mut sources = ConfigSources::new(cwd);
+        sources.read_process_env = false;
+        sources.user_config_path = Some(user);
+
+        let err = ConfigLoader::load(&sources).expect_err("must reject invalid glob");
+        assert!(
+            err.to_string().contains("permissions[0].pattern"),
+            "err={err}"
+        );
     }
 
     fn write_config(path: &Path, contents: &str) {

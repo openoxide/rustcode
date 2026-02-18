@@ -61,6 +61,19 @@ pub struct Event {
     pub payload: EventPayload,
 }
 
+impl Event {
+    #[must_use]
+    pub fn new(id: EventId, scope: EventScope, payload: EventPayload) -> Self {
+        Self {
+            schema_version: EVENT_SCHEMA_VERSION,
+            id,
+            timestamp: SystemTime::now(),
+            scope,
+            payload,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,17 +112,5 @@ mod tests {
         let encoded = serde_json::to_string(&event).expect("must serialize");
         let decoded: Event = serde_json::from_str(&encoded).expect("must deserialize");
         assert_eq!(decoded, event);
-    }
-}
-
-impl Event {
-    pub fn new(id: EventId, scope: EventScope, payload: EventPayload) -> Self {
-        Self {
-            schema_version: EVENT_SCHEMA_VERSION,
-            id,
-            timestamp: SystemTime::now(),
-            scope,
-            payload,
-        }
     }
 }

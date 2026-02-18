@@ -5,6 +5,7 @@ members = [
   "crates/rustcode-engine",
   "crates/rustcode-config",
   "crates/rustcode-auth",
+  "crates/rustcode-state",
   "crates/rustcode-io",
   "crates/rustcode-plugins",
   "crates/rustcode-llm",
@@ -37,6 +38,8 @@ base64 = "0.22"
 rand = "0.9"
 sha2 = "0.10"
 rpassword = "7.4"
+globset = "0.4"
+regex = "1.11"
 
 [workspace.lints.clippy]
 all = "warn"

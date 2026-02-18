@@ -36,6 +36,7 @@ pub enum Command {
     Agent {
         prompt: String,
         options: AgentOptions,
+        history: Vec<StoredMessage>,
     },
     Exec {
         command: String,
@@ -62,3 +63,4 @@ pub enum Command {
     },
     Version,
 }
+use crate::session::StoredMessage;

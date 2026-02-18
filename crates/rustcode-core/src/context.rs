@@ -20,6 +20,7 @@ pub struct CommandContext {
 }
 
 impl CommandContext {
+    #[must_use]
     pub fn new(config: Arc<ResolvedConfig>, session: SessionMeta) -> Self {
         Self {
             config,
@@ -28,6 +29,7 @@ impl CommandContext {
         }
     }
 
+    #[must_use]
     pub fn with_cancellation(
         config: Arc<ResolvedConfig>,
         session: SessionMeta,
