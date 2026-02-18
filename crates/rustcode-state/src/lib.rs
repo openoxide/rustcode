@@ -222,6 +222,39 @@ impl SessionStore {
         Ok(forked)
     }
 
+    pub fn update_session_title(
+        &self,
+        session_id: &str,
+        title: Option<String>,
+    ) -> Result<SessionInfo, StateError> {
+        let dir = self.session_dir(session_id);
+        if !dir.exists() {
+            return Err(StateError::NotFound(session_id.to_string()));
+        }
+        let mut info = self.get_session(session_id)?;
+        info.title = title.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        info.updated_at_unix_ms = now_unix_ms()?;
+        write_json_atomic(&dir.join("meta.json"), &info)?;
+        Ok(info)
+    }
+
+    pub fn delete_session(&self, session_id: &str) -> Result<(), StateError> {
+        let dir = self.session_dir(session_id);
+        if !dir.exists() {
+            return Err(StateError::NotFound(session_id.to_string()));
+        }
+        fs::remove_dir_all(&dir)
+            .map_err(|err| StateError::Io(format!("{}: {err}", dir.display())))?;
+        Ok(())
+    }
+
     pub fn new_message_id(&self) -> MessageId {
         new_message_id()
     }
@@ -480,6 +513,39 @@ mod tests {
         let err = store
             .load_messages("does-not-exist")
             .expect_err("must fail");
+        assert!(matches!(err, StateError::NotFound(_)));
+    }
+
+    #[test]
+    fn update_session_title_round_trips() {
+        let root = temp_dir("rename");
+        let store = SessionStore::with_root(root.join("sessions"));
+        let session = store
+            .create_session(None, None, Path::new("/tmp"), Path::new("/tmp"), "m")
+            .expect("create");
+
+        let updated = store
+            .update_session_title(&session.id, Some("new title".to_string()))
+            .expect("update title");
+        assert_eq!(updated.title.as_deref(), Some("new title"));
+
+        let loaded = store.get_session(&session.id).expect("get");
+        assert_eq!(loaded.title.as_deref(), Some("new title"));
+    }
+
+    #[test]
+    fn delete_session_removes_from_list_and_load_fails() {
+        let root = temp_dir("delete");
+        let store = SessionStore::with_root(root.join("sessions"));
+        let session = store
+            .create_session(None, None, Path::new("/tmp"), Path::new("/tmp"), "m")
+            .expect("create");
+
+        store.delete_session(&session.id).expect("delete");
+        let sessions = store.list_sessions().expect("list");
+        assert!(sessions.is_empty());
+
+        let err = store.load_messages(&session.id).expect_err("load must fail");
         assert!(matches!(err, StateError::NotFound(_)));
     }
 }

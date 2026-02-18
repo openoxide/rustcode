@@ -15,7 +15,13 @@ use rustcode_core::SessionInfo;
 
 mod backend;
 
-pub use backend::{CreateSessionOptions, LocalSessionBackend, SessionBackend};
+pub use backend::{CreateSessionOptions, LocalSessionBackend, RemoteSessionBackend, SessionBackend};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InteractiveSubmitMode {
+    Agent,
+    Run,
+}
 
 #[derive(Debug, Error)]
 pub enum TuiError {
@@ -123,6 +129,8 @@ pub struct InteractiveServices {
 
     pub config: Option<Arc<ResolvedConfig>>,
     pub executor: Option<Arc<dyn CommandExecutor>>,
+
+    pub submit_mode: InteractiveSubmitMode,
 }
 
 pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {

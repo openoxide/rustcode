@@ -1,0 +1,526 @@
+use crate::types::{ChatMessage, ChatRequest, ChatRole, LlmError, ToolCall, ToolSpec};
+use serde_json::{json, Value};
+
+fn openai_role_value(role: ChatRole) -> &'static str {
+    match role {
+        ChatRole::System => "system",
+        ChatRole::User => "user",
+        ChatRole::Assistant => "assistant",
+        ChatRole::Tool => "tool",
+    }
+}
+
+fn openai_tool_call_value(call: &ToolCall) -> Value {
+    json!({
+        "id": call.id,
+        "type": "function",
+        "function": {
+            "name": call.name,
+            "arguments": call.arguments,
+        }
+    })
+}
+
+pub(crate) fn openai_message_value(message: &ChatMessage) -> Value {
+    let mut obj = serde_json::Map::new();
+    obj.insert(
+        "role".to_string(),
+        Value::String(openai_role_value(message.role).to_string()),
+    );
+    obj.insert("content".to_string(), message.content.clone());
+    if message.role == ChatRole::Tool {
+        if let Some(tool_call_id) = message.tool_call_id.as_ref() {
+            obj.insert(
+                "tool_call_id".to_string(),
+                Value::String(tool_call_id.clone()),
+            );
+        }
+        if let Some(tool_name) = message.tool_name.as_ref() {
+            obj.insert("name".to_string(), Value::String(tool_name.clone()));
+        }
+    }
+    if message.role == ChatRole::Assistant && !message.tool_calls.is_empty() {
+        obj.insert(
+            "tool_calls".to_string(),
+            Value::Array(
+                message
+                    .tool_calls
+                    .iter()
+                    .map(openai_tool_call_value)
+                    .collect(),
+            ),
+        );
+    }
+    Value::Object(obj)
+}
+
+pub(crate) fn openai_tool_spec_value(tool: &ToolSpec) -> Value {
+    json!({
+        "type": "function",
+        "function": {
+            "name": tool.name,
+            "description": tool.description,
+            "parameters": tool.parameters,
+        }
+    })
+}
+
+pub(crate) fn extract_openai_text(value: &Value) -> Option<String> {
+    let message = value.get("choices")?.get(0)?;
+    if let Some(text) = message.get("text").and_then(Value::as_str) {
+        return Some(text.to_string());
+    }
+    let content = message.get("message")?.get("content")?;
+    if let Some(text) = content.as_str() {
+        return Some(text.to_string());
+    }
+
+    let content_parts = content.as_array()?;
+    let mut combined = String::new();
+    for part in content_parts {
+        if let Some(text) = part.get("text").and_then(Value::as_str) {
+            combined.push_str(text);
+        }
+    }
+    if combined.is_empty() {
+        None
+    } else {
+        Some(combined)
+    }
+}
+
+pub(crate) fn extract_openai_tool_calls(value: &Value) -> Vec<ToolCall> {
+    let Some(message) = value.get("choices").and_then(|choices| choices.get(0)) else {
+        return Vec::new();
+    };
+    let Some(message) = message.get("message") else {
+        return Vec::new();
+    };
+    let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    let mut parsed = Vec::new();
+    for call in tool_calls {
+        let Some(id) = call.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(function) = call.get("function") else {
+            continue;
+        };
+        let Some(name) = function.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(arguments) = function.get("arguments") else {
+            continue;
+        };
+        let arguments = match arguments {
+            Value::String(raw) => raw.clone(),
+            other => other.to_string(),
+        };
+        parsed.push(ToolCall {
+            id: id.to_string(),
+            name: name.to_string(),
+            arguments,
+        });
+    }
+    parsed
+}
+
+pub(crate) fn extract_openai_stream_delta(value: &Value) -> Option<String> {
+    let choice = value.get("choices")?.get(0)?;
+    if let Some(text) = choice.get("text").and_then(Value::as_str) {
+        return Some(text.to_string());
+    }
+
+    let delta = choice.get("delta")?;
+    if let Some(text) = delta.get("content").and_then(Value::as_str) {
+        return Some(text.to_string());
+    }
+
+    if let Some(parts) = delta.get("content").and_then(Value::as_array) {
+        let mut combined = String::new();
+        for part in parts {
+            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                combined.push_str(text);
+            }
+        }
+        if !combined.is_empty() {
+            return Some(combined);
+        }
+    }
+
+    None
+}
+
+pub(crate) fn extract_anthropic_text(value: &Value) -> Option<String> {
+    let content = value.get("content")?.as_array()?;
+    let mut combined = String::new();
+    for item in content {
+        if item.get("type").and_then(Value::as_str) == Some("text") {
+            if let Some(text) = item.get("text").and_then(Value::as_str) {
+                combined.push_str(text);
+            }
+        }
+    }
+    if combined.is_empty() {
+        None
+    } else {
+        Some(combined)
+    }
+}
+
+pub(crate) fn extract_anthropic_tool_calls(value: &Value) -> Vec<ToolCall> {
+    let Some(content) = value.get("content").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    let mut calls = Vec::new();
+    for item in content {
+        if item.get("type").and_then(Value::as_str) != Some("tool_use") {
+            continue;
+        }
+        let Some(id) = item.get("id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(name) = item.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let input = item.get("input").cloned().unwrap_or(Value::Null);
+        calls.push(ToolCall {
+            id: id.to_string(),
+            name: name.to_string(),
+            arguments: input.to_string(),
+        });
+    }
+    calls
+}
+
+pub(crate) fn extract_anthropic_stream_delta(value: &Value) -> Option<String> {
+    let event_type = value.get("type").and_then(Value::as_str)?;
+    match event_type {
+        "content_block_delta" => value
+            .get("delta")
+            .and_then(|delta| delta.get("text"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        "content_block_start" => value
+            .get("content_block")
+            .and_then(|block| block.get("text"))
+            .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        _ => None,
+    }
+}
+
+pub(crate) fn anthropic_messages_from_chat(
+    request: &ChatRequest,
+) -> Result<(String, Vec<Value>), LlmError> {
+    let mut system = String::new();
+    let mut messages: Vec<Value> = Vec::new();
+
+    for message in &request.messages {
+        match message.role {
+            ChatRole::System => {
+                if let Some(text) = message.content.as_str() {
+                    if !system.is_empty() {
+                        system.push_str("\n\n");
+                    }
+                    system.push_str(text);
+                }
+            }
+            ChatRole::User => {
+                let blocks = anthropic_content_blocks_from_value(&message.content);
+                if !blocks.is_empty() {
+                    messages.push(json!({"role":"user","content": blocks}));
+                }
+            }
+            ChatRole::Assistant => {
+                let mut blocks: Vec<Value> = Vec::new();
+                if let Some(text) = message.content.as_str() {
+                    if !text.is_empty() {
+                        blocks.push(json!({"type":"text","text": text}));
+                    }
+                }
+                for call in &message.tool_calls {
+                    let input: Value = serde_json::from_str(&call.arguments).unwrap_or(Value::Null);
+                    blocks.push(json!({
+                        "type": "tool_use",
+                        "id": call.id,
+                        "name": call.name,
+                        "input": input,
+                    }));
+                }
+                if !blocks.is_empty() {
+                    messages.push(json!({"role":"assistant","content": blocks}));
+                }
+            }
+            ChatRole::Tool => {
+                let Some(call_id) = message.tool_call_id.as_deref() else {
+                    continue;
+                };
+                let (content, is_error) = anthropic_tool_result_from_value(&message.content);
+                messages.push(json!({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": call_id,
+                        "content": content,
+                        "is_error": is_error
+                    }]
+                }));
+            }
+        }
+    }
+
+    Ok((system, messages))
+}
+
+fn anthropic_content_blocks_from_value(value: &Value) -> Vec<Value> {
+    if let Some(text) = value.as_str() {
+        if text.is_empty() {
+            return Vec::new();
+        }
+        return vec![json!({"type":"text","text": text})];
+    }
+    if value.is_null() {
+        return Vec::new();
+    }
+    vec![json!({"type":"text","text": value.to_string()})]
+}
+
+fn anthropic_tool_result_from_value(value: &Value) -> (String, bool) {
+    let content = if let Some(text) = value.as_str() {
+        text.to_string()
+    } else {
+        value.to_string()
+    };
+
+    let is_error = match serde_json::from_str::<Value>(&content) {
+        Ok(parsed) => parsed
+            .get("ok")
+            .and_then(Value::as_bool)
+            .map(|ok| !ok)
+            .unwrap_or(false),
+        Err(_) => false,
+    };
+
+    (content, is_error)
+}
+
+pub(crate) fn extract_google_text(value: &Value) -> Option<String> {
+    let candidates = value.get("candidates")?.as_array()?;
+    let first = candidates.first()?;
+    let content = first.get("content")?;
+    let parts = content.get("parts")?.as_array()?;
+    let mut combined = String::new();
+    for part in parts {
+        if let Some(text) = part.get("text").and_then(Value::as_str) {
+            combined.push_str(text);
+        }
+    }
+    if combined.is_empty() {
+        None
+    } else {
+        Some(combined)
+    }
+}
+
+pub(crate) fn extract_google_text_delta(value: &Value) -> Option<String> {
+    extract_google_text(value)
+}
+
+pub(crate) fn extract_google_tool_calls(value: &Value) -> Vec<ToolCall> {
+    let Some(candidates) = value.get("candidates").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let Some(first) = candidates.first() else {
+        return Vec::new();
+    };
+    let Some(parts) = first
+        .get("content")
+        .and_then(|content| content.get("parts"))
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+
+    let mut calls = Vec::new();
+    let mut idx = 1usize;
+    for part in parts {
+        let Some(call) = part.get("functionCall") else {
+            continue;
+        };
+        let Some(name) = call.get("name").and_then(Value::as_str) else {
+            continue;
+        };
+        let args = call.get("args").cloned().unwrap_or(Value::Null);
+        calls.push(ToolCall {
+            id: format!("call_{idx}"),
+            name: name.to_string(),
+            arguments: args.to_string(),
+        });
+        idx += 1;
+    }
+    calls
+}
+
+pub(crate) fn google_tools_from_specs(tools: &[ToolSpec]) -> Vec<Value> {
+    if tools.is_empty() {
+        return Vec::new();
+    }
+    let declarations = tools
+        .iter()
+        .map(|tool| {
+            let parameters = sanitize_google_schema(&tool.parameters);
+            json!({
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": parameters,
+            })
+        })
+        .collect::<Vec<_>>();
+    vec![json!({
+        "functionDeclarations": declarations
+    })]
+}
+
+pub(crate) fn sanitize_google_schema(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut sanitized = serde_json::Map::new();
+            for (key, child) in map {
+                if key == "additionalProperties" {
+                    continue;
+                }
+                sanitized.insert(key.clone(), sanitize_google_schema(child));
+            }
+            Value::Object(sanitized)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(sanitize_google_schema).collect()),
+        _ => value.clone(),
+    }
+}
+
+pub(crate) fn google_contents_from_chat(
+    request: &ChatRequest,
+) -> Result<(String, Vec<Value>), LlmError> {
+    let mut system = String::new();
+    let mut contents: Vec<Value> = Vec::new();
+
+    for message in &request.messages {
+        match message.role {
+            ChatRole::System => {
+                if let Some(text) = message.content.as_str() {
+                    if !system.is_empty() {
+                        system.push_str("\n\n");
+                    }
+                    system.push_str(text);
+                }
+            }
+            ChatRole::User => {
+                let text = google_text_from_value(&message.content);
+                if !text.is_empty() {
+                    contents.push(json!({
+                        "role": "user",
+                        "parts": [{"text": text}],
+                    }));
+                }
+            }
+            ChatRole::Assistant => {
+                let mut parts: Vec<Value> = Vec::new();
+                let text = google_text_from_value(&message.content);
+                if !text.is_empty() {
+                    parts.push(json!({"text": text}));
+                }
+                for call in &message.tool_calls {
+                    let args: Value = serde_json::from_str(&call.arguments).unwrap_or(Value::Null);
+                    parts.push(json!({
+                        "functionCall": {
+                            "name": call.name,
+                            "args": args,
+                        }
+                    }));
+                }
+                if !parts.is_empty() {
+                    contents.push(json!({
+                        "role": "model",
+                        "parts": parts,
+                    }));
+                }
+            }
+            ChatRole::Tool => {
+                let Some(tool_name) = message.tool_name.as_deref() else {
+                    return Err(LlmError::Invalid(
+                        "tool result message missing tool_name for google provider".to_string(),
+                    ));
+                };
+                let response = google_tool_response_object(&message.content);
+                contents.push(json!({
+                    "role": "user",
+                    "parts": [{
+                        "functionResponse": {
+                            "name": tool_name,
+                            "response": response,
+                        }
+                    }],
+                }));
+            }
+        }
+    }
+
+    Ok((system, contents))
+}
+
+fn google_text_from_value(value: &Value) -> String {
+    if let Some(text) = value.as_str() {
+        return text.to_string();
+    }
+    if value.is_null() {
+        return String::new();
+    }
+    value.to_string()
+}
+
+fn google_tool_response_object(value: &Value) -> Value {
+    if let Some(text) = value.as_str() {
+        if let Ok(parsed) = serde_json::from_str::<Value>(text) {
+            if parsed.is_object() {
+                return parsed;
+            }
+        }
+        return json!({ "output": text });
+    }
+    if value.is_object() {
+        return value.clone();
+    }
+    json!({ "output": value })
+}
+
+pub(crate) fn extract_gateway_text(value: &Value) -> Option<String> {
+    if let Some(text) = extract_openai_text(value) {
+        return Some(text);
+    }
+    if let Some(text) = value.get("text").and_then(Value::as_str) {
+        return Some(text.to_string());
+    }
+    if let Some(text) = value.get("output").and_then(Value::as_str) {
+        return Some(text.to_string());
+    }
+    None
+}
+
+pub(crate) fn extract_gateway_stream_delta(value: &Value) -> Option<String> {
+    let kind = value.get("type").and_then(Value::as_str).unwrap_or("");
+    let candidates = ["textDelta", "delta", "text"];
+
+    if kind.contains("delta") || kind.contains("text") {
+        for key in candidates {
+            if let Some(text) = value.get(key).and_then(Value::as_str) {
+                return Some(text.to_string());
+            }
+        }
+    }
+
+    None
+}
