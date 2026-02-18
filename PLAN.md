@@ -1263,7 +1263,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Tests: config parsing/validation + engine gating behavior
 
 59. MCP Runtime (Tool + Resource Integration)
-- Status: pending
+- Status: in_progress
 - Scope:
   - Connect to configured MCP servers, expose MCP tools to the agent, and support reading MCP resources.
   - Integrate OAuth flows via existing `rustcode-auth` primitives.
@@ -1272,7 +1272,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - `opencode/packages/opencode/src/cli/cmd/mcp.ts` (MCP command UX)
   - `codex/codex-rs/cli/src/mcp_cmd.rs` (MCP CLI patterns)
 - Deliverables:
-  - MCP client runtime with stdio transport
+  - MCP client runtime (streamable HTTP baseline; stdio to follow)
   - tool schema transformation/sanitization for provider compatibility
   - tests using mocked MCP servers
 
