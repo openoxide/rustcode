@@ -1,4 +1,4 @@
-use crate::types::{ChatMessage, ChatRequest, ChatRole, LlmError, ToolCall, ToolSpec};
+use crate::types::{ChatMessage, ChatRequest, ChatRole, LlmError, TokenUsage, ToolCall, ToolSpec};
 use serde_json::{json, Value};
 
 fn openai_role_value(role: ChatRole) -> &'static str {
@@ -523,3 +523,42 @@ pub(crate) fn extract_gateway_stream_delta(value: &Value) -> Option<String> {
 
     None
 }
+
+// ── Token usage extraction ─────────────────────────────────────────────
+
+/// Extract token usage from an OpenAI-compatible response.
+/// Shape: `{ "usage": { "prompt_tokens": N, "completion_tokens": N, "total_tokens": N } }`
+pub(crate) fn extract_openai_usage(value: &Value) -> Option<TokenUsage> {
+    let usage = value.get("usage")?;
+    let input = usage.get("prompt_tokens").and_then(Value::as_u64).unwrap_or(0);
+    let output = usage.get("completion_tokens").and_then(Value::as_u64).unwrap_or(0);
+    let total = usage.get("total_tokens").and_then(Value::as_u64).unwrap_or(input + output);
+    let cache_read = usage.get("prompt_tokens_details")
+        .and_then(|d| d.get("cached_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    Some(TokenUsage { input, output, total, cache_read, cache_write: 0 })
+}
+
+/// Extract token usage from an Anthropic Messages API response.
+/// Shape: `{ "usage": { "input_tokens": N, "output_tokens": N, "cache_read_input_tokens": N, "cache_creation_input_tokens": N } }`
+pub(crate) fn extract_anthropic_usage(value: &Value) -> Option<TokenUsage> {
+    let usage = value.get("usage")?;
+    let input = usage.get("input_tokens").and_then(Value::as_u64).unwrap_or(0);
+    let output = usage.get("output_tokens").and_then(Value::as_u64).unwrap_or(0);
+    let cache_read = usage.get("cache_read_input_tokens").and_then(Value::as_u64).unwrap_or(0);
+    let cache_write = usage.get("cache_creation_input_tokens").and_then(Value::as_u64).unwrap_or(0);
+    Some(TokenUsage { input, output, total: input + output, cache_read, cache_write })
+}
+
+/// Extract token usage from a Google Generative AI response.
+/// Shape: `{ "usageMetadata": { "promptTokenCount": N, "candidatesTokenCount": N, "totalTokenCount": N, "cachedContentTokenCount": N } }`
+pub(crate) fn extract_google_usage(value: &Value) -> Option<TokenUsage> {
+    let usage = value.get("usageMetadata")?;
+    let input = usage.get("promptTokenCount").and_then(Value::as_u64).unwrap_or(0);
+    let output = usage.get("candidatesTokenCount").and_then(Value::as_u64).unwrap_or(0);
+    let total = usage.get("totalTokenCount").and_then(Value::as_u64).unwrap_or(input + output);
+    let cache_read = usage.get("cachedContentTokenCount").and_then(Value::as_u64).unwrap_or(0);
+    Some(TokenUsage { input, output, total, cache_read, cache_write: 0 })
+}
+

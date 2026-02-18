@@ -53,6 +53,8 @@ mod agent_handlers_patch;
 mod agent_handlers_search;
 mod agent_handlers_web;
 mod agent_runtime;
+pub mod compaction;
+pub mod context_tracker;
 mod agent_tools;
 mod agent_tool_specs;
 mod agent_util;

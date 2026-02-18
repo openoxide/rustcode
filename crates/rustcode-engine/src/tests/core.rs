@@ -146,6 +146,7 @@ async fn agent_can_exec_when_allowed() {
                             name: "exec".to_string(),
                             arguments: r#"{"command":"echo","args":["hi"]}"#.to_string(),
                         }],
+                        usage: None,
                     })
                 }
                 _ => {
@@ -159,6 +160,7 @@ async fn agent_can_exec_when_allowed() {
                     Ok(ChatResponse {
                         text: "done".to_string(),
                         tool_calls: Vec::new(),
+                        usage: None,
                     })
                 }
             }

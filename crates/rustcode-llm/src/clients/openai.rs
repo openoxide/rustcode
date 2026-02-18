@@ -6,7 +6,7 @@ use crate::provider::model_for_provider;
 use crate::streaming::{extract_stream_error_message, read_sse_or_body, StreamedProviderBody};
 use crate::transforms::{
     extract_openai_stream_delta, extract_openai_text, extract_openai_tool_calls,
-    openai_message_value, openai_tool_spec_value,
+    extract_openai_usage, openai_message_value, openai_tool_spec_value,
 };
 use crate::types::{
     ChatRequest, ChatResponse, LlmClient, LlmError, LlmRequest, LlmResponse,
@@ -211,6 +211,8 @@ impl LlmClient for OpenAiCompatibleClient {
             ));
         }
 
-        Ok(ChatResponse { text, tool_calls })
+        let usage = extract_openai_usage(&parsed);
+
+        Ok(ChatResponse { text, tool_calls, usage })
     }
 }

@@ -4,6 +4,7 @@ use crate::agent_util::{
     approval_fields, approval_match_targets, is_mutating_tool, is_parallel_safe_tool,
     resolve_permission_action, stored_messages_to_chat, tool_payload_json,
 };
+use crate::context_tracker::ContextTracker;
 
 impl Engine {
     pub(crate) async fn run_agent(
@@ -35,10 +36,31 @@ When you are done, respond with a final plain-text answer."
             .build_initial_messages(&system_prompt, &prompt, history, context)
             .await?;
 
+        let mut context_tracker = ContextTracker::new(&context.config.model);
+
         for _step in 0..options.max_steps {
+            // Check for context overflow and compact if needed
+            if context_tracker.is_overflow() {
+                tracing::info!(
+                    "context overflow detected ({}), compacting",
+                    context_tracker.status_line()
+                );
+                if let Err(err) = self.compact_context(&mut messages, context).await {
+                    tracing::warn!("compaction failed, continuing with pruned context: {err}");
+                }
+                // Reset tracker after compaction (next LLM step will report new usage)
+                context_tracker = ContextTracker::new(&context.config.model);
+            }
+
             let response = self
                 .run_llm_step(&messages, &tools, context)
                 .await?;
+
+            // Record token usage for context tracking
+            if let Some(usage) = &response.usage {
+                context_tracker.record_usage(usage);
+                tracing::debug!("context: {}", context_tracker.status_line());
+            }
 
             self.record_assistant_response(&response, &messages, publisher.clone(), context)
                 .await?;

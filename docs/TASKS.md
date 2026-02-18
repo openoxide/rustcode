@@ -51,11 +51,13 @@
 - [x] Tool specs extracted to `agent_tool_specs.rs` (LOC compliance)
 
 ## Milestone 3: Context Window Management & Compaction
-- [ ] Token counting / estimation
-- [ ] Context window tracking
-- [ ] Compaction strategy (reference: opencode `session/compaction.ts`, codex `tasks/compact.rs`)
-- [ ] Summary generation for compacted context
-- [ ] Safe compaction with invariant preservation
+- [x] Token usage tracking in LLM responses (`TokenUsage` struct in `types.rs`)
+- [x] Extract usage from OpenAI/Anthropic/Google provider responses
+- [x] Context window tracker (`context_tracker.rs`) — with `usage_percent()` + `status_line()` for TUI
+- [x] Compaction module (`compaction.rs`) — prune + LLM summarize
+- [x] Hook compaction into agent loop (`agent_runtime.rs`)
+- [x] Unit tests for all new modules (15 new tests)
+- [ ] Manual live test: trigger compaction in long conversation
 
 ## Milestone 4: Session & State Management Enhancement
 - [ ] Instruction system (reference: opencode `session/instruction.ts`, codex `instructions/`)

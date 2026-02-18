@@ -40,10 +40,30 @@ pub enum RequestInitiator {
     Agent,
 }
 
+/// Token usage statistics from an LLM API response.
+#[derive(Debug, Clone, Default)]
+pub struct TokenUsage {
+    /// Tokens consumed by the input (prompt + messages).
+    pub input: u64,
+    /// Tokens generated in the output.
+    pub output: u64,
+    /// Total tokens (input + output). May differ from sum if provider reports differently.
+    pub total: u64,
+    /// Tokens read from cache (prompt caching).
+    pub cache_read: u64,
+    /// Tokens written to cache.
+    pub cache_write: u64,
+}
+
+/// Response from an LLM chat completion.
 #[derive(Debug, Clone)]
 pub struct ChatResponse {
+    /// The assistant's text reply (may be empty if only tool calls).
     pub text: String,
+    /// Tool calls requested by the assistant.
     pub tool_calls: Vec<ToolCall>,
+    /// Token usage statistics, if reported by the provider.
+    pub usage: Option<TokenUsage>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

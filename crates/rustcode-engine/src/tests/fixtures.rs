@@ -292,6 +292,7 @@ impl LlmClient for ScriptedAgentLlm {
                         name: "list".to_string(),
                         arguments: r#"{"path":"."}"#.to_string(),
                     }],
+                    usage: None,
                 })
             }
             _ => {
@@ -305,6 +306,7 @@ impl LlmClient for ScriptedAgentLlm {
                 Ok(ChatResponse {
                     text: "done".to_string(),
                     tool_calls: Vec::new(),
+                    usage: None,
                 })
             }
         }

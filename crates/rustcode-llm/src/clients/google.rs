@@ -3,7 +3,7 @@ use crate::provider::model_for_provider;
 use crate::streaming::{extract_stream_error_message, read_sse_or_body, StreamedProviderBody};
 use crate::transforms::{
     extract_google_text, extract_google_text_delta, extract_google_tool_calls,
-    google_contents_from_chat, google_tools_from_specs,
+    extract_google_usage, google_contents_from_chat, google_tools_from_specs,
 };
 use crate::types::{
     ChatRequest, ChatResponse, LlmClient, LlmError, LlmRequest, LlmResponse,
@@ -204,6 +204,7 @@ impl LlmClient for GoogleGenerativeAiClient {
                 "provider response did not include content or tool calls".to_string(),
             ));
         }
-        Ok(ChatResponse { text, tool_calls })
+        let usage = extract_google_usage(&parsed);
+        Ok(ChatResponse { text, tool_calls, usage })
     }
 }

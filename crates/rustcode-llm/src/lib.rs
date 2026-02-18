@@ -27,7 +27,7 @@ pub use provider::{
 };
 pub use types::{
     ChatMessage, ChatRequest, ChatResponse, ChatRole, LlmClient, LlmError, LlmRequest,
-    LlmResponse, NullLlmClient, RequestInitiator, ToolCall, ToolSpec,
+    LlmResponse, NullLlmClient, RequestInitiator, ToolCall, ToolSpec, TokenUsage,
 };
 
 pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmError> {

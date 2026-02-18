@@ -3,7 +3,7 @@ use crate::provider::model_for_provider;
 use crate::streaming::{extract_stream_error_message, read_sse_or_body, StreamedProviderBody};
 use crate::transforms::{
     anthropic_messages_from_chat, extract_anthropic_stream_delta, extract_anthropic_text,
-    extract_anthropic_tool_calls,
+    extract_anthropic_tool_calls, extract_anthropic_usage,
 };
 use crate::types::{
     ChatRequest, ChatResponse, LlmClient, LlmError, LlmRequest, LlmResponse,
@@ -207,6 +207,8 @@ impl LlmClient for AnthropicClient {
             ));
         }
 
-        Ok(ChatResponse { text, tool_calls })
+        let usage = extract_anthropic_usage(&parsed);
+
+        Ok(ChatResponse { text, tool_calls, usage })
     }
 }
