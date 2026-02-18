@@ -10,6 +10,7 @@ use std::{
 };
 
 use async_trait::async_trait;
+use futures_util::future::join_all;
 use futures_util::StreamExt;
 use reqwest::header::CONTENT_TYPE;
 use serde_json::{json, Value};
@@ -471,11 +472,14 @@ When you are done, respond with a final plain-text answer."
                 return Ok(());
             }
 
-            for call in response
+            let calls = response
                 .tool_calls
                 .iter()
                 .take(options.max_tool_calls_per_step)
-            {
+                .cloned()
+                .collect::<Vec<_>>();
+
+            for call in &calls {
                 self.emit(
                     publisher.clone(),
                     EventScope::Tool,
@@ -487,16 +491,52 @@ When you are done, respond with a final plain-text answer."
                     context,
                 )
                 .await?;
+            }
 
-                let tool_result = self
-                    .execute_agent_tool_call(
-                        call.name.as_str(),
-                        call.arguments.as_str(),
-                        context,
-                        &options,
-                        &mut state,
+            let can_parallelize = calls.len() > 1
+                && calls
+                    .iter()
+                    .all(|call| is_parallel_safe_tool(call.name.as_str()));
+
+            let results = if can_parallelize {
+                join_all(calls.iter().map(|call| async {
+                    let mut local_state = AgentState::default();
+                    (
+                        call.id.clone(),
+                        call.name.clone(),
+                        self.execute_agent_tool_call(
+                            call.name.as_str(),
+                            call.arguments.as_str(),
+                            context,
+                            &options,
+                            &mut local_state,
+                        )
+                        .await,
                     )
-                    .await;
+                }))
+                .await
+            } else {
+                let mut out = Vec::with_capacity(calls.len());
+                for call in &calls {
+                    out.push((
+                        call.id.clone(),
+                        call.name.clone(),
+                        self.execute_agent_tool_call(
+                            call.name.as_str(),
+                            call.arguments.as_str(),
+                            context,
+                            &options,
+                            &mut state,
+                        )
+                        .await,
+                    ));
+                }
+                out
+            };
+
+            for (call, (id, name, tool_result)) in calls.iter().zip(results.into_iter()) {
+                debug_assert_eq!(call.id, id);
+                debug_assert_eq!(call.name, name);
 
                 let (ok, output) = match tool_result {
                     Ok(output) => (true, output),
@@ -1588,6 +1628,10 @@ fn html_to_plainish_text(html: &str) -> String {
 
 fn is_mutating_tool(name: &str) -> bool {
     matches!(name, "write" | "edit" | "exec")
+}
+
+fn is_parallel_safe_tool(name: &str) -> bool {
+    matches!(name, "list" | "glob" | "grep" | "webfetch" | "todowrite")
 }
 
 fn approval_fields(tool: &str, args: &Value) -> (String, String, String) {
