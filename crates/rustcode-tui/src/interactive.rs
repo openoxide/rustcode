@@ -47,7 +47,6 @@ struct ChatState {
     composer: String,
     activity: Vec<String>,
     running: Option<RunningCommand>,
-    pending_approval: Option<PendingApproval>,
 }
 
 struct AppState {
@@ -56,6 +55,8 @@ struct AppState {
     screen: Screen,
     status: Option<String>,
     defaults: InteractiveDefaults,
+
+    pending_approval: Option<PendingApproval>,
 
     store: SessionStore,
     config: Option<Arc<ResolvedConfig>>,
@@ -87,6 +88,8 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
         screen: Screen::Sessions,
         status: services.initial_status,
         defaults: services.defaults,
+
+        pending_approval: None,
         store: services.store,
         config: services.config,
         executor: services.executor,
@@ -178,12 +181,9 @@ fn drain_messages(state: &mut AppState) {
                 }
             }
             InteractiveMsg::ApprovalRequest { request, reply } => {
-                if let Screen::Chat(chat) = &mut screen {
-                    chat.pending_approval = Some(PendingApproval { request, reply });
-                } else {
-                    // Deny approvals when not in a place to render them.
-                    let _ = reply.send(false);
-                }
+                // Always present approvals globally; the run might be streaming while the user
+                // navigates around.
+                state.pending_approval = Some(PendingApproval { request, reply });
             }
             InteractiveMsg::RunEnded { ok, message } => {
                 if let Screen::Chat(chat) = &mut screen {
@@ -213,6 +213,25 @@ enum ChatNav {
 }
 
 fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
+    if let Some(pending) = state.pending_approval.take() {
+        let decision = match key.code {
+            KeyCode::Char('a') => Some(true),
+            KeyCode::Char('d') => Some(false),
+            KeyCode::Esc | KeyCode::Char('q') => Some(false),
+            _ => None,
+        };
+        if let Some(decision) = decision {
+            let _ = pending.reply.send(decision);
+            state.status = Some(format!(
+                "approval: tool={} decision={decision}",
+                pending.request.tool
+            ));
+        } else {
+            state.pending_approval = Some(pending);
+        }
+        return false;
+    }
+
     match &state.screen {
         Screen::Sessions => handle_sessions_key(state, key),
         Screen::Chat(_) => {
@@ -334,7 +353,6 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 composer: String::new(),
                 activity: Vec::new(),
                 running: None,
-                pending_approval: None,
             });
         }
         _ => {}
@@ -343,25 +361,6 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
 }
 
 fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) -> ChatNav {
-    if let Some(pending) = chat.pending_approval.take() {
-        let decision = match key.code {
-            KeyCode::Char('a') => Some(true),
-            KeyCode::Char('d') => Some(false),
-            KeyCode::Esc | KeyCode::Char('q') => Some(false),
-            _ => None,
-        };
-        if let Some(decision) = decision {
-            let _ = pending.reply.send(decision);
-            chat.activity.push(format!(
-                "approval: tool={} decision={decision}",
-                pending.request.tool
-            ));
-            return ChatNav::Stay;
-        }
-        chat.pending_approval = Some(pending);
-        return ChatNav::Stay;
-    }
-
     if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
         if let Some(running) = &chat.running {
             running.cancellation.cancel();
@@ -493,6 +492,10 @@ fn render(frame: &mut ratatui::Frame<'_>, state: &AppState) {
         Screen::Sessions => render_sessions(frame, state),
         Screen::Chat(chat) => render_chat(frame, state, chat),
     }
+
+    if let Some(pending) = &state.pending_approval {
+        render_approval_modal(frame, pending);
+    }
 }
 
 fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) {
@@ -609,10 +612,6 @@ fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState)
     frame.render_widget(help, left[2]);
 
     render_activity(frame, root[1], chat);
-
-    if let Some(pending) = &chat.pending_approval {
-        render_approval_modal(frame, pending);
-    }
 }
 
 fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: &ChatState) {
@@ -742,6 +741,8 @@ mod tests {
                 workspace_root: std::path::PathBuf::from("/tmp"),
                 model: "null".to_string(),
             },
+
+            pending_approval: None,
             store: SessionStore::with_root(std::path::PathBuf::from("/tmp")),
             config: None,
             executor: None,
