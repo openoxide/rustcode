@@ -1709,4 +1709,122 @@ mod tests {
         assert!(text.contains("Output:"), "text={text}");
         assert!(text.contains("tool output"), "text={text}");
     }
+
+    #[test]
+    fn approval_modal_renders_tool_name() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+
+        let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+        let state = AppState {
+            sessions: vec![SessionInfo {
+                id: "s-1".to_string(),
+                title: Some("t1".to_string()),
+                created_at_unix_ms: 0,
+                updated_at_unix_ms: 0,
+                parent_id: None,
+                cwd: "/tmp".to_string(),
+                workspace_root: "/tmp".to_string(),
+                model: "null".to_string(),
+            }],
+            sessions_view: vec![0],
+            selected: 0,
+            sessions_filter: String::new(),
+            sessions_filter_active: false,
+            screen: Screen::Sessions,
+            status: None,
+            defaults: InteractiveDefaults {
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                model: "null".to_string(),
+            },
+
+            pending_approval: Some(PendingApproval {
+                request: ToolApprovalRequest {
+                    tool: "read".to_string(),
+                    permission: "read".to_string(),
+                    pattern: "README.md".to_string(),
+                    arguments: serde_json::json!({"path": "README.md"}),
+                    reason: "test".to_string(),
+                },
+                reply: reply_tx,
+            }),
+            store: SessionStore::with_root(std::path::PathBuf::from("/tmp")),
+            config: None,
+            executor: None,
+            runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
+            tx: tokio::sync::mpsc::unbounded_channel().0,
+            rx: tokio::sync::mpsc::unbounded_channel().1,
+            request_seq: 0,
+        };
+
+        terminal.draw(|frame| render(frame, &state)).expect("draw");
+        let text = buffer_to_string(terminal.backend().buffer());
+        assert!(text.contains("Tool approval required"), "text={text}");
+        assert!(text.contains("tool: read"), "text={text}");
+        assert!(text.contains("target: README.md"), "text={text}");
+    }
+
+    #[test]
+    fn activity_details_modal_renders_tool_arguments() {
+        let backend = TestBackend::new(120, 30);
+        let mut terminal = Terminal::new(backend).expect("terminal");
+
+        let session = SessionInfo {
+            id: "s-1".to_string(),
+            title: Some("t1".to_string()),
+            created_at_unix_ms: 0,
+            updated_at_unix_ms: 0,
+            parent_id: None,
+            cwd: "/tmp".to_string(),
+            workspace_root: "/tmp".to_string(),
+            model: "null".to_string(),
+        };
+
+        let state = AppState {
+            sessions: vec![session.clone()],
+            sessions_view: vec![0],
+            selected: 0,
+            sessions_filter: String::new(),
+            sessions_filter_active: false,
+            screen: Screen::Chat(ChatState {
+                session,
+                messages: Vec::new(),
+                scroll: 0,
+                composer: String::new(),
+                prompt_history: Vec::new(),
+                history_cursor: None,
+                history_draft: String::new(),
+                focus: ChatFocus::Activity,
+                activity: vec![ActivityItem::ToolCall {
+                    id: "tc-1".to_string(),
+                    name: "read".to_string(),
+                    arguments: "{\"path\":\"README.md\"}".to_string(),
+                }],
+                activity_selected: 0,
+                details_open: true,
+                tool_details: false,
+                running: None,
+            }),
+            status: None,
+            defaults: InteractiveDefaults {
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                model: "null".to_string(),
+            },
+
+            pending_approval: None,
+            store: SessionStore::with_root(std::path::PathBuf::from("/tmp")),
+            config: None,
+            executor: None,
+            runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
+            tx: tokio::sync::mpsc::unbounded_channel().0,
+            rx: tokio::sync::mpsc::unbounded_channel().1,
+            request_seq: 0,
+        };
+
+        terminal.draw(|frame| render(frame, &state)).expect("draw");
+        let text = buffer_to_string(terminal.backend().buffer());
+        assert!(text.contains("Details"), "text={text}");
+        assert!(text.contains("arguments:"), "text={text}");
+        assert!(text.contains("README.md"), "text={text}");
+    }
 }
