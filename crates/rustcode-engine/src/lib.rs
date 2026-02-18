@@ -1719,6 +1719,9 @@ mod tests {
     struct AgentFs {
         root: PathBuf,
     }
+    struct SearchFs {
+        root: PathBuf,
+    }
     struct ScriptedAgentLlm {
         step: Mutex<usize>,
     }
@@ -1819,6 +1822,71 @@ mod tests {
             _max_entries: usize,
         ) -> Result<Vec<PathBuf>, IoError> {
             Ok(vec![self.root.join("a.txt"), self.root.join("dir")])
+        }
+    }
+
+    #[async_trait]
+    impl FileSystemPort for SearchFs {
+        async fn read_to_string(&self, path: &Path) -> Result<String, IoError> {
+            self.read_to_string_limited(path, usize::MAX).await
+        }
+
+        async fn read_to_string_limited(
+            &self,
+            path: &Path,
+            _max_bytes: usize,
+        ) -> Result<String, IoError> {
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("<unknown>");
+            let content = match name {
+                "a.txt" => "hello\nneedle here\n".to_string(),
+                "b.md" => "needle too\n".to_string(),
+                _ => "".to_string(),
+            };
+            Ok(content)
+        }
+
+        async fn exists(&self, _path: &Path) -> Result<bool, IoError> {
+            Ok(true)
+        }
+
+        async fn write_string(&self, _path: &Path, _contents: &str) -> Result<(), IoError> {
+            Err(IoError::Io("not used".to_string()))
+        }
+
+        async fn list_dir(&self, _path: &Path) -> Result<Vec<PathBuf>, IoError> {
+            Err(IoError::Io("not used".to_string()))
+        }
+
+        async fn list_dir_limited(
+            &self,
+            _path: &Path,
+            _max_entries: usize,
+        ) -> Result<Vec<PathBuf>, IoError> {
+            Err(IoError::Io("not used".to_string()))
+        }
+
+        async fn metadata(&self, path: &Path) -> Result<rustcode_io::FsMetadata, IoError> {
+            let is_dir = path.ends_with("dir");
+            Ok(rustcode_io::FsMetadata {
+                is_dir,
+                is_file: !is_dir,
+                len: 0,
+            })
+        }
+
+        async fn walk_dir_limited(
+            &self,
+            _path: &Path,
+            _max_entries: usize,
+        ) -> Result<Vec<PathBuf>, IoError> {
+            Ok(vec![
+                self.root.join("a.txt"),
+                self.root.join("b.md"),
+                self.root.join("dir"),
+            ])
         }
     }
 
@@ -2641,6 +2709,97 @@ mod tests {
             .await;
         assert!(matches!(result, Err(ExecutionError::Dispatch(_))));
         assert_eq!(approver.calls.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn glob_returns_matching_files_relative_to_workspace() {
+        let workspace_root = PathBuf::from("/tmp/rustcode-glob-workspace");
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(SearchFs {
+                root: workspace_root.clone(),
+            }),
+            Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+        let context = CommandContext::new(
+            Arc::new(ResolvedConfig {
+                workspace_root: workspace_root.clone(),
+                ..ResolvedConfig::default()
+            }),
+            SessionMeta {
+                session_id: "s-glob-1".to_string(),
+                request_id: "r-glob-1".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let options = AgentOptions::default();
+        let mut state = AgentState::default();
+        let output = engine
+            .execute_agent_tool_call(
+                "glob",
+                r#"{"pattern":"*.txt"}"#,
+                &context,
+                &options,
+                &mut state,
+            )
+            .await
+            .expect("glob should succeed");
+
+        assert!(output.contains("a.txt"), "output={output}");
+        assert!(!output.contains("b.md"), "output={output}");
+        assert!(!output.contains("dir"), "output={output}");
+    }
+
+    #[tokio::test]
+    async fn grep_respects_include_filter_and_emits_line_matches() {
+        let workspace_root = PathBuf::from("/tmp/rustcode-grep-workspace");
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(SearchFs {
+                root: workspace_root.clone(),
+            }),
+            Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+        let context = CommandContext::new(
+            Arc::new(ResolvedConfig {
+                workspace_root: workspace_root.clone(),
+                ..ResolvedConfig::default()
+            }),
+            SessionMeta {
+                session_id: "s-grep-1".to_string(),
+                request_id: "r-grep-1".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let options = AgentOptions {
+            max_read_bytes: 64 * 1024,
+            max_list_entries: 100,
+            ..AgentOptions::default()
+        };
+        let mut state = AgentState::default();
+        let output = engine
+            .execute_agent_tool_call(
+                "grep",
+                r#"{"pattern":"needle","include":"*.txt"}"#,
+                &context,
+                &options,
+                &mut state,
+            )
+            .await
+            .expect("grep should succeed");
+
+        assert!(output.contains("a.txt:2: needle here"), "output={output}");
+        assert!(!output.contains("b.md"), "output={output}");
     }
 
     #[tokio::test]
