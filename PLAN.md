@@ -1328,6 +1328,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added in-chat shortcuts for session lifecycle: `Ctrl+N` new session, `Ctrl+F` fork session
   - Added multi-line prompt entry in TUI (`Alt+Enter` inserts newline)
   - Added session picker filtering (`/` to enter filter mode)
+  - Added tool message rendering in transcript with `t` toggle for details
   - `rustcode tui` now launches interactive UI only when running in a real terminal (no-op when piped)
 
 62. Export/Import/Share
