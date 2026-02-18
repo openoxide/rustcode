@@ -25,12 +25,11 @@ impl Engine {
 
         let mut state = AgentState::default();
 
-        let system_prompt = "You are rustcode, a production-grade coding agent.\n\
-Use tools when you need filesystem context.\n\
-Prefer: list -> read.\n\
-Only modify files via write/edit when explicitly required.\n\
-When you are done, respond with a final plain-text answer."
-            .to_string();
+        let system_prompt = crate::system_prompt::build_system_prompt(
+            &context.config.model,
+            &context.config.workspace_root,
+            crate::system_prompt::is_git_repo(&context.config.workspace_root),
+        );
 
         let mut messages = self
             .build_initial_messages(&system_prompt, &prompt, history, context)
@@ -52,9 +51,11 @@ When you are done, respond with a final plain-text answer."
                 context_tracker = ContextTracker::new(&context.config.model);
             }
 
-            let response = self
-                .run_llm_step(&messages, &tools, context)
-                .await?;
+            let retry_policy = crate::retry::RetryPolicy::default();
+            let response = crate::retry::retry_llm_call(&retry_policy, || {
+                self.run_llm_step(&messages, &tools, context)
+            })
+            .await?;
 
             // Record token usage for context tracking
             if let Some(usage) = &response.usage {

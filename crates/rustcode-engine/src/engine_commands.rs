@@ -301,8 +301,26 @@ impl CommandExecutor for Engine {
                 options,
                 history,
             } => {
-                self.run_agent(prompt, options, history, &context, publisher.clone())
-                    .await
+                let result = self.run_agent(prompt, options, history, &context, publisher.clone())
+                    .await;
+                
+                // Compute and emit session summary after agent completes
+                if result.is_ok() {
+                    let summary = crate::session_summary::compute_diff_stats(&context.config.workspace_root);
+                    if summary.has_changes() {
+                        self.emit(
+                            publisher.clone(),
+                            EventScope::System,
+                            EventPayload::OutputChunk {
+                                text: format!("\n{}", summary.to_display()),
+                            },
+                            &context,
+                        )
+                        .await?;
+                    }
+                }
+                
+                result
             }
             Command::Exec { command, args } => {
                 self.run_exec(command, args, &context, publisher.clone())

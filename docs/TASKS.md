@@ -60,14 +60,14 @@
 - [ ] Manual live test: trigger compaction in long conversation
 
 ## Milestone 4: Session & State Management Enhancement
-- [ ] Instruction system (reference: opencode `session/instruction.ts`, codex `instructions/`)
+- [x] Instruction system (reference: opencode `session/instruction.ts`, codex `instructions/`)
+- [x] System prompt management (reference: opencode `session/system.ts`)
+- [x] Retry logic (reference: opencode `session/retry.ts`)
+- [x] Summary generation (reference: opencode `session/summary.ts`)
 - [ ] Message v2 format (reference: opencode `session/message-v2.ts`)
 - [ ] Prompt construction (reference: opencode `session/prompt.ts`)
-- [ ] Retry logic (reference: opencode `session/retry.ts`)
 - [ ] Revert logic (reference: opencode `session/revert.ts`)
 - [ ] Status tracking (reference: opencode `session/status.ts`)
-- [ ] Summary generation (reference: opencode `session/summary.ts`)
-- [ ] System prompt management (reference: opencode `session/system.ts`)
 - [ ] Snapshot/share support (reference: opencode `snapshot/`, `share/`)
 
 ## Milestone 5: Provider & Auth System Hardening
