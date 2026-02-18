@@ -2824,11 +2824,11 @@ async fn run_attached(
     event_debug: bool,
 ) -> Result<()> {
     let endpoint = format!("{}/v1/run", server_url.trim_end_matches('/'));
-    let request = serde_json::json!({
-        "schema_version": rustcode_core::event::EVENT_SCHEMA_VERSION,
-        "prompt": prompt,
-        "session_id": session_id,
-    });
+    let request = rustcode_core::server_protocol::V1RunRequest {
+        schema_version: rustcode_core::server_protocol::SERVER_API_SCHEMA_VERSION,
+        prompt: prompt.to_string(),
+        session_id: session_id.map(str::to_string),
+    };
 
     let client = reqwest::Client::new();
     let response = client

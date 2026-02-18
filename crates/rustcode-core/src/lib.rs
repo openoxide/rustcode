@@ -5,6 +5,7 @@ pub mod error;
 pub mod event;
 pub mod permissions;
 pub mod ports;
+pub mod server_protocol;
 pub mod session;
 pub mod tool_approval;
 

@@ -32,6 +32,10 @@ use rustcode_core::ports::{
     CommandExecutor, EventPublisher, PathOperation, PermissionPolicy, ToolApprover,
     TranscriptRecorder,
 };
+use rustcode_core::server_protocol::{
+    V1ErrorResponse, V1RunRequest, V1SessionCreateRequest, V1SessionCreateResponse,
+    V1SessionShowResponse, V1SessionsListResponse, SERVER_API_SCHEMA_VERSION,
+};
 use rustcode_core::session::{MessageRole, StoredMessage, StoredToolCall};
 use rustcode_core::ToolApprovalRequest;
 use rustcode_io::{FileSystemPort, IoError, ProcessOutput, ProcessPort};
@@ -1524,46 +1528,50 @@ When you are done, respond with a final plain-text answer."
         body: Vec<u8>,
         serve_context: &CommandContext,
     ) -> Result<u16, ExecutionError> {
-        #[derive(serde::Deserialize)]
-        struct RunRequest {
-            #[serde(default)]
-            schema_version: Option<u16>,
-            prompt: String,
-            #[serde(default)]
-            session_id: Option<String>,
-        }
-
-        let request: RunRequest = match serde_json::from_slice(&body) {
+        let request: V1RunRequest = match serde_json::from_slice(&body) {
             Ok(value) => value,
             Err(err) => {
-                let payload = serde_json::json!({
-                    "error": "bad request",
-                    "message": format!("invalid json body: {err}"),
-                })
-                .to_string();
-                write_http_json(&mut stream, 400, "Bad Request", &(payload + "\n")).await?;
+                let payload = V1ErrorResponse {
+                    error: "bad request".to_string(),
+                    message: format!("invalid json body: {err}"),
+                };
+                write_http_json(
+                    &mut stream,
+                    400,
+                    "Bad Request",
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+                )
+                .await?;
                 return Ok(400);
             }
         };
         if request.prompt.trim().is_empty() {
-            let payload = serde_json::json!({
-                "error": "bad request",
-                "message": "prompt must not be empty",
-            })
-            .to_string();
-            write_http_json(&mut stream, 400, "Bad Request", &(payload + "\n")).await?;
+            let payload = V1ErrorResponse {
+                error: "bad request".to_string(),
+                message: "prompt must not be empty".to_string(),
+            };
+            write_http_json(
+                &mut stream,
+                400,
+                "Bad Request",
+                &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+            )
+            .await?;
             return Ok(400);
         }
-        if let Some(schema) = request.schema_version {
-            if schema != 1 {
-                let payload = serde_json::json!({
-                    "error": "bad request",
-                    "message": format!("unsupported schema_version={schema}"),
-                })
-                .to_string();
-                write_http_json(&mut stream, 400, "Bad Request", &(payload + "\n")).await?;
-                return Ok(400);
-            }
+        if request.schema_version != SERVER_API_SCHEMA_VERSION {
+            let payload = V1ErrorResponse {
+                error: "bad request".to_string(),
+                message: format!("unsupported schema_version={}", request.schema_version),
+            };
+            write_http_json(
+                &mut stream,
+                400,
+                "Bad Request",
+                &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+            )
+            .await?;
+            return Ok(400);
         }
 
         let cwd = std::env::current_dir()
@@ -1589,21 +1597,31 @@ When you are done, respond with a final plain-text answer."
         let session_id = match session_result {
             Ok(info) => info.id,
             Err(rustcode_state::StateError::NotFound(_)) => {
-                let payload = serde_json::json!({
-                    "error": "not found",
-                    "message": "session not found",
-                })
-                .to_string();
-                write_http_json(&mut stream, 404, "Not Found", &(payload + "\n")).await?;
+                let payload = V1ErrorResponse {
+                    error: "not found".to_string(),
+                    message: "session not found".to_string(),
+                };
+                write_http_json(
+                    &mut stream,
+                    404,
+                    "Not Found",
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+                )
+                .await?;
                 return Ok(404);
             }
             Err(rustcode_state::StateError::Validation(message)) => {
-                let payload = serde_json::json!({
-                    "error": "bad request",
-                    "message": message,
-                })
-                .to_string();
-                write_http_json(&mut stream, 400, "Bad Request", &(payload + "\n")).await?;
+                let payload = V1ErrorResponse {
+                    error: "bad request".to_string(),
+                    message,
+                };
+                write_http_json(
+                    &mut stream,
+                    400,
+                    "Bad Request",
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+                )
+                .await?;
                 return Ok(400);
             }
             Err(err) if create_new => {
@@ -1613,13 +1631,17 @@ When you are done, respond with a final plain-text answer."
                 format!("session-{}", unix_ms())
             }
             Err(err) => {
-                let payload = serde_json::json!({
-                    "error": "internal",
-                    "message": err.to_string(),
-                })
-                .to_string();
-                write_http_json(&mut stream, 500, "Internal Server Error", &(payload + "\n"))
-                    .await?;
+                let payload = V1ErrorResponse {
+                    error: "internal".to_string(),
+                    message: err.to_string(),
+                };
+                write_http_json(
+                    &mut stream,
+                    500,
+                    "Internal Server Error",
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+                )
+                .await?;
                 return Ok(500);
             }
         };
@@ -1727,23 +1749,33 @@ When you are done, respond with a final plain-text answer."
         let sessions = match sessions_result {
             Ok(sessions) => sessions,
             Err(err) => {
-                let payload = serde_json::json!({
-                    "error": "internal",
-                    "message": err.to_string(),
-                })
-                .to_string();
-                write_http_json(stream, 500, "Internal Server Error", &(payload + "\n")).await?;
+                let payload = V1ErrorResponse {
+                    error: "internal".to_string(),
+                    message: err.to_string(),
+                };
+                write_http_json(
+                    stream,
+                    500,
+                    "Internal Server Error",
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+                )
+                .await?;
                 return Ok(500);
             }
         };
 
-        let payload = serde_json::json!({
-            "schema_version": 1,
-            "sessions_root": root,
-            "sessions": sessions,
-        })
-        .to_string();
-        write_http_json(stream, 200, "OK", &(payload + "\n")).await?;
+        let payload = V1SessionsListResponse {
+            schema_version: SERVER_API_SCHEMA_VERSION,
+            sessions_root: root,
+            sessions,
+        };
+        write_http_json(
+            stream,
+            200,
+            "OK",
+            &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+        )
+        .await?;
         Ok(200)
     }
 
@@ -1753,36 +1785,36 @@ When you are done, respond with a final plain-text answer."
         body: Vec<u8>,
         context: &CommandContext,
     ) -> Result<u16, ExecutionError> {
-        #[derive(serde::Deserialize)]
-        struct CreateSessionRequest {
-            #[serde(default)]
-            schema_version: Option<u16>,
-            #[serde(default)]
-            title: Option<String>,
-        }
-
-        let request: CreateSessionRequest = match serde_json::from_slice(&body) {
+        let request: V1SessionCreateRequest = match serde_json::from_slice(&body) {
             Ok(value) => value,
             Err(err) => {
-                let payload = serde_json::json!({
-                    "error": "bad request",
-                    "message": format!("invalid json body: {err}"),
-                })
-                .to_string();
-                write_http_json(stream, 400, "Bad Request", &(payload + "\n")).await?;
+                let payload = V1ErrorResponse {
+                    error: "bad request".to_string(),
+                    message: format!("invalid json body: {err}"),
+                };
+                write_http_json(
+                    stream,
+                    400,
+                    "Bad Request",
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+                )
+                .await?;
                 return Ok(400);
             }
         };
-        if let Some(schema) = request.schema_version {
-            if schema != 1 {
-                let payload = serde_json::json!({
-                    "error": "bad request",
-                    "message": format!("unsupported schema_version={schema}"),
-                })
-                .to_string();
-                write_http_json(stream, 400, "Bad Request", &(payload + "\n")).await?;
-                return Ok(400);
-            }
+        if request.schema_version != SERVER_API_SCHEMA_VERSION {
+            let payload = V1ErrorResponse {
+                error: "bad request".to_string(),
+                message: format!("unsupported schema_version={}", request.schema_version),
+            };
+            write_http_json(
+                stream,
+                400,
+                "Bad Request",
+                &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+            )
+            .await?;
+            return Ok(400);
         }
 
         let title = request.title;
@@ -1801,31 +1833,46 @@ When you are done, respond with a final plain-text answer."
         let session = match session_result {
             Ok(session) => session,
             Err(rustcode_state::StateError::Validation(message)) => {
-                let payload = serde_json::json!({
-                    "error": "bad request",
-                    "message": message,
-                })
-                .to_string();
-                write_http_json(stream, 400, "Bad Request", &(payload + "\n")).await?;
+                let payload = V1ErrorResponse {
+                    error: "bad request".to_string(),
+                    message,
+                };
+                write_http_json(
+                    stream,
+                    400,
+                    "Bad Request",
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+                )
+                .await?;
                 return Ok(400);
             }
             Err(err) => {
-                let payload = serde_json::json!({
-                    "error": "internal",
-                    "message": err.to_string(),
-                })
-                .to_string();
-                write_http_json(stream, 500, "Internal Server Error", &(payload + "\n")).await?;
+                let payload = V1ErrorResponse {
+                    error: "internal".to_string(),
+                    message: err.to_string(),
+                };
+                write_http_json(
+                    stream,
+                    500,
+                    "Internal Server Error",
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+                )
+                .await?;
                 return Ok(500);
             }
         };
 
-        let payload = serde_json::json!({
-            "schema_version": 1,
-            "session": session,
-        })
-        .to_string();
-        write_http_json(stream, 201, "Created", &(payload + "\n")).await?;
+        let payload = V1SessionCreateResponse {
+            schema_version: SERVER_API_SCHEMA_VERSION,
+            session,
+        };
+        write_http_json(
+            stream,
+            201,
+            "Created",
+            &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+        )
+        .await?;
         Ok(201)
     }
 
@@ -1847,40 +1894,60 @@ When you are done, respond with a final plain-text answer."
 
         match result {
             Ok((session, messages)) => {
-                let payload = serde_json::json!({
-                    "schema_version": 1,
-                    "session": session,
-                    "messages": messages,
-                })
-                .to_string();
-                write_http_json(stream, 200, "OK", &(payload + "\n")).await?;
+                let payload = V1SessionShowResponse {
+                    schema_version: SERVER_API_SCHEMA_VERSION,
+                    session,
+                    messages,
+                };
+                write_http_json(
+                    stream,
+                    200,
+                    "OK",
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+                )
+                .await?;
                 Ok(200)
             }
             Err(rustcode_state::StateError::NotFound(_)) => {
-                let payload = serde_json::json!({
-                    "error": "not found",
-                    "message": "session not found",
-                })
-                .to_string();
-                write_http_json(stream, 404, "Not Found", &(payload + "\n")).await?;
+                let payload = V1ErrorResponse {
+                    error: "not found".to_string(),
+                    message: "session not found".to_string(),
+                };
+                write_http_json(
+                    stream,
+                    404,
+                    "Not Found",
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+                )
+                .await?;
                 Ok(404)
             }
             Err(rustcode_state::StateError::Validation(message)) => {
-                let payload = serde_json::json!({
-                    "error": "bad request",
-                    "message": message,
-                })
-                .to_string();
-                write_http_json(stream, 400, "Bad Request", &(payload + "\n")).await?;
+                let payload = V1ErrorResponse {
+                    error: "bad request".to_string(),
+                    message,
+                };
+                write_http_json(
+                    stream,
+                    400,
+                    "Bad Request",
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+                )
+                .await?;
                 Ok(400)
             }
             Err(err) => {
-                let payload = serde_json::json!({
-                    "error": "internal",
-                    "message": err.to_string(),
-                })
-                .to_string();
-                write_http_json(stream, 500, "Internal Server Error", &(payload + "\n")).await?;
+                let payload = V1ErrorResponse {
+                    error: "internal".to_string(),
+                    message: err.to_string(),
+                };
+                write_http_json(
+                    stream,
+                    500,
+                    "Internal Server Error",
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
+                )
+                .await?;
                 Ok(500)
             }
         }
