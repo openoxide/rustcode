@@ -24,8 +24,8 @@ reqwest.workspace = true
 futures-util.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true
+rustcode-logging = { path = "../rustcode-logging" }
 tracing.workspace = true
-tracing-subscriber.workspace = true
 rpassword.workspace = true
 
 [lints]

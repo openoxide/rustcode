@@ -1226,6 +1226,7 @@ dependencies = [
  "rustcode-engine",
  "rustcode-io",
  "rustcode-llm",
+ "rustcode-logging",
  "rustcode-plugins",
  "rustcode-state",
  "rustcode-tui",
@@ -1234,7 +1235,6 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]
@@ -1299,6 +1299,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rustcode-error"
+version = "0.1.0"
+dependencies = [
+ "rustcode-core",
+ "thiserror",
+]
+
+[[package]]
 name = "rustcode-io"
 version = "0.1.0"
 dependencies = [
@@ -1322,6 +1330,14 @@ dependencies = [
  "serde_json",
  "thiserror",
  "tokio",
+]
+
+[[package]]
+name = "rustcode-logging"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

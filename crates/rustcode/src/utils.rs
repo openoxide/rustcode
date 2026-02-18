@@ -1,7 +1,6 @@
 use std::io::{IsTerminal, Write};
 use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
-use tracing_subscriber::EnvFilter;
 use crate::cli::Cli;
 use rustcode_config::{ConfigLoader, ConfigSources};
 use rustcode_core::config::ResolvedConfig;
@@ -41,10 +40,7 @@ pub fn now_unix_ms() -> i64 {
 }
 
 pub fn init_tracing() {
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .with_writer(std::io::stderr)
-        .try_init();
+    rustcode_logging::init();
 }
 
 pub fn load_effective_config(cli: &Cli) -> Result<ResolvedConfig> {

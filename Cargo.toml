@@ -5,6 +5,8 @@ members = [
   "crates/rustcode-engine",
   "crates/rustcode-config",
   "crates/rustcode-auth",
+  "crates/rustcode-error",
+  "crates/rustcode-logging",
   "crates/rustcode-mcp",
   "crates/rustcode-state",
   "crates/rustcode-io",

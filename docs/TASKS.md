@@ -29,10 +29,10 @@
   - [ ] ~~Split test files~~ (576, 563 LOC — test-only, deferred)
   - [ ] `oauth/browser.rs` (561 LOC — near limit, split if it grows)
   - [ ] Remaining files all under 540 LOC — no immediate action needed
-- [ ] Create `rustcode-error` crate — unified typed error hierarchy
-- [ ] Create `rustcode-logging` crate — structured tracing setup
-- [ ] Replace all `unwrap()` in production paths with proper error handling
-- [ ] Ensure all public APIs are documented
+- [x] Create `rustcode-error` crate — unified typed error hierarchy (IoError, LlmError, RustcodeError)
+- [x] Create `rustcode-logging` crate — structured tracing setup (compact, env-filter)
+- [x] Replace all `unwrap()` in production paths — 8 regex unwraps fixed with `OnceLock`
+- [x] Ensure all public APIs are documented — doc comments on core error types
 
 ## Milestone 2: Tool Execution Engine Expansion
 - [x] **Phase 1 — High-impact tools:**

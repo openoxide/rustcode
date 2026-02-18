@@ -1,0 +1,13 @@
+[package]
+name = "rustcode-error"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+rustcode-core = { path = "../rustcode-core" }
+thiserror.workspace = true
+
+[lints]
+workspace = true

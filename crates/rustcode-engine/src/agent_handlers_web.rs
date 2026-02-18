@@ -124,14 +124,25 @@ impl Engine {
 }
 
 fn html_to_plainish_text(html: &str) -> String {
-    let re_script = Regex::new(r"(?is)<script[^>]*>.*?</script>").unwrap();
-    let re_style = Regex::new(r"(?is)<style[^>]*>.*?</style>").unwrap();
-    let re_br = Regex::new(r"(?is)<br\s*/?>").unwrap();
-    let re_block_end = Regex::new(r"(?is)</\s*(p|div|li|h[1-6]|tr|table|ul|ol)\s*>").unwrap();
-    let re_li = Regex::new(r"(?is)<\s*li\b[^>]*>").unwrap();
-    let re_tags = Regex::new(r"(?is)<[^>]+>").unwrap();
-    let re_ws = Regex::new(r"[ \t\x0B\x0C\r]+\n").unwrap();
-    let re_many_newlines = Regex::new(r"\n{3,}").unwrap();
+    use std::sync::OnceLock;
+
+    static RE_SCRIPT: OnceLock<Regex> = OnceLock::new();
+    static RE_STYLE: OnceLock<Regex> = OnceLock::new();
+    static RE_BR: OnceLock<Regex> = OnceLock::new();
+    static RE_BLOCK_END: OnceLock<Regex> = OnceLock::new();
+    static RE_LI: OnceLock<Regex> = OnceLock::new();
+    static RE_TAGS: OnceLock<Regex> = OnceLock::new();
+    static RE_WS: OnceLock<Regex> = OnceLock::new();
+    static RE_MANY_NEWLINES: OnceLock<Regex> = OnceLock::new();
+
+    let re_script = RE_SCRIPT.get_or_init(|| Regex::new(r"(?is)<script[^>]*>.*?</script>").expect("static regex"));
+    let re_style = RE_STYLE.get_or_init(|| Regex::new(r"(?is)<style[^>]*>.*?</style>").expect("static regex"));
+    let re_br = RE_BR.get_or_init(|| Regex::new(r"(?is)<br\s*/?>").expect("static regex"));
+    let re_block_end = RE_BLOCK_END.get_or_init(|| Regex::new(r"(?is)</\s*(p|div|li|h[1-6]|tr|table|ul|ol)\s*>").expect("static regex"));
+    let re_li = RE_LI.get_or_init(|| Regex::new(r"(?is)<\s*li\b[^>]*>").expect("static regex"));
+    let re_tags = RE_TAGS.get_or_init(|| Regex::new(r"(?is)<[^>]+>").expect("static regex"));
+    let re_ws = RE_WS.get_or_init(|| Regex::new(r"[ \t\x0B\x0C\r]+\n").expect("static regex"));
+    let re_many_newlines = RE_MANY_NEWLINES.get_or_init(|| Regex::new(r"\n{3,}").expect("static regex"));
 
     let mut s = re_script.replace_all(html, "").to_string();
     s = re_style.replace_all(&s, "").to_string();
