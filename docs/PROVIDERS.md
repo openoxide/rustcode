@@ -2,6 +2,8 @@
 
 `rustcode` now resolves LLM providers via config, env, or CLI overrides.
 
+For CI-runnable, no-network provider examples, see `docs/PROVIDER_DOCTESTS.md`.
+
 ## Resolution Order
 
 1. CLI flags
