@@ -339,6 +339,15 @@ impl Engine {
                     }
                     Err(err) => {
                         tracing::warn!("failed to fetch MCP tool specs: {err}");
+                        self.emit(
+                            publisher.clone(),
+                            EventScope::System,
+                            EventPayload::Warning {
+                                message: format!("mcp tools unavailable: {err}"),
+                            },
+                            context,
+                        )
+                        .await?;
                     }
                 }
             }
