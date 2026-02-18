@@ -155,29 +155,79 @@ async fn main() -> Result<()> {
             return Ok(());
         }
 
+        let runtime = tokio::runtime::Handle::current();
+        let store = SessionStore::open_default();
+        let handles = rustcode_tui::InteractiveHandles::new();
+
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let (defaults, initial_status) = match load_effective_config(&cli) {
-            Ok(config) => (
-                rustcode_tui::InteractiveDefaults {
+        let (defaults, initial_status, config, executor) = match load_effective_config(&cli) {
+            Ok(config) => {
+                let defaults = rustcode_tui::InteractiveDefaults {
                     workspace_root: config.workspace_root.clone(),
                     model: config.model.clone(),
-                },
-                None,
-            ),
+                };
+
+                let config = Arc::new(config);
+                let (initial_status, executor) = match build_client(&config) {
+                    Ok(llm_client) => {
+                        let recorder: Option<Arc<dyn rustcode_core::TranscriptRecorder>> =
+                            Some(Arc::new(FileTranscriptRecorder::new(store.clone())));
+
+                        let mut engine = {
+                            let io = Arc::new(LocalIo);
+                            Engine::new(
+                                llm_client,
+                                io.clone(),
+                                io,
+                                Arc::new(WorkspacePermissionPolicy),
+                                PluginRegistry::default(),
+                                recorder,
+                                Some(handles.approver.clone()),
+                            )
+                        };
+
+                        if config.allow_network {
+                            if let Ok(registry) = build_mcp_registry(&config).await {
+                                engine = engine.with_mcp(registry);
+                            }
+                        }
+
+                        (
+                            None,
+                            Some(Arc::new(engine) as Arc<dyn rustcode_core::CommandExecutor>),
+                        )
+                    }
+                    Err(err) => (Some(format!("llm init failed: {err}")), None),
+                };
+
+                (defaults, initial_status, Some(config), executor)
+            }
             Err(err) => (
                 rustcode_tui::InteractiveDefaults {
                     workspace_root: cwd.clone(),
                     model: "unknown".to_string(),
                 },
                 Some(format!("config not loaded: {err}")),
+                None,
+                None,
             ),
         };
 
-        let store = SessionStore::open_default();
-        tokio::task::spawn_blocking(move || rustcode_tui::run_interactive(store, defaults, initial_status))
-            .await
-            .context("tui join failed")?
-            .context("tui failed")?;
+        tokio::task::spawn_blocking(move || {
+            let services = rustcode_tui::InteractiveServices {
+                store,
+                defaults,
+                initial_status,
+                runtime,
+                handles,
+                config,
+                executor,
+            };
+            rustcode_tui::run_interactive(services)
+        })
+        .await
+        .context("tui join failed")?
+        .context("tui failed")?;
         return Ok(());
     }
 

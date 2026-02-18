@@ -1,10 +1,17 @@
-use thiserror::Error;
-use tokio::sync::mpsc;
-
-use rustcode_core::event::Event;
-use rustcode_state::SessionStore;
-
 use std::path::PathBuf;
+use std::sync::Arc;
+
+use thiserror::Error;
+use tokio::runtime::Handle;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+
+use rustcode_core::config::ResolvedConfig;
+use rustcode_core::event::Event;
+use rustcode_core::error::{ExecutionError, PublishError};
+use rustcode_core::ports::{CommandExecutor, EventPublisher, ToolApprover};
+use rustcode_core::tool_approval::ToolApprovalRequest;
+use rustcode_state::SessionStore;
 
 #[derive(Debug, Error)]
 pub enum TuiError {
@@ -24,12 +31,87 @@ pub struct InteractiveDefaults {
     pub model: String,
 }
 
-pub fn run_interactive(
-    store: SessionStore,
-    defaults: InteractiveDefaults,
-    initial_status: Option<String>,
-) -> Result<(), TuiError> {
-    interactive::run_interactive(store, defaults, initial_status)
+#[derive(Debug)]
+pub enum InteractiveMsg {
+    EngineEvent(Event),
+    RunEnded {
+        ok: bool,
+        message: Option<String>,
+    },
+    ApprovalRequest {
+        request: ToolApprovalRequest,
+        reply: oneshot::Sender<bool>,
+    },
+}
+
+pub struct InteractiveHandles {
+    pub tx: mpsc::UnboundedSender<InteractiveMsg>,
+    pub rx: mpsc::UnboundedReceiver<InteractiveMsg>,
+    pub approver: Arc<dyn ToolApprover>,
+}
+
+impl InteractiveHandles {
+    #[must_use]
+    pub fn new() -> Self {
+        let (tx, rx) = mpsc::unbounded_channel();
+        Self {
+            tx: tx.clone(),
+            rx,
+            approver: Arc::new(TuiToolApprover { tx }),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct TuiPublisher {
+    tx: mpsc::UnboundedSender<InteractiveMsg>,
+}
+
+impl TuiPublisher {
+    #[must_use]
+    pub fn new(tx: mpsc::UnboundedSender<InteractiveMsg>) -> Self {
+        Self { tx }
+    }
+}
+
+#[async_trait::async_trait]
+impl EventPublisher for TuiPublisher {
+    async fn publish(&self, event: Event) -> Result<(), PublishError> {
+        self.tx
+            .send(InteractiveMsg::EngineEvent(event))
+            .map_err(|_| PublishError::SinkClosed)
+    }
+}
+
+struct TuiToolApprover {
+    tx: mpsc::UnboundedSender<InteractiveMsg>,
+}
+
+#[async_trait::async_trait]
+impl ToolApprover for TuiToolApprover {
+    async fn approve(&self, request: ToolApprovalRequest) -> Result<bool, ExecutionError> {
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(InteractiveMsg::ApprovalRequest { request, reply: tx })
+            .map_err(|_| ExecutionError::Executor("approval channel closed".to_string()))?;
+        rx.await
+            .map_err(|_| ExecutionError::Executor("approval response dropped".to_string()))
+    }
+}
+
+pub struct InteractiveServices {
+    pub store: SessionStore,
+    pub defaults: InteractiveDefaults,
+    pub initial_status: Option<String>,
+    pub runtime: Handle,
+    pub handles: InteractiveHandles,
+
+    pub config: Option<Arc<ResolvedConfig>>,
+    pub executor: Option<Arc<dyn CommandExecutor>>,
+}
+
+pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
+    interactive::run_interactive(services)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

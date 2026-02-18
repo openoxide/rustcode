@@ -1,31 +1,53 @@
 use std::io;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
-use crossterm::event::{self, Event as CEvent, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event as CEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
 use crossterm::{execute, ExecutableCommand};
+
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Terminal;
 
-use rustcode_core::session::{MessageRole, SessionInfo, StoredMessage};
+use tokio_util::sync::CancellationToken;
+
+use rustcode_core::command::AgentOptions;
+use rustcode_core::event::EventPayload;
+use rustcode_core::ports::EventPublisher;
+use rustcode_core::{Command, CommandContext, ResolvedConfig, SessionInfo};
+use rustcode_core::{MessageRole, SessionMeta, StoredMessage, ToolApprovalRequest};
 use rustcode_state::SessionStore;
 
-use crate::InteractiveDefaults;
-use crate::TuiError;
+use crate::{InteractiveDefaults, InteractiveMsg, InteractiveServices, TuiError, TuiPublisher};
 
 enum Screen {
     Sessions,
-    Transcript {
-        session: SessionInfo,
-        messages: Vec<StoredMessage>,
-        scroll: u16,
-    },
+    Chat(ChatState),
+}
+
+struct PendingApproval {
+    request: ToolApprovalRequest,
+    reply: tokio::sync::oneshot::Sender<bool>,
+}
+
+struct RunningCommand {
+    cancellation: CancellationToken,
+}
+
+struct ChatState {
+    session: SessionInfo,
+    messages: Vec<StoredMessage>,
+    scroll: u16,
+    composer: String,
+    activity: Vec<String>,
+    running: Option<RunningCommand>,
+    pending_approval: Option<PendingApproval>,
 }
 
 struct AppState {
@@ -34,13 +56,17 @@ struct AppState {
     screen: Screen,
     status: Option<String>,
     defaults: InteractiveDefaults,
+
+    store: SessionStore,
+    config: Option<Arc<ResolvedConfig>>,
+    executor: Option<Arc<dyn rustcode_core::ports::CommandExecutor>>,
+    runtime: tokio::runtime::Handle,
+    tx: tokio::sync::mpsc::UnboundedSender<InteractiveMsg>,
+    rx: tokio::sync::mpsc::UnboundedReceiver<InteractiveMsg>,
+    request_seq: u64,
 }
 
-pub fn run_interactive(
-    store: SessionStore,
-    defaults: InteractiveDefaults,
-    initial_status: Option<String>,
-) -> Result<(), TuiError> {
+pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
     let mut stdout = io::stdout();
     enable_raw_mode().map_err(|err| TuiError::Io(err.to_string()))?;
     execute!(stdout, EnterAlternateScreen).map_err(|err| TuiError::Io(err.to_string()))?;
@@ -53,146 +79,419 @@ pub fn run_interactive(
         .map_err(|err| TuiError::Io(err.to_string()))?;
 
     let mut state = AppState {
-        sessions: store
+        sessions: services
+            .store
             .list_sessions()
             .map_err(|err| TuiError::State(err.to_string()))?,
         selected: 0,
         screen: Screen::Sessions,
-        status: initial_status,
-        defaults,
+        status: services.initial_status,
+        defaults: services.defaults,
+        store: services.store,
+        config: services.config,
+        executor: services.executor,
+        runtime: services.runtime,
+        tx: services.handles.tx,
+        rx: services.handles.rx,
+        request_seq: 0,
     };
 
     loop {
+        drain_messages(&mut state);
+
         terminal
             .draw(|frame| render(frame, &state))
             .map_err(|err| TuiError::Io(err.to_string()))?;
 
-        if event::poll(Duration::from_millis(100)).map_err(|err| TuiError::Io(err.to_string()))? {
+        if event::poll(Duration::from_millis(50)).map_err(|err| TuiError::Io(err.to_string()))? {
             let evt = event::read().map_err(|err| TuiError::Io(err.to_string()))?;
-            match evt {
-                CEvent::Key(key) if key.kind == KeyEventKind::Press => match &mut state.screen {
-                    Screen::Sessions => match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => return Ok(()),
-                        KeyCode::Down => {
-                            if !state.sessions.is_empty() {
-                                state.selected = (state.selected + 1)
-                                    .min(state.sessions.len().saturating_sub(1));
-                            }
-                        }
-                        KeyCode::Up => {
-                            if state.selected > 0 {
-                                state.selected -= 1;
-                            }
-                        }
-                        KeyCode::Char('n') => {
-                            state.status = None;
-                            let cwd = match std::env::current_dir() {
-                                Ok(cwd) => cwd,
-                                Err(err) => {
-                                    state.status = Some(format!("failed to resolve cwd: {err}"));
-                                    continue;
-                                }
-                            };
-
-                            match store.create_session(
-                                None,
-                                None,
-                                &cwd,
-                                state.defaults.workspace_root.as_path(),
-                                state.defaults.model.as_str(),
-                            ) {
-                                Ok(_session) => {
-                                    state.sessions = store
-                                        .list_sessions()
-                                        .map_err(|err| TuiError::State(err.to_string()))?;
-                                    state.selected = 0;
-                                }
-                                Err(err) => {
-                                    state.status = Some(format!("failed to create session: {err}"));
-                                }
-                            }
-                        }
-                        KeyCode::Char('f') => {
-                            state.status = None;
-                            let Some(session) = state.sessions.get(state.selected) else {
-                                continue;
-                            };
-
-                            match store.fork_session(&session.id, None) {
-                                Ok(_forked) => {
-                                    state.sessions = store
-                                        .list_sessions()
-                                        .map_err(|err| TuiError::State(err.to_string()))?;
-                                    state.selected = 0;
-                                }
-                                Err(err) => {
-                                    state.status = Some(format!("failed to fork session: {err}"));
-                                }
-                            }
-                        }
-                        KeyCode::Enter => {
-                            state.status = None;
-                            if let Some(session) = state.sessions.get(state.selected).cloned() {
-                                let messages = store
-                                    .load_messages(&session.id)
-                                    .map_err(|err| TuiError::State(err.to_string()))?;
-                                state.screen = Screen::Transcript {
-                                    session,
-                                    messages,
-                                    scroll: 0,
-                                };
-                            }
-                        }
-                        KeyCode::Char('r') => {
-                            state.status = None;
-                            state.sessions = store
-                                .list_sessions()
-                                .map_err(|err| TuiError::State(err.to_string()))?;
-                            state.selected =
-                                state.selected.min(state.sessions.len().saturating_sub(1));
-                        }
-                        _ => {}
-                    },
-                    Screen::Transcript {
-                        session,
-                        messages,
-                        scroll,
-                    } => match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => {
-                            state.status = None;
-                            state.screen = Screen::Sessions;
-                        }
-                        KeyCode::Down => {
-                            *scroll = scroll.saturating_add(1);
-                        }
-                        KeyCode::Up => {
-                            *scroll = scroll.saturating_sub(1);
-                        }
-                        KeyCode::Char('r') => {
-                            state.status = None;
-                            let refreshed = store
-                                .load_messages(&session.id)
-                                .map_err(|err| TuiError::State(err.to_string()))?;
-                            *messages = refreshed;
-                        }
-                        _ => {}
-                    },
-                },
-                CEvent::Resize(_w, _h) => {}
-                _ => {}
+            if let CEvent::Key(key) = evt {
+                if key.kind == KeyEventKind::Press {
+                    if handle_key(&mut state, key) {
+                        return Ok(());
+                    }
+                }
             }
         }
     }
 }
 
+fn drain_messages(state: &mut AppState) {
+    loop {
+        let msg = match state.rx.try_recv() {
+            Ok(msg) => msg,
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => return,
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => return,
+        };
+
+        let mut screen = std::mem::replace(&mut state.screen, Screen::Sessions);
+        match msg {
+            InteractiveMsg::EngineEvent(event) => {
+                if let Screen::Chat(chat) = &mut screen {
+                    let mut refresh = false;
+                    match &event.payload {
+                        EventPayload::CommandAccepted { name } => {
+                            chat.activity.push(format!("command: {name}"));
+                        }
+                        EventPayload::ToolCall { id, name, .. } => {
+                            chat.activity.push(format!("tool call: {name} ({id})"));
+                        }
+                        EventPayload::ToolResult { id, name, ok, .. } => {
+                            chat.activity
+                                .push(format!("tool result: {name} ({id}) ok={ok}"));
+                        }
+                        EventPayload::Warning { message } => {
+                            chat.activity.push(format!("warning: {message}"));
+                        }
+                        EventPayload::Failure { message } => {
+                            chat.activity.push(format!("failure: {message}"));
+                            state.status = Some(message.clone());
+                            refresh = true;
+                        }
+                        EventPayload::OutputChunk { text } => {
+                            let mut snippet = text.replace('\n', " ");
+                            snippet.truncate(120);
+                            if !snippet.is_empty() {
+                                chat.activity.push(format!("assistant: {snippet}"));
+                            }
+                        }
+                        EventPayload::Completed => {
+                            chat.activity.push("completed".to_string());
+                            chat.running = None;
+                            refresh = true;
+                        }
+                        EventPayload::ServeRequest { .. } => {}
+                    }
+
+                    while chat.activity.len() > 200 {
+                        chat.activity.remove(0);
+                    }
+
+                    if refresh {
+                        match state.store.load_messages(&chat.session.id) {
+                            Ok(messages) => chat.messages = messages,
+                            Err(err) => {
+                                state.status = Some(format!("failed to load transcript: {err}"));
+                            }
+                        }
+                    }
+                }
+            }
+            InteractiveMsg::ApprovalRequest { request, reply } => {
+                if let Screen::Chat(chat) = &mut screen {
+                    chat.pending_approval = Some(PendingApproval { request, reply });
+                } else {
+                    // Deny approvals when not in a place to render them.
+                    let _ = reply.send(false);
+                }
+            }
+            InteractiveMsg::RunEnded { ok, message } => {
+                if let Screen::Chat(chat) = &mut screen {
+                    chat.running = None;
+                    if ok {
+                        state.status = None;
+                    } else {
+                        state.status = message;
+                    }
+                    match state.store.load_messages(&chat.session.id) {
+                        Ok(messages) => chat.messages = messages,
+                        Err(err) => {
+                            state.status = Some(format!("failed to load transcript: {err}"));
+                        }
+                    }
+                }
+            }
+        }
+
+        state.screen = screen;
+    }
+}
+
+enum ChatNav {
+    Stay,
+    ToSessions,
+}
+
+fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
+    match &state.screen {
+        Screen::Sessions => handle_sessions_key(state, key),
+        Screen::Chat(_) => {
+            let Screen::Chat(mut chat) = std::mem::replace(&mut state.screen, Screen::Sessions)
+            else {
+                return false;
+            };
+
+            let nav = handle_chat_key(state, &mut chat, key);
+            match nav {
+                ChatNav::Stay => {
+                    state.screen = Screen::Chat(chat);
+                }
+                ChatNav::ToSessions => {
+                    state.screen = Screen::Sessions;
+                }
+            }
+            false
+        }
+    }
+}
+
+fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Char('q') | KeyCode::Esc => return true,
+        KeyCode::Down => {
+            if !state.sessions.is_empty() {
+                state.selected = (state.selected + 1).min(state.sessions.len().saturating_sub(1));
+            }
+        }
+        KeyCode::Up => {
+            if state.selected > 0 {
+                state.selected -= 1;
+            }
+        }
+        KeyCode::Char('r') => {
+            state.status = None;
+            state.sessions = state
+                .store
+                .list_sessions()
+                .map_err(|err| TuiError::State(err.to_string()))
+                .unwrap_or_else(|err| {
+                    state.status = Some(err.to_string());
+                    Vec::new()
+                });
+            state.selected = state.selected.min(state.sessions.len().saturating_sub(1));
+        }
+        KeyCode::Char('n') => {
+            state.status = None;
+            let cwd = match std::env::current_dir() {
+                Ok(cwd) => cwd,
+                Err(err) => {
+                    state.status = Some(format!("failed to resolve cwd: {err}"));
+                    return false;
+                }
+            };
+            match state.store.create_session(
+                None,
+                None,
+                &cwd,
+                state.defaults.workspace_root.as_path(),
+                state.defaults.model.as_str(),
+            ) {
+                Ok(_session) => {
+                    state.sessions = state
+                        .store
+                        .list_sessions()
+                        .map_err(|err| TuiError::State(err.to_string()))
+                        .unwrap_or_else(|err| {
+                            state.status = Some(err.to_string());
+                            Vec::new()
+                        });
+                    state.selected = 0;
+                }
+                Err(err) => {
+                    state.status = Some(format!("failed to create session: {err}"));
+                }
+            }
+        }
+        KeyCode::Char('f') => {
+            state.status = None;
+            let Some(session) = state.sessions.get(state.selected) else {
+                return false;
+            };
+            match state.store.fork_session(&session.id, None) {
+                Ok(_forked) => {
+                    state.sessions = state
+                        .store
+                        .list_sessions()
+                        .map_err(|err| TuiError::State(err.to_string()))
+                        .unwrap_or_else(|err| {
+                            state.status = Some(err.to_string());
+                            Vec::new()
+                        });
+                    state.selected = 0;
+                }
+                Err(err) => {
+                    state.status = Some(format!("failed to fork session: {err}"));
+                }
+            }
+        }
+        KeyCode::Enter => {
+            state.status = None;
+            let Some(session) = state.sessions.get(state.selected).cloned() else {
+                return false;
+            };
+            let messages = state
+                .store
+                .load_messages(&session.id)
+                .map_err(|err| TuiError::State(err.to_string()))
+                .unwrap_or_else(|err| {
+                    state.status = Some(err.to_string());
+                    Vec::new()
+                });
+            state.screen = Screen::Chat(ChatState {
+                session,
+                messages,
+                scroll: 0,
+                composer: String::new(),
+                activity: Vec::new(),
+                running: None,
+                pending_approval: None,
+            });
+        }
+        _ => {}
+    }
+    false
+}
+
+fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) -> ChatNav {
+    if let Some(pending) = chat.pending_approval.take() {
+        let decision = match key.code {
+            KeyCode::Char('a') => Some(true),
+            KeyCode::Char('d') => Some(false),
+            KeyCode::Esc | KeyCode::Char('q') => Some(false),
+            _ => None,
+        };
+        if let Some(decision) = decision {
+            let _ = pending.reply.send(decision);
+            chat.activity.push(format!(
+                "approval: tool={} decision={decision}",
+                pending.request.tool
+            ));
+            return ChatNav::Stay;
+        }
+        chat.pending_approval = Some(pending);
+        return ChatNav::Stay;
+    }
+
+    if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
+        if let Some(running) = &chat.running {
+            running.cancellation.cancel();
+            chat.activity.push("cancel requested".to_string());
+        }
+        return ChatNav::Stay;
+    }
+
+    match key.code {
+        KeyCode::Esc => {
+            if !chat.composer.is_empty() {
+                chat.composer.clear();
+            } else {
+                return ChatNav::ToSessions;
+            }
+        }
+        KeyCode::Char('q') => {
+            return ChatNav::ToSessions;
+        }
+        KeyCode::Char('r') => {
+            refresh_chat_messages(state, chat);
+        }
+        KeyCode::Down => {
+            chat.scroll = chat.scroll.saturating_add(1);
+        }
+        KeyCode::Up => {
+            chat.scroll = chat.scroll.saturating_sub(1);
+        }
+        KeyCode::Backspace => {
+            chat.composer.pop();
+        }
+        KeyCode::Enter => {
+            if chat.running.is_some() {
+                return ChatNav::Stay;
+            }
+            let prompt = chat.composer.trim().to_string();
+            if prompt.is_empty() {
+                return ChatNav::Stay;
+            }
+            chat.composer.clear();
+            submit_prompt(state, chat, prompt);
+        }
+        KeyCode::Char(ch) => {
+            if !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT)
+            {
+                chat.composer.push(ch);
+            }
+        }
+        _ => {}
+    }
+
+    ChatNav::Stay
+}
+
+fn refresh_chat_messages(state: &mut AppState, chat: &mut ChatState) {
+    match state.store.load_messages(&chat.session.id) {
+        Ok(messages) => chat.messages = messages,
+        Err(err) => state.status = Some(format!("failed to load transcript: {err}")),
+    }
+}
+
+fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: String) {
+    let Some(config) = state.config.clone() else {
+        state.status = Some("config not loaded; cannot run agent".to_string());
+        return;
+    };
+    let Some(executor) = state.executor.clone() else {
+        state.status = Some("engine not available; cannot run agent".to_string());
+        return;
+    };
+
+    let history = match state.store.load_messages(&chat.session.id) {
+        Ok(history) => history,
+        Err(err) => {
+            state.status = Some(format!("failed to load history: {err}"));
+            return;
+        }
+    };
+
+    let cancellation = CancellationToken::new();
+    chat.running = Some(RunningCommand {
+        cancellation: cancellation.clone(),
+    });
+    state.status = None;
+
+    state.request_seq = state.request_seq.saturating_add(1);
+    let seq = state.request_seq;
+    let session_id = chat.session.id.clone();
+    let request_id = format!("tui-{seq}");
+
+    let tx = state.tx.clone();
+    let publisher: Arc<dyn EventPublisher> = Arc::new(TuiPublisher::new(tx.clone()));
+    let runtime = state.runtime.clone();
+    runtime.spawn(async move {
+        let context = CommandContext::with_cancellation(
+            config,
+            SessionMeta {
+                session_id,
+                request_id,
+                started_at: SystemTime::now(),
+            },
+            cancellation,
+        );
+
+        let options = AgentOptions {
+            allow_write: true,
+            allow_edit: true,
+            allow_exec: true,
+            ..AgentOptions::default()
+        };
+        let command = Command::Agent {
+            prompt,
+            options,
+            history,
+        };
+
+        let result = executor.execute(command, context, publisher).await;
+        let (ok, message) = match result {
+            Ok(()) => (true, None),
+            Err(err) => (false, Some(err.to_string())),
+        };
+        let _ = tx.send(InteractiveMsg::RunEnded { ok, message });
+    });
+}
+
 fn render(frame: &mut ratatui::Frame<'_>, state: &AppState) {
     match &state.screen {
         Screen::Sessions => render_sessions(frame, state),
-        Screen::Transcript {
-            session,
-            messages,
-            scroll,
-        } => render_transcript(frame, session, messages, *scroll, state.status.as_deref()),
+        Screen::Chat(chat) => render_chat(frame, state, chat),
     }
 }
 
@@ -242,25 +541,26 @@ fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) {
     frame.render_widget(help, chunks[1]);
 }
 
-fn render_transcript(
-    frame: &mut ratatui::Frame<'_>,
-    session: &SessionInfo,
-    messages: &[StoredMessage],
-    scroll: u16,
-    status: Option<&str>,
-) {
-    let chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(2)])
+fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState) {
+    let root = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
         .split(frame.area());
 
-    let title = session
+    let left = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(5), Constraint::Length(2)])
+        .split(root[0]);
+
+    let title = chat
+        .session
         .title
         .as_deref()
-        .unwrap_or(session.id.as_str())
+        .unwrap_or(chat.session.id.as_str())
         .to_string();
+
     let mut lines = Vec::new();
-    for msg in messages {
+    for msg in &chat.messages {
         let role = match msg.role {
             MessageRole::System => "System",
             MessageRole::User => "User",
@@ -276,21 +576,119 @@ fn render_transcript(
         lines.push(Line::raw(""));
     }
 
-    let paragraph = Paragraph::new(lines)
+    let transcript = Paragraph::new(lines)
         .block(Block::default().title(title).borders(Borders::ALL))
         .wrap(Wrap { trim: false })
-        .scroll((scroll, 0));
-    frame.render_widget(paragraph, chunks[0]);
+        .scroll((chat.scroll, 0));
+    frame.render_widget(transcript, left[0]);
+
+    let composer_title = if chat.running.is_some() {
+        "Prompt (running)"
+    } else {
+        "Prompt"
+    };
+    let composer = Paragraph::new(chat.composer.as_str())
+        .block(Block::default().title(composer_title).borders(Borders::ALL))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(composer, left[1]);
 
     let help = Paragraph::new(Line::from(vec![
+        Span::raw("Enter: submit  "),
         Span::raw("Up/Down: scroll  "),
+        Span::raw("Ctrl+C: cancel  "),
         Span::raw("r: refresh  "),
-        Span::raw("q/Esc: back"),
+        Span::raw("Esc: clear/back  "),
+        Span::raw("q: sessions"),
         Span::raw("  "),
-        Span::styled(status.unwrap_or(""), Style::default().fg(Color::Red)),
+        Span::styled(
+            app.status.as_deref().unwrap_or(""),
+            Style::default().fg(Color::Red),
+        ),
     ]))
     .block(Block::default().borders(Borders::TOP));
-    frame.render_widget(help, chunks[1]);
+    frame.render_widget(help, left[2]);
+
+    render_activity(frame, root[1], chat);
+
+    if let Some(pending) = &chat.pending_approval {
+        render_approval_modal(frame, pending);
+    }
+}
+
+fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: &ChatState) {
+    let items = if chat.activity.is_empty() {
+        vec![ListItem::new("(no activity)")]
+    } else {
+        chat.activity
+            .iter()
+            .rev()
+            .take(80)
+            .rev()
+            .map(|line| ListItem::new(line.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    let list = List::new(items).block(Block::default().title("Activity").borders(Borders::ALL));
+    frame.render_widget(list, area);
+}
+
+fn render_approval_modal(frame: &mut ratatui::Frame<'_>, pending: &PendingApproval) {
+    let area = centered_rect(80, 60, frame.area());
+    frame.render_widget(Clear, area);
+
+    let mut lines = Vec::new();
+    lines.push(Line::from(vec![
+        Span::styled(
+            "Tool approval required",
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
+    ]));
+    lines.push(Line::raw(""));
+    lines.push(Line::raw(format!("tool: {}", pending.request.tool)));
+    lines.push(Line::raw(format!("permission: {}", pending.request.permission)));
+    lines.push(Line::raw(format!("target: {}", pending.request.pattern)));
+    lines.push(Line::raw(""));
+    lines.push(Line::raw(format!("reason: {}", pending.request.reason)));
+    lines.push(Line::raw(""));
+    lines.push(Line::raw("arguments:"));
+    let args = serde_json::to_string_pretty(&pending.request.arguments)
+        .unwrap_or_else(|_| "<unprintable>".to_string());
+    for line in args.lines().take(12) {
+        lines.push(Line::raw(line.to_string()));
+    }
+    lines.push(Line::raw(""));
+    lines.push(Line::from(vec![
+        Span::raw("a: allow  "),
+        Span::raw("d: deny  "),
+        Span::raw("Esc: deny"),
+    ]));
+
+    let block = Block::default()
+        .title("Approval")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow));
+    let modal = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    frame.render_widget(modal, area);
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
 }
 
 struct TerminalCleanup;
@@ -344,7 +742,15 @@ mod tests {
                 workspace_root: std::path::PathBuf::from("/tmp"),
                 model: "null".to_string(),
             },
+            store: SessionStore::with_root(std::path::PathBuf::from("/tmp")),
+            config: None,
+            executor: None,
+            runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
+            tx: tokio::sync::mpsc::unbounded_channel().0,
+            rx: tokio::sync::mpsc::unbounded_channel().1,
+            request_seq: 0,
         };
+
         terminal.draw(|frame| render(frame, &state)).expect("draw");
         let buf = terminal.backend().buffer();
         let text = buffer_to_string(buf);
