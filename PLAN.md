@@ -1326,6 +1326,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added `rustcode tui` start flags (`--continue`, `--session`, `--fork`, `--prompt`) to jump into a session and optionally auto-submit
   - Added activity list selection + details modal for tool calls/results and output chunks
   - Added in-chat shortcuts for session lifecycle: `Ctrl+N` new session, `Ctrl+F` fork session
+  - Added multi-line prompt entry in TUI (`Alt+Enter` inserts newline)
   - `rustcode tui` now launches interactive UI only when running in a real terminal (no-op when piped)
 
 62. Export/Import/Share
