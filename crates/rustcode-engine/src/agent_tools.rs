@@ -9,6 +9,20 @@ use crate::{AgentState, Engine};
 
 pub struct AgentToolRegistry;
 
+fn ensure_allowed_keys(args: &Value, allowed: &[&str]) -> Result<(), ExecutionError> {
+    let obj = args.as_object().ok_or_else(|| {
+        ExecutionError::Dispatch("tool arguments must be a JSON object".to_string())
+    })?;
+    for key in obj.keys() {
+        if !allowed.iter().any(|allowed_key| key == *allowed_key) {
+            return Err(ExecutionError::Dispatch(format!(
+                "unexpected argument key: {key}"
+            )));
+        }
+    }
+    Ok(())
+}
+
 impl AgentToolRegistry {
     pub fn tool_specs(options: &AgentOptions, allow_network: bool) -> Vec<ToolSpec> {
         let mut specs = vec![
@@ -149,6 +163,7 @@ impl AgentToolRegistry {
     ) -> Result<String, ExecutionError> {
         match name {
             "list" => {
+                ensure_allowed_keys(&args, &["path"])?;
                 let path = args
                     .get("path")
                     .and_then(Value::as_str)
@@ -156,12 +171,14 @@ impl AgentToolRegistry {
                 engine.agent_tool_list(path, context, options).await
             }
             "read" => {
+                ensure_allowed_keys(&args, &["path"])?;
                 let path = args.get("path").and_then(Value::as_str).ok_or_else(|| {
                     ExecutionError::Dispatch("read tool requires path".to_string())
                 })?;
                 engine.agent_tool_read(path, context, options, state).await
             }
             "write" => {
+                ensure_allowed_keys(&args, &["path", "contents"])?;
                 if !options.allow_write && !options.allow_edit {
                     return Err(ExecutionError::Dispatch(
                         "agent write is disabled; rerun with --allow-write".to_string(),
@@ -181,6 +198,7 @@ impl AgentToolRegistry {
                     .await
             }
             "edit" => {
+                ensure_allowed_keys(&args, &["path", "from", "to"])?;
                 if !options.allow_edit {
                     return Err(ExecutionError::Dispatch(
                         "agent edit is disabled; rerun with --allow-edit".to_string(),
@@ -205,6 +223,7 @@ impl AgentToolRegistry {
                     .await
             }
             "exec" => {
+                ensure_allowed_keys(&args, &["command", "args"])?;
                 if !options.allow_exec {
                     return Err(ExecutionError::Dispatch(
                         "agent exec is disabled; rerun with --allow-exec".to_string(),
@@ -229,6 +248,7 @@ impl AgentToolRegistry {
                 engine.agent_tool_exec(command, &args_list, context).await
             }
             "glob" => {
+                ensure_allowed_keys(&args, &["pattern", "path"])?;
                 let pattern = args.get("pattern").and_then(Value::as_str).ok_or_else(|| {
                     ExecutionError::Dispatch("glob tool requires pattern".to_string())
                 })?;
@@ -238,6 +258,7 @@ impl AgentToolRegistry {
                     .await
             }
             "grep" => {
+                ensure_allowed_keys(&args, &["pattern", "path", "include"])?;
                 let pattern = args.get("pattern").and_then(Value::as_str).ok_or_else(|| {
                     ExecutionError::Dispatch("grep tool requires pattern".to_string())
                 })?;
@@ -248,6 +269,7 @@ impl AgentToolRegistry {
                     .await
             }
             "webfetch" => {
+                ensure_allowed_keys(&args, &["url", "format", "timeout_secs"])?;
                 let url = args.get("url").and_then(Value::as_str).ok_or_else(|| {
                     ExecutionError::Dispatch("webfetch tool requires url".to_string())
                 })?;

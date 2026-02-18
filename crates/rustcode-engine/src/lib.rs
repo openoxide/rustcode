@@ -2803,6 +2803,48 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tool_rejects_unknown_argument_keys() {
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(CancelledProcess),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+        let context = CommandContext::new(
+            Arc::new(ResolvedConfig {
+                workspace_root: PathBuf::from("/tmp/rustcode-unknown-args"),
+                ..ResolvedConfig::default()
+            }),
+            SessionMeta {
+                session_id: "s-args-1".to_string(),
+                request_id: "r-args-1".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let options = AgentOptions::default();
+        let mut state = AgentState::default();
+        let result = engine
+            .execute_agent_tool_call(
+                "read",
+                r#"{"path":"README.md","extra":true}"#,
+                &context,
+                &options,
+                &mut state,
+            )
+            .await;
+        match result {
+            Err(ExecutionError::Dispatch(message)) => {
+                assert!(message.contains("unexpected argument key"), "message={message}");
+            }
+            other => panic!("expected dispatch error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
     async fn mutating_tools_can_be_denied_by_permissions_without_prompt() {
         let mut cfg = ResolvedConfig::default();
         cfg.permission_rules = vec![rustcode_core::PermissionRule {
