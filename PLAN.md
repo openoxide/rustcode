@@ -1329,6 +1329,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added multi-line prompt entry in TUI (`Alt+Enter` inserts newline)
   - Added session picker filtering (`/` to enter filter mode)
   - Added tool message rendering in transcript with `t` toggle for details
+  - Added prompt history navigation in composer (`Alt+Up/Alt+Down`)
   - `rustcode tui` now launches interactive UI only when running in a real terminal (no-op when piped)
 
 62. Export/Import/Share
