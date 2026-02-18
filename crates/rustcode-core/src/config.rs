@@ -39,6 +39,9 @@ pub struct BackendSelectionPolicy {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct McpServerConfig {
     pub url: Option<String>,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub env: BTreeMap<String, String>,
     pub oauth: McpOAuthConfig,
 }
 

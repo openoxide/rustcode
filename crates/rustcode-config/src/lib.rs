@@ -80,6 +80,11 @@ struct McpConfig {
 #[derive(Debug, Default, Deserialize)]
 struct McpServerFileConfig {
     url: Option<String>,
+    command: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
     oauth: Option<McpOAuthFileConfig>,
 }
 
@@ -337,6 +342,32 @@ pub fn edit_mcp_server(
         server_table.remove("url");
     }
 
+    if let Some(command) = server.command.as_ref() {
+        server_table.insert("command", Item::Value(Value::from(command.clone())));
+    } else {
+        server_table.remove("command");
+    }
+
+    if server.args.is_empty() {
+        server_table.remove("args");
+    } else {
+        let mut args_array = toml_edit::Array::default();
+        for arg in &server.args {
+            args_array.push(arg.as_str());
+        }
+        server_table.insert("args", Item::Value(Value::Array(args_array)));
+    }
+
+    if server.env.is_empty() {
+        server_table.remove("env");
+    } else {
+        let mut env_table = toml_edit::InlineTable::new();
+        for (key, value) in &server.env {
+            env_table.get_or_insert(key.as_str(), value.clone());
+        }
+        server_table.insert("env", Item::Value(Value::InlineTable(env_table)));
+    }
+
     let oauth = &server.oauth;
     let has_settings = oauth.client_id.is_some() || oauth.client_secret_env.is_some();
     if has_settings {
@@ -514,10 +545,22 @@ fn merge_mcp_servers(
     for (name, server) in incoming {
         let mut entry = current.remove(name).unwrap_or(McpServerConfig {
             url: None,
+            command: None,
+            args: Vec::new(),
+            env: BTreeMap::new(),
             oauth: McpOAuthConfig::default(),
         });
         if server.url.is_some() {
             entry.url.clone_from(&server.url);
+        }
+        if server.command.is_some() {
+            entry.command.clone_from(&server.command);
+        }
+        if !server.args.is_empty() {
+            entry.args.clone_from(&server.args);
+        }
+        if !server.env.is_empty() {
+            entry.env.clone_from(&server.env);
         }
         let oauth = match &server.oauth {
             None => entry.oauth.clone(),
@@ -650,6 +693,42 @@ fn validate(cfg: &ResolvedConfig) -> Result<(), ConfigError> {
             if url.trim().is_empty() {
                 return Err(ConfigError::Validation(format!(
                     "mcp.servers.{name}.url must not be empty"
+                )));
+            }
+        }
+        if let Some(command) = server.command.as_ref() {
+            if command.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "mcp.servers.{name}.command must not be empty"
+                )));
+            }
+        }
+        if server.url.is_none() && server.command.is_none() {
+            return Err(ConfigError::Validation(format!(
+                "mcp.servers.{name} must set either url or command"
+            )));
+        }
+        if server.url.is_some() && server.command.is_some() {
+            return Err(ConfigError::Validation(format!(
+                "mcp.servers.{name} cannot set both url and command"
+            )));
+        }
+        for (idx, arg) in server.args.iter().enumerate() {
+            if arg.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "mcp.servers.{name}.args[{idx}] must not be empty"
+                )));
+            }
+        }
+        for (key, value) in &server.env {
+            if key.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "mcp.servers.{name}.env keys must not be empty"
+                )));
+            }
+            if value.trim().is_empty() {
+                return Err(ConfigError::Validation(format!(
+                    "mcp.servers.{name}.env.{key} must not be empty"
                 )));
             }
         }
@@ -1133,6 +1212,95 @@ url = "   "
         match err {
             ConfigError::Validation(message) => {
                 assert!(message.contains("mcp.servers.github.url"));
+            }
+            _ => panic!("expected validation error"),
+        }
+    }
+
+    #[test]
+    fn mcp_server_config_accepts_stdio_transport_fields() {
+        let temp_root = make_temp_dir("mcp-config-stdio");
+        let cwd = temp_root.join("project");
+        fs::create_dir_all(&cwd).expect("must create cwd");
+        let global = temp_root.join("global.toml");
+
+        write_config(
+            &global,
+            r#"
+[mcp.servers.local]
+command = "node"
+args = ["server.js", "--mcp"]
+env = { MCP_MODE = "test" }
+"#,
+        );
+
+        let mut sources = ConfigSources::new(cwd);
+        sources.read_process_env = false;
+        sources.global_config_path = Some(global);
+
+        let cfg = ConfigLoader::load(&sources).expect("must accept stdio mcp config");
+        let local = cfg
+            .mcp_servers
+            .get("local")
+            .expect("local mcp config should exist");
+        assert!(local.url.is_none());
+        assert_eq!(local.command.as_deref(), Some("node"));
+        assert_eq!(local.args, vec!["server.js", "--mcp"]);
+        assert_eq!(local.env.get("MCP_MODE").map(String::as_str), Some("test"));
+    }
+
+    #[test]
+    fn mcp_server_config_rejects_missing_transport() {
+        let temp_root = make_temp_dir("mcp-config-no-transport");
+        let cwd = temp_root.join("project");
+        fs::create_dir_all(&cwd).expect("must create cwd");
+        let global = temp_root.join("global.toml");
+
+        write_config(
+            &global,
+            r#"
+[mcp.servers.invalid]
+oauth = true
+"#,
+        );
+
+        let mut sources = ConfigSources::new(cwd);
+        sources.read_process_env = false;
+        sources.global_config_path = Some(global);
+
+        let err = ConfigLoader::load(&sources).expect_err("must reject missing transport");
+        match err {
+            ConfigError::Validation(message) => {
+                assert!(message.contains("must set either url or command"));
+            }
+            _ => panic!("expected validation error"),
+        }
+    }
+
+    #[test]
+    fn mcp_server_config_rejects_both_http_and_stdio_transport() {
+        let temp_root = make_temp_dir("mcp-config-both-transport");
+        let cwd = temp_root.join("project");
+        fs::create_dir_all(&cwd).expect("must create cwd");
+        let global = temp_root.join("global.toml");
+
+        write_config(
+            &global,
+            r#"
+[mcp.servers.invalid]
+url = "https://example.com/mcp"
+command = "node"
+"#,
+        );
+
+        let mut sources = ConfigSources::new(cwd);
+        sources.read_process_env = false;
+        sources.global_config_path = Some(global);
+
+        let err = ConfigLoader::load(&sources).expect_err("must reject dual transport");
+        match err {
+            ConfigError::Validation(message) => {
+                assert!(message.contains("cannot set both url and command"));
             }
             _ => panic!("expected validation error"),
         }

@@ -1183,6 +1183,12 @@ async fn handle_mcp_command(
                             "credential": render_stored_credential(store.get(&key)?),
                             "configured": configured.is_some(),
                             "url": configured.and_then(|entry| entry.url.clone()),
+                            "command": configured.and_then(|entry| entry.command.clone()),
+                            "args": configured.map(|entry| entry.args.clone()).unwrap_or_default(),
+                            "env_keys": configured
+                                .map(|entry| entry.env.keys().cloned().collect::<Vec<_>>())
+                                .unwrap_or_default(),
+                            "transport": configured.map(|entry| entry.transport_kind()).unwrap_or("none"),
                             "oauth_enabled": configured.map(|entry| entry.oauth_enabled()).unwrap_or(false),
                         }))
                     })
@@ -1219,6 +1225,13 @@ async fn handle_mcp_command(
                     if let Some(url) = &configured.url {
                         row.push_str(&format!("\turl={url}"));
                     }
+                    if let Some(command) = &configured.command {
+                        row.push_str(&format!("\tcommand={command}"));
+                        if !configured.args.is_empty() {
+                            row.push_str(&format!("\targs={}", configured.args.join(" ")));
+                        }
+                    }
+                    row.push_str(&format!("\ttransport={}", configured.transport_kind()));
                     row.push_str(&format!("\toauth_enabled={}", configured.oauth_enabled()));
                 }
                 if !write_stdout_line(&row)? {
@@ -1280,6 +1293,9 @@ async fn handle_mcp_command(
                     "name": name,
                     "configured": configured.is_some(),
                     "url": configured.as_ref().and_then(|entry| entry.url.clone()),
+                    "command": configured.as_ref().and_then(|entry| entry.command.clone()),
+                    "target": configured.as_ref().and_then(|entry| entry.transport_target().map(str::to_string)),
+                    "transport": configured.as_ref().map(|entry| entry.transport_kind()).unwrap_or("none"),
                     "oauth_enabled": configured.as_ref().map(|entry| entry.oauth_enabled()).unwrap_or(false),
                     "oauth_supported": oauth_supported,
                     "credential": render_stored_credential(credential),
@@ -1313,12 +1329,16 @@ async fn handle_mcp_command(
                 let name = row["name"].as_str().unwrap_or("<unknown>");
                 let cred = row["credential"].as_str().unwrap_or("none");
                 let configured = row["configured"].as_bool().unwrap_or(false);
-                let url = row["url"].as_str().unwrap_or("-");
+                let transport = row["transport"].as_str().unwrap_or("none");
+                let target = row["url"]
+                    .as_str()
+                    .or_else(|| row["command"].as_str())
+                    .unwrap_or("-");
                 let oauth_enabled = row["oauth_enabled"].as_bool().unwrap_or(false);
                 let oauth_supported = row["oauth_supported"].as_bool().unwrap_or(false);
                 let expired = row["expired"].as_bool().unwrap_or(false);
                 let line = format!(
-                    "name={name}\tconfigured={configured}\turl={url}\toauth_enabled={oauth_enabled}\toauth_supported={oauth_supported}\tcredential={cred}\texpired={expired}",
+                    "name={name}\tconfigured={configured}\ttransport={transport}\ttarget={target}\toauth_enabled={oauth_enabled}\toauth_supported={oauth_supported}\tcredential={cred}\texpired={expired}",
                 );
                 if !write_stdout_line(&line)? {
                     return Ok(());
@@ -1335,6 +1355,12 @@ async fn handle_mcp_command(
                     "name": name,
                     "configured": configured.is_some(),
                     "url": configured.and_then(|entry| entry.url.clone()),
+                    "command": configured.and_then(|entry| entry.command.clone()),
+                    "args": configured.map(|entry| entry.args.clone()).unwrap_or_default(),
+                    "env_keys": configured
+                        .map(|entry| entry.env.keys().cloned().collect::<Vec<_>>())
+                        .unwrap_or_default(),
+                    "transport": configured.map(|entry| entry.transport_kind()).unwrap_or("none"),
                     "oauth_enabled": configured.map(|entry| entry.oauth_enabled()).unwrap_or(false),
                     "credential": render_stored_credential(store.get(&key)?),
                     "auth_file": store.path().display().to_string(),
@@ -1361,6 +1387,19 @@ async fn handle_mcp_command(
                         return Ok(());
                     }
                 }
+                if let Some(command) = &configured.command {
+                    if !write_stdout_line(&format!("command={command}"))? {
+                        return Ok(());
+                    }
+                    if !configured.args.is_empty()
+                        && !write_stdout_line(&format!("args={}", configured.args.join(" ")))?
+                    {
+                        return Ok(());
+                    }
+                }
+                if !write_stdout_line(&format!("transport={}", configured.transport_kind()))? {
+                    return Ok(());
+                }
                 if !write_stdout_line(&format!("oauth_enabled={}", configured.oauth_enabled()))? {
                     return Ok(());
                 }
@@ -1371,6 +1410,9 @@ async fn handle_mcp_command(
         McpCommand::Add {
             name,
             url,
+            command,
+            args,
+            env,
             oauth,
             client_id,
             client_secret_env,
@@ -1378,14 +1420,24 @@ async fn handle_mcp_command(
         } => {
             let cwd = std::env::current_dir().context("failed to resolve current directory")?;
             let scope = parse_mcp_edit_scope(&scope)?;
+            if url.is_none() && command.is_none() {
+                anyhow::bail!("mcp add requires one transport: --url <MCP_URL> or --command <CMD>");
+            }
+            if url.is_some() && command.is_some() {
+                anyhow::bail!("mcp add cannot combine --url and --command");
+            }
             let oauth_enabled = match oauth.as_deref() {
                 None => true,
                 Some("on") => true,
                 Some("off") => false,
                 Some(other) => anyhow::bail!("invalid oauth toggle: {other}"),
             };
+            let env_map = parse_mcp_env_assignments(&env)?;
             let server = rustcode_core::config::McpServerConfig {
-                url: Some(url.clone()),
+                url: url.clone(),
+                command: command.clone(),
+                args: args.clone(),
+                env: env_map.clone(),
                 oauth: rustcode_core::config::McpOAuthConfig {
                     enabled: oauth_enabled,
                     client_id: client_id.clone(),
@@ -1404,6 +1456,10 @@ async fn handle_mcp_command(
                     "scope": render_mcp_edit_scope(scope),
                     "config_file": path.display().to_string(),
                     "url": url,
+                    "command_name": command,
+                    "args": args,
+                    "env_keys": env_map.keys().cloned().collect::<Vec<_>>(),
+                    "transport": if server.url.is_some() { "http" } else { "stdio" },
                     "oauth_enabled": oauth_enabled,
                 });
                 if !write_stdout_line(
@@ -1419,6 +1475,18 @@ async fn handle_mcp_command(
                 || !write_stdout_line(&format!("config_file={}", path.display()))?
             {
                 return Ok(());
+            }
+            if let Some(url) = server.url.as_deref() {
+                if !write_stdout_line(&format!("transport=http\turl={url}"))? {
+                    return Ok(());
+                }
+            } else if let Some(command_name) = server.command.as_deref() {
+                if !write_stdout_line(&format!(
+                    "transport=stdio\tcommand={command_name}\targs={}",
+                    server.args.join(" ")
+                ))? {
+                    return Ok(());
+                }
             }
         }
         McpCommand::Remove { name, scope } => {
@@ -1765,6 +1833,12 @@ struct McpConfigEntry {
     #[serde(default)]
     url: Option<String>,
     #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default)]
+    env: BTreeMap<String, String>,
+    #[serde(default)]
     oauth: Option<McpOAuthConfig>,
 }
 
@@ -1786,6 +1860,20 @@ struct McpOAuthSettings {
 }
 
 impl McpConfigEntry {
+    fn transport_kind(&self) -> &'static str {
+        if self.url.is_some() {
+            "http"
+        } else if self.command.is_some() {
+            "stdio"
+        } else {
+            "none"
+        }
+    }
+
+    fn transport_target(&self) -> Option<&str> {
+        self.url.as_deref().or(self.command.as_deref())
+    }
+
     fn oauth_enabled(&self) -> bool {
         match &self.oauth {
             None => true,
@@ -1818,6 +1906,9 @@ impl From<&CoreMcpServerConfig> for McpConfigEntry {
         }));
         Self {
             url: value.url.clone(),
+            command: value.command.clone(),
+            args: value.args.clone(),
+            env: value.env.clone(),
             oauth,
         }
     }
@@ -1950,6 +2041,25 @@ fn render_mcp_edit_scope(scope: ConfigEditScope) -> &'static str {
     }
 }
 
+fn parse_mcp_env_assignments(raw_items: &[String]) -> Result<BTreeMap<String, String>> {
+    let mut env = BTreeMap::new();
+    for item in raw_items {
+        let (key, value) = item
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("invalid --env value `{item}`; expected KEY=VALUE"))?;
+        let key = key.trim();
+        let value = value.trim();
+        if key.is_empty() {
+            anyhow::bail!("invalid --env value `{item}`; key must not be empty");
+        }
+        if value.is_empty() {
+            anyhow::bail!("invalid --env value `{item}`; value must not be empty");
+        }
+        env.insert(key.to_string(), value.to_string());
+    }
+    Ok(env)
+}
+
 fn resolve_configured_mcp_servers(
     config: &ResolvedConfig,
 ) -> Result<BTreeMap<String, McpConfigEntry>> {
@@ -2002,12 +2112,19 @@ async fn build_mcp_registry(config: &ResolvedConfig) -> Result<McpRegistry> {
     let store = AuthStore::open_default();
 
     for (name, server) in &config.mcp_servers {
-        let Some(url) = server.url.as_deref() else {
-            tracing::debug!("skipping mcp server without url: {name}");
+        let token = resolve_mcp_bearer_token(&store, name)?;
+        let connect_result = if let Some(url) = server.url.as_deref() {
+            registry.connect(name.clone(), url, token).await
+        } else if let Some(command) = server.command.as_deref() {
+            registry
+                .connect_stdio(name.clone(), command, &server.args, &server.env, token)
+                .await
+        } else {
+            tracing::debug!("skipping mcp server without transport: {name}");
             continue;
         };
-        let token = resolve_mcp_bearer_token(&store, name)?;
-        if let Err(err) = registry.connect(name.clone(), url, token).await {
+
+        if let Err(err) = connect_result {
             tracing::warn!("failed to connect mcp server {name}: {err}");
         }
     }
@@ -2909,15 +3026,16 @@ fn resolve_session(
     session_id: Option<&str>,
     fork: bool,
     title: Option<String>,
-) -> Result<(rustcode_core::SessionInfo, Vec<rustcode_core::StoredMessage>)> {
+) -> Result<(
+    rustcode_core::SessionInfo,
+    Vec<rustcode_core::StoredMessage>,
+)> {
     if fork && !continue_session && session_id.is_none() {
         anyhow::bail!("--fork requires --continue or --session <SESSION_ID>");
     }
 
     let base = if continue_session {
-        let sessions = store
-            .list_sessions()
-            .context("failed to list sessions")?;
+        let sessions = store.list_sessions().context("failed to list sessions")?;
         sessions
             .into_iter()
             .next()
@@ -2991,13 +3109,7 @@ fn handle_session_command(
         SessionCommand::New { title } => {
             let cwd = std::env::current_dir().context("failed to resolve cwd")?;
             let session = store
-                .create_session(
-                    title,
-                    None,
-                    &cwd,
-                    &config.workspace_root,
-                    &config.model,
-                )
+                .create_session(title, None, &cwd, &config.workspace_root, &config.model)
                 .context("failed to create session")?;
             if json_output {
                 let payload = serde_json::json!({
@@ -3058,7 +3170,10 @@ fn handle_session_command(
                 "title={}",
                 session.title.as_deref().unwrap_or("-")
             ))?;
-            write_stdout_line(&format!("parent_id={}", session.parent_id.as_deref().unwrap_or("-")))?;
+            write_stdout_line(&format!(
+                "parent_id={}",
+                session.parent_id.as_deref().unwrap_or("-")
+            ))?;
             write_stdout_line(&format!("created_at={}", session.created_at_unix_ms))?;
             write_stdout_line(&format!("updated_at={}", session.updated_at_unix_ms))?;
             write_stdout_line(&format!("cwd={}", session.cwd))?;

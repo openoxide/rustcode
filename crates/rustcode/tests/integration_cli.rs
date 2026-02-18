@@ -1829,6 +1829,91 @@ fn mcp_add_writes_project_config_and_list_sees_server_when_trusted() {
 }
 
 #[test]
+fn mcp_add_stdio_writes_project_config_and_list_reports_stdio_transport() {
+    let root = std::env::temp_dir().join(format!(
+        "rustcode-mcp-add-stdio-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("time should be monotonic")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&root).expect("must create project root");
+
+    let add_output = Command::new(rustcode_bin())
+        .args([
+            "--json",
+            "mcp",
+            "add",
+            "local",
+            "--command",
+            "node",
+            "--arg",
+            "server.js",
+            "--arg=--mcp",
+            "--env",
+            "MCP_MODE=test",
+            "--scope",
+            "project",
+        ])
+        .current_dir(&root)
+        .output()
+        .expect("must run rustcode mcp add");
+
+    assert!(
+        add_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&add_output.stdout),
+        String::from_utf8_lossy(&add_output.stderr)
+    );
+    let add_payload: Value = serde_json::from_str(
+        String::from_utf8(add_output.stdout)
+            .expect("stdout must be utf8")
+            .trim(),
+    )
+    .expect("must parse json");
+    assert_eq!(add_payload["command"].as_str(), Some("mcp.add"));
+    assert_eq!(add_payload["transport"].as_str(), Some("stdio"));
+    assert_eq!(add_payload["command_name"].as_str(), Some("node"));
+
+    let list_output = Command::new(rustcode_bin())
+        .args(["--trust-project-config", "--json", "mcp", "list"])
+        .current_dir(&root)
+        .output()
+        .expect("must run rustcode mcp list");
+
+    assert!(
+        list_output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&list_output.stdout),
+        String::from_utf8_lossy(&list_output.stderr)
+    );
+    let payload: Value = serde_json::from_str(
+        String::from_utf8(list_output.stdout)
+            .expect("stdout must be utf8")
+            .trim(),
+    )
+    .expect("must parse json");
+    let servers = payload["servers"]
+        .as_array()
+        .expect("servers should be array");
+    let row = servers
+        .iter()
+        .find(|row| row["name"].as_str() == Some("local"))
+        .expect("local row should exist");
+    assert_eq!(row["configured"].as_bool(), Some(true));
+    assert_eq!(row["transport"].as_str(), Some("stdio"));
+    assert_eq!(row["command"].as_str(), Some("node"));
+    assert_eq!(
+        row["args"]
+            .as_array()
+            .and_then(|items| items.first())
+            .and_then(Value::as_str),
+        Some("server.js")
+    );
+}
+
+#[test]
 fn mcp_status_reports_oauth_supported_for_discoverable_server() {
     let Some((port, handle)) = spawn_mcp_discovery_server() else {
         return;

@@ -235,7 +235,13 @@ pub enum McpCommand {
     Add {
         name: String,
         #[arg(long)]
-        url: String,
+        url: Option<String>,
+        #[arg(long)]
+        command: Option<String>,
+        #[arg(long = "arg")]
+        args: Vec<String>,
+        #[arg(long = "env")]
+        env: Vec<String>,
         #[arg(long = "oauth", value_parser = ["on", "off"])]
         oauth: Option<String>,
         #[arg(long = "client-id")]
@@ -731,6 +737,9 @@ mod tests {
                     McpCommand::Add {
                         name,
                         url,
+                        command,
+                        args,
+                        env,
                         oauth,
                         client_id,
                         client_secret_env,
@@ -738,11 +747,53 @@ mod tests {
                     },
             } => {
                 assert_eq!(name, "github");
-                assert_eq!(url, "https://example.com/mcp");
+                assert_eq!(url.as_deref(), Some("https://example.com/mcp"));
+                assert!(command.is_none());
+                assert!(args.is_empty());
+                assert!(env.is_empty());
                 assert_eq!(oauth.as_deref(), Some("on"));
                 assert_eq!(client_id.as_deref(), Some("client-123"));
                 assert_eq!(client_secret_env.as_deref(), Some("MCP_SECRET"));
                 assert_eq!(scope, "project");
+            }
+            _ => panic!("expected mcp add command"),
+        }
+    }
+
+    #[test]
+    fn mcp_add_parses_stdio_transport_options() {
+        let cli = Cli::try_parse_from([
+            "rustcode",
+            "mcp",
+            "add",
+            "local",
+            "--command",
+            "node",
+            "--arg",
+            "server.js",
+            "--arg=--mcp",
+            "--env",
+            "MCP_MODE=test",
+        ])
+        .expect("cli should parse");
+
+        match cli.command {
+            TopCommand::Mcp {
+                command:
+                    McpCommand::Add {
+                        name,
+                        url,
+                        command,
+                        args,
+                        env,
+                        ..
+                    },
+            } => {
+                assert_eq!(name, "local");
+                assert!(url.is_none());
+                assert_eq!(command.as_deref(), Some("node"));
+                assert_eq!(args, vec!["server.js", "--mcp"]);
+                assert_eq!(env, vec!["MCP_MODE=test"]);
             }
             _ => panic!("expected mcp add command"),
         }

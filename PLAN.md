@@ -1272,9 +1272,15 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - `opencode/packages/opencode/src/cli/cmd/mcp.ts` (MCP command UX)
   - `codex/codex-rs/cli/src/mcp_cmd.rs` (MCP CLI patterns)
 - Deliverables:
-  - MCP client runtime (streamable HTTP baseline; stdio to follow)
+  - MCP client runtime (streamable HTTP + stdio baseline)
+  - MCP resource read integration via namespaced helper tools (`__resources_list`, `__resources_read`)
+  - MCP server transport config supports both `url` (HTTP) and `command/args/env` (stdio), including `mcp add` stdio flags
+  - stdio MCP round-trip test coverage with spawned subprocess fixture
   - tool schema transformation/sanitization for provider compatibility
   - tests using mocked MCP servers
+- Validation:
+  - Pass: `cargo test --workspace` (2026-02-18)
+  - Pass: `RUSTFLAGS='-Dwarnings' cargo check --workspace` (2026-02-18)
 
 60. Local Server + Attach API (Events + Sessions Over HTTP)
 - Status: pending
