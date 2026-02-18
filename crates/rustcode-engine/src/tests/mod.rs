@@ -19,7 +19,8 @@ use rustcode_core::event::{Event, EventPayload};
 use rustcode_core::ports::{EventPublisher, ToolApprover};
 use rustcode_io::{FileSystemPort, IoError, ProcessOutput, ProcessPort};
 use rustcode_llm::{
-    ChatRequest, ChatResponse, LlmClient, LlmRequest, LlmResponse, NullLlmClient, ToolCall,
+    ChatRequest, ChatResponse, LlmClient, LlmRequest, LlmResponse, NullLlmClient, TokenUsage,
+    ToolCall,
 };
 use rustcode_plugins::{Plugin, PluginError, PluginRegistry};
 

@@ -287,3 +287,97 @@ fn extracts_stream_error_message_from_object_payload() {
         Some("insufficient_quota")
     );
 }
+
+// ── Token usage extraction tests ───────────────────────────────────────
+
+#[test]
+fn extracts_openai_usage_with_cache() {
+    let payload = json!({
+        "choices": [{"message": {"content": "hi"}}],
+        "usage": {
+            "prompt_tokens": 1500,
+            "completion_tokens": 200,
+            "total_tokens": 1700,
+            "prompt_tokens_details": { "cached_tokens": 500 }
+        }
+    });
+    let usage = extract_openai_usage(&payload).expect("usage should be present");
+    assert_eq!(usage.input, 1500);
+    assert_eq!(usage.output, 200);
+    assert_eq!(usage.total, 1700);
+    assert_eq!(usage.cache_read, 500);
+    assert_eq!(usage.cache_write, 0);
+}
+
+#[test]
+fn extracts_openai_usage_without_cache() {
+    let payload = json!({
+        "usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150
+        }
+    });
+    let usage = extract_openai_usage(&payload).expect("usage should be present");
+    assert_eq!(usage.input, 100);
+    assert_eq!(usage.output, 50);
+    assert_eq!(usage.total, 150);
+    assert_eq!(usage.cache_read, 0);
+}
+
+#[test]
+fn extracts_anthropic_usage_with_cache() {
+    let payload = json!({
+        "content": [{"type": "text", "text": "hello"}],
+        "usage": {
+            "input_tokens": 2000,
+            "output_tokens": 300,
+            "cache_read_input_tokens": 800,
+            "cache_creation_input_tokens": 100
+        }
+    });
+    let usage = extract_anthropic_usage(&payload).expect("usage should be present");
+    assert_eq!(usage.input, 2000);
+    assert_eq!(usage.output, 300);
+    assert_eq!(usage.total, 2300);
+    assert_eq!(usage.cache_read, 800);
+    assert_eq!(usage.cache_write, 100);
+}
+
+#[test]
+fn extracts_google_usage_with_cached_content() {
+    let payload = json!({
+        "candidates": [{"content": {"parts": [{"text": "hi"}]}}],
+        "usageMetadata": {
+            "promptTokenCount": 500,
+            "candidatesTokenCount": 100,
+            "totalTokenCount": 600,
+            "cachedContentTokenCount": 200
+        }
+    });
+    let usage = extract_google_usage(&payload).expect("usage should be present");
+    assert_eq!(usage.input, 500);
+    assert_eq!(usage.output, 100);
+    assert_eq!(usage.total, 600);
+    assert_eq!(usage.cache_read, 200);
+    assert_eq!(usage.cache_write, 0);
+}
+
+#[test]
+fn openai_usage_returns_none_when_missing() {
+    let payload = json!({"choices": [{"message": {"content": "hi"}}]});
+    assert!(extract_openai_usage(&payload).is_none());
+}
+
+#[test]
+fn anthropic_usage_returns_none_when_missing() {
+    let payload = json!({"content": [{"type": "text", "text": "hi"}]});
+    assert!(extract_anthropic_usage(&payload).is_none());
+}
+
+#[test]
+fn google_usage_returns_none_when_missing() {
+    let payload = json!({"candidates": [{"content": {"parts": [{"text": "hi"}]}}]});
+    assert!(extract_google_usage(&payload).is_none());
+}
+

@@ -379,7 +379,6 @@ async fn serve_waits_until_cancelled() {
         None,
     );
     let publisher = Arc::new(CollectingPublisher::default());
-
     let task = tokio::spawn({
         let publisher = publisher.clone();
         async move {
@@ -428,4 +427,143 @@ async fn serve_waits_until_cancelled() {
         }
         other => panic!("unexpected serve result: {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn agent_compaction_triggers_on_high_token_usage() {
+    /// LLM mock that reports near-overflow usage on step 0, and a compaction
+    /// summary when asked (no tool calls), then a final answer on step 1.
+    struct CompactionLlm {
+        step: Mutex<usize>,
+    }
+
+    #[async_trait]
+    impl LlmClient for CompactionLlm {
+        async fn complete(
+            &self,
+            _request: LlmRequest,
+        ) -> Result<LlmResponse, rustcode_llm::LlmError> {
+            Ok(LlmResponse {
+                text: "unused".to_string(),
+                chunks: Vec::new(),
+            })
+        }
+
+        async fn chat(
+            &self,
+            request: ChatRequest,
+        ) -> Result<ChatResponse, rustcode_llm::LlmError> {
+            let mut step = self.step.lock().await;
+            match *step {
+                0 => {
+                    *step = 1;
+                    // Step 0: tool call with high usage approaching the limit
+                    Ok(ChatResponse {
+                        text: String::new(),
+                        tool_calls: vec![ToolCall {
+                            id: "call_1".to_string(),
+                            name: "list".to_string(),
+                            arguments: r#"{"path":"."}"#.to_string(),
+                        }],
+                        usage: Some(TokenUsage {
+                            input: 115_000,
+                            output: 5_000,
+                            total: 120_000, // Over 128K - 20K buffer = 108K
+                            cache_read: 0,
+                            cache_write: 0,
+                        }),
+                    })
+                }
+                1 => {
+                    // Step 1: compaction summary request (no tools)
+                    if request.tools.is_empty() {
+                        *step = 2;
+                        Ok(ChatResponse {
+                            text: "## Summary\nUser listed files.".to_string(),
+                            tool_calls: Vec::new(),
+                            usage: Some(TokenUsage {
+                                input: 5_000,
+                                output: 500,
+                                total: 5_500,
+                                cache_read: 0,
+                                cache_write: 0,
+                            }),
+                        })
+                    } else {
+                        // Step 1 (post-compaction): tool result + final answer
+                        *step = 2;
+                        Ok(ChatResponse {
+                            text: "done after compaction".to_string(),
+                            tool_calls: Vec::new(),
+                            usage: Some(TokenUsage {
+                                input: 10_000,
+                                output: 500,
+                                total: 10_500,
+                                cache_read: 0,
+                                cache_write: 0,
+                            }),
+                        })
+                    }
+                }
+                _ => {
+                    // Final answer after compaction
+                    Ok(ChatResponse {
+                        text: "done after compaction".to_string(),
+                        tool_calls: Vec::new(),
+                        usage: None,
+                    })
+                }
+            }
+        }
+    }
+
+    let workspace_root = PathBuf::from("/tmp/rustcode-compaction-test");
+    let engine = Engine::new(
+        Arc::new(CompactionLlm {
+            step: Mutex::new(0),
+        }),
+        Arc::new(AgentFs {
+            root: workspace_root.clone(),
+        }),
+        Arc::new(CancelledProcess),
+        Arc::new(WorkspacePermissionPolicy),
+        PluginRegistry::default(),
+        None,
+        None,
+    );
+    let publisher = Arc::new(CollectingPublisher::default());
+    let context = CommandContext::new(
+        Arc::new(ResolvedConfig {
+            workspace_root,
+            ..ResolvedConfig::default()
+        }),
+        SessionMeta {
+            session_id: "compact-s1".to_string(),
+            request_id: "compact-r1".to_string(),
+            started_at: SystemTime::now(),
+        },
+    );
+
+    let result = engine
+        .execute(
+            Command::Agent {
+                prompt: "list files".to_string(),
+                options: AgentOptions::default(),
+                history: Vec::new(),
+            },
+            context,
+            publisher.clone(),
+        )
+        .await;
+
+    assert!(result.is_ok(), "agent should complete: {result:?}");
+
+    let events = publisher.events.lock().await.clone();
+    // Verify we got output after the agent completed
+    assert!(events.iter().any(|event| {
+        matches!(
+            &event.payload,
+            EventPayload::OutputChunk { text } if text.contains("done")
+        )
+    }));
 }
