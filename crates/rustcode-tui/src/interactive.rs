@@ -173,6 +173,7 @@ struct ChatState {
     session: SessionInfo,
     messages: Vec<StoredMessage>,
     scroll: u16,
+    live_assistant: String,
     composer: String,
     prompt_history: Vec<String>,
     history_cursor: Option<usize>,
@@ -295,6 +296,7 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
                 session,
                 messages,
                 scroll: 0,
+                live_assistant: String::new(),
                 composer: if should_submit {
                     String::new()
                 } else {
@@ -408,6 +410,17 @@ fn drain_messages(state: &mut AppState) {
                             output: output.clone(),
                         }),
                         EventPayload::OutputChunk { text } => {
+                            chat.live_assistant.push_str(text);
+                            if chat.live_assistant.len() > 64 * 1024 {
+                                let keep = 48 * 1024;
+                                let mut start = chat.live_assistant.len().saturating_sub(keep);
+                                while start < chat.live_assistant.len()
+                                    && !chat.live_assistant.is_char_boundary(start)
+                                {
+                                    start += 1;
+                                }
+                                chat.live_assistant = chat.live_assistant[start..].to_string();
+                            }
                             Some(ActivityItem::OutputChunk { text: text.clone() })
                         }
                         EventPayload::Warning { message } => {
@@ -416,6 +429,7 @@ fn drain_messages(state: &mut AppState) {
                         EventPayload::Failure { message } => {
                             state.status = Some(message.clone());
                             refresh = true;
+                            chat.live_assistant.clear();
                             Some(ActivityItem::Failure {
                                 message: message.clone(),
                             })
@@ -423,6 +437,7 @@ fn drain_messages(state: &mut AppState) {
                         EventPayload::Completed => {
                             chat.running = None;
                             refresh = true;
+                            chat.live_assistant.clear();
                             Some(ActivityItem::Completed)
                         }
                         EventPayload::ServeRequest { .. } => None,
@@ -460,6 +475,7 @@ fn drain_messages(state: &mut AppState) {
             InteractiveMsg::RunEnded { ok, message } => {
                 if let Screen::Chat(chat) = &mut screen {
                     chat.running = None;
+                    chat.live_assistant.clear();
                     if ok {
                         state.status = None;
                     } else {
@@ -564,6 +580,7 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         session,
                         messages,
                         scroll: 0,
+                        live_assistant: String::new(),
                         composer: String::new(),
                         prompt_history,
                         history_cursor: None,
@@ -674,6 +691,7 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         session,
                         messages,
                         scroll: 0,
+                        live_assistant: String::new(),
                         composer: String::new(),
                         prompt_history,
                         history_cursor: None,
@@ -728,6 +746,7 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         session: forked,
                         messages,
                         scroll: 0,
+                        live_assistant: String::new(),
                         composer: String::new(),
                         prompt_history,
                         history_cursor: None,
@@ -768,6 +787,7 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 session,
                 messages,
                 scroll: 0,
+                live_assistant: String::new(),
                 composer: String::new(),
                 prompt_history,
                 history_cursor: None,
@@ -827,6 +847,7 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
                 chat.session = session;
                 chat.messages = messages;
                 chat.scroll = 0;
+                chat.live_assistant.clear();
                 chat.composer.clear();
                 chat.prompt_history = build_prompt_history(&chat.messages);
                 chat.history_cursor = None;
@@ -864,6 +885,7 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
                 chat.session = forked;
                 chat.messages = messages;
                 chat.scroll = 0;
+                chat.live_assistant.clear();
                 chat.composer.clear();
                 chat.prompt_history = build_prompt_history(&chat.messages);
                 chat.history_cursor = None;
@@ -1021,6 +1043,7 @@ fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: String) {
         cancellation: cancellation.clone(),
     });
     state.status = None;
+    chat.live_assistant.clear();
 
     let trimmed = prompt.trim();
     if !trimmed.is_empty() {
@@ -1206,6 +1229,15 @@ fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState)
     let mut lines = Vec::new();
     for msg in &chat.messages {
         append_message_lines(&mut lines, msg, chat.tool_details);
+    }
+
+    if !chat.live_assistant.trim().is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            "Assistant (streaming)",
+            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+        )]));
+        append_text_lines(&mut lines, chat.live_assistant.as_str(), "", 200);
+        lines.push(Line::raw(""));
     }
 
     let transcript_border = if chat.focus == ChatFocus::Transcript {
@@ -1666,6 +1698,7 @@ mod tests {
                 session,
                 messages,
                 scroll: 0,
+                live_assistant: String::new(),
                 composer: String::new(),
                 prompt_history: Vec::new(),
                 history_cursor: None,
@@ -1790,6 +1823,7 @@ mod tests {
                 session,
                 messages: Vec::new(),
                 scroll: 0,
+                live_assistant: String::new(),
                 composer: String::new(),
                 prompt_history: Vec::new(),
                 history_cursor: None,
