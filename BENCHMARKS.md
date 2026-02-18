@@ -36,7 +36,7 @@ Examples:
 ```
 
 ## Notes
-- The harness builds `rustcode-cli` before running probes.
+- The harness builds `rustcode` before running probes.
 - On restricted environments, `/usr/bin/time -l` may be unavailable or blocked; the script falls back to portable timing output.
 - For full RSS metrics on macOS, run outside sandbox restrictions with `/usr/bin/time -l` enabled.
 - Memory metrics in compare/assert/release-gate scripts are normalized to bytes (BSD + GNU time formats).

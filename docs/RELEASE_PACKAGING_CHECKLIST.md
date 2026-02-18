@@ -14,7 +14,7 @@
 5. `./scripts/benchmark_release_gate.sh benchmarks/release-baseline.json benchmarks/latest.json`
 
 ## Artifact Naming
-- Binary artifact base: `rustcode-cli`
+- Binary artifact base: `rustcode`
 - Suggested release bundle naming:
   - `rustcode-v<version>-<target>.tar.gz`
   - `rustcode-v<version>-<target>.sha256`

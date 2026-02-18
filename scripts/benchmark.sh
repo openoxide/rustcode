@@ -22,9 +22,9 @@ shift || true
 
 cd "$(dirname "$0")/.."
 
-cargo build -q -p rustcode-cli
+cargo build -q -p rustcode
 
-bin="./target/debug/rustcode-cli"
+bin="./target/debug/rustcode"
 
 run_time() {
   if /usr/bin/time -p "$@" >/dev/null 2>&1; then

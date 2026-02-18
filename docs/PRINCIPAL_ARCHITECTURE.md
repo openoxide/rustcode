@@ -28,7 +28,7 @@ rustcode/
 ├── docs/
 │   └── PRINCIPAL_ARCHITECTURE.md
 └── crates/
-    ├── rustcode-cli/      # clap parser, command routing, startup wiring
+    ├── rustcode/          # CLI sources (package/binary name: `rustcode`)
     ├── rustcode-core/     # domain commands/events/context/errors/ports
     ├── rustcode-engine/   # orchestrator, command execution state machine
     ├── rustcode-config/   # layered config loading + validation + trust policy

@@ -8,7 +8,7 @@ use std::time::Duration;
 use serde_json::Value;
 
 fn rustcode_bin() -> &'static str {
-    env!("CARGO_BIN_EXE_rustcode-cli")
+    env!("CARGO_BIN_EXE_rustcode")
 }
 
 fn make_temp_file_path(name: &str) -> PathBuf {
@@ -17,7 +17,7 @@ fn make_temp_file_path(name: &str) -> PathBuf {
         .expect("time should be monotonic")
         .as_nanos();
     let pid = std::process::id();
-    std::env::temp_dir().join(format!("rustcode-cli-{name}-{pid}-{now}.json"))
+    std::env::temp_dir().join(format!("rustcode-{name}-{pid}-{now}.json"))
 }
 
 fn http_request(port: u16, path: &str) -> std::io::Result<String> {
@@ -76,6 +76,61 @@ fn spawn_hanging_http_server() -> Option<(u16, thread::JoinHandle<()>)> {
         }
     });
     Some((port, handle))
+}
+
+#[test]
+fn version_does_not_require_trusted_project_config_or_llm_init() {
+    let seed = make_temp_file_path("version-untrusted");
+    let stem = seed
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("rustcode-version-untrusted");
+    let project_root = std::env::temp_dir().join(stem);
+    let _ = std::fs::remove_dir_all(&project_root);
+    std::fs::create_dir_all(&project_root).expect("create project dir");
+
+    // Create an untrusted project config that would normally trip the trust gate.
+    std::fs::write(project_root.join("rustcode.toml"), "allow_network = true\n")
+        .expect("write project config");
+
+    let output = Command::new(rustcode_bin())
+        .current_dir(&project_root)
+        .arg("version")
+        .output()
+        .expect("run rustcode version");
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.trim().starts_with("0."), "stdout={stdout}");
+
+    let _ = std::fs::remove_dir_all(&project_root);
+}
+
+#[test]
+fn list_does_not_require_llm_provider_even_when_allow_network_true() {
+    let seed = make_temp_file_path("list-no-llm-init");
+    let stem = seed
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("rustcode-list-no-llm-init");
+    let project_root = std::env::temp_dir().join(stem);
+    let _ = std::fs::remove_dir_all(&project_root);
+    std::fs::create_dir_all(&project_root).expect("create project dir");
+
+    // allow_network=true would previously cause provider policy selection and a missing-api-key error
+    // during CLI startup, even for non-LLM commands like `list`.
+    std::fs::write(project_root.join("rustcode.toml"), "allow_network = true\n")
+        .expect("write project config");
+
+    let output = Command::new(rustcode_bin())
+        .current_dir(&project_root)
+        .arg("--trust-project-config")
+        .arg("list")
+        .arg(".")
+        .output()
+        .expect("run rustcode list");
+    assert!(output.status.success());
+
+    let _ = std::fs::remove_dir_all(&project_root);
 }
 
 #[test]

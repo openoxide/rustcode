@@ -34,7 +34,7 @@ if [[ ! -f docs/RELEASE_NOTES_DRAFT.md ]]; then
   exit 1
 fi
 
-cargo build --release -p rustcode-cli
+cargo build --release -p rustcode
 
 target_triple="$(rustc -vV | awk '/^host:/ { print $2 }')"
 if [[ -z "$target_triple" ]]; then
@@ -46,7 +46,7 @@ bundle_name="rustcode-${tag}-${target_triple}"
 bundle_root="$output_dir/$bundle_name"
 mkdir -p "$bundle_root"
 
-cp "target/release/rustcode-cli" "$bundle_root/"
+cp "target/release/rustcode" "$bundle_root/"
 cp "benchmarks/latest.json" "$bundle_root/"
 cp "docs/RELEASE_NOTES_DRAFT.md" "$bundle_root/"
 

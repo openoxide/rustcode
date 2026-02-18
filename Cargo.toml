@@ -1,6 +1,6 @@
 [workspace]
 members = [
-  "crates/rustcode-cli",
+  "crates/rustcode",
   "crates/rustcode-core",
   "crates/rustcode-engine",
   "crates/rustcode-config",

@@ -13,32 +13,32 @@ cargo test --workspace
 
 ## Core Commands
 ```bash
-cargo run -q -p rustcode-cli -- --help
-cargo run -q -p rustcode-cli -- run "hello"
-cargo run -q -p rustcode-cli -- agent "scan the repo and summarize key modules"
-cargo run -q -p rustcode-cli -- --json run "hello"
+cargo run -q -p rustcode -- --help
+cargo run -q -p rustcode -- run "hello"
+cargo run -q -p rustcode -- agent "scan the repo and summarize key modules"
+cargo run -q -p rustcode -- --json run "hello"
 ```
 
 ## Tool Runtime Commands
 ```bash
-cargo run -q -p rustcode-cli -- list .
-cargo run -q -p rustcode-cli -- read path/to/file
-cargo run -q -p rustcode-cli -- write path/to/file "contents"
-cargo run -q -p rustcode-cli -- edit path/to/file "from" "to"
-cargo run -q -p rustcode-cli -- exec echo hi
-cargo run -q -p rustcode-cli -- models
-cargo run -q -p rustcode-cli -- models openrouter
+cargo run -q -p rustcode -- list .
+cargo run -q -p rustcode -- read path/to/file
+cargo run -q -p rustcode -- write path/to/file "contents"
+cargo run -q -p rustcode -- edit path/to/file "from" "to"
+cargo run -q -p rustcode -- exec echo hi
+cargo run -q -p rustcode -- models
+cargo run -q -p rustcode -- models openrouter
 ```
 
 ## Provider Setup
 ```bash
-cargo run -q -p rustcode-cli -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY run "hello"
+cargo run -q -p rustcode -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY run "hello"
 ```
 
 Tool-calling agent runs require an OpenAI-compatible provider that supports `tools`:
 
 ```bash
-cargo run -q -p rustcode-cli -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY agent "list files then read Cargo.toml"
+cargo run -q -p rustcode -- --llm-provider openrouter --llm-base-url https://openrouter.ai/api/v1 --llm-api-key-env OPENROUTER_API_KEY agent "list files then read Cargo.toml"
 ```
 
 Safety defaults:
@@ -49,15 +49,15 @@ Safety defaults:
 
 ## Auth Commands
 ```bash
-cargo run -q -p rustcode-cli -- auth methods openrouter
-cargo run -q -p rustcode-cli -- auth set-key openrouter --from-env OPENROUTER_API_KEY
-cargo run -q -p rustcode-cli -- auth status openrouter
-cargo run -q -p rustcode-cli -- auth remove openrouter
+cargo run -q -p rustcode -- auth methods openrouter
+cargo run -q -p rustcode -- auth set-key openrouter --from-env OPENROUTER_API_KEY
+cargo run -q -p rustcode -- auth status openrouter
+cargo run -q -p rustcode -- auth remove openrouter
 ```
 
 ## TUI Path
 ```bash
-cargo run -q -p rustcode-cli -- tui
+cargo run -q -p rustcode -- tui
 ```
 
 ## Benchmarking

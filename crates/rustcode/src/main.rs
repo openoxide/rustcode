@@ -43,6 +43,24 @@ async fn main() -> Result<()> {
     init_tracing()?;
 
     let cli = Cli::parse();
+
+    if matches!(&cli.command, TopCommand::Version) {
+        let version = env!("CARGO_PKG_VERSION");
+        if cli.json {
+            let payload = serde_json::json!({
+                "schema_version": 1,
+                "command": "version",
+                "version": version,
+            });
+            write_stdout_line(
+                &serde_json::to_string(&payload).context("failed to serialize version json")?,
+            )?;
+        } else {
+            write_stdout_line(version)?;
+        }
+        return Ok(());
+    }
+
     if let TopCommand::Auth { command } = &cli.command {
         return match handle_auth_command(command.clone(), cli.json).await {
             Ok(()) => Ok(()),
@@ -121,11 +139,19 @@ async fn main() -> Result<()> {
         return handle_models_command(provider.as_deref(), &config, cli.json);
     }
     let launch_tui = matches!(&cli.command, TopCommand::Tui);
+    let requires_llm = matches!(
+        &cli.command,
+        TopCommand::Run { .. } | TopCommand::Agent { .. } | TopCommand::Serve { .. }
+    );
     let output_format = OutputFormat::from_json_flag(cli.json);
     let event_debug = cli.event_debug;
 
     let config = load_effective_config(&cli)?;
-    let llm_client = build_client(&config).context("failed to initialize llm provider")?;
+    let llm_client = if requires_llm {
+        build_client(&config).context("failed to initialize llm provider")?
+    } else {
+        Arc::new(rustcode_llm::NullLlmClient)
+    };
 
     let cancellation = CancellationToken::new();
     let context = CommandContext::with_cancellation(
@@ -1167,30 +1193,31 @@ async fn handle_mcp_command(
                 )? {
                     return Ok(());
                 }
-            } else if !write_stdout_line(&format!("name={name}"))?
-                || !write_stdout_line(&format!("method={}", selected_method.as_str()))?
-                || !write_stdout_line("stage=oauth_discovered")?
-                || !write_stdout_line(&format!("url={resolved_url}"))?
-                || !write_stdout_line(&format!(
-                    "metadata_url={}",
-                    discovery.metadata_url.as_deref().unwrap_or("<unknown>")
-                ))?
-                || !write_stdout_line(&format!(
-                    "authorization_endpoint={}",
-                    discovery
-                        .authorization_endpoint
-                        .as_deref()
-                        .unwrap_or("<unknown>")
-                ))?
-                || !write_stdout_line(&format!(
-                    "token_endpoint={}",
-                    discovery.token_endpoint.as_deref().unwrap_or("<unknown>")
-                ))?
-            {
-                return Ok(());
-            }
-            if !scopes.is_empty() && !write_stdout_line(&format!("scopes={}", scopes.join(",")))? {
-                return Ok(());
+            } else {
+                if !write_stdout_line(&format!("name={name}"))?
+                    || !write_stdout_line(&format!("method={}", selected_method.as_str()))?
+                    || !write_stdout_line("stage=oauth_discovered")?
+                    || !write_stdout_line(&format!("url={resolved_url}"))?
+                    || !write_stdout_line(&format!(
+                        "metadata_url={}",
+                        discovery.metadata_url.as_deref().unwrap_or("<unknown>")
+                    ))?
+                    || !write_stdout_line(&format!(
+                        "authorization_endpoint={}",
+                        discovery
+                            .authorization_endpoint
+                            .as_deref()
+                            .unwrap_or("<unknown>")
+                    ))?
+                    || !write_stdout_line(&format!(
+                        "token_endpoint={}",
+                        discovery.token_endpoint.as_deref().unwrap_or("<unknown>")
+                    ))?
+                    || (!scopes.is_empty()
+                        && !write_stdout_line(&format!("scopes={}", scopes.join(",")))?)
+                {
+                    return Ok(());
+                }
             }
 
             match selected_method {

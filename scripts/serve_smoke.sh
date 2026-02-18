@@ -3,8 +3,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-cargo build -q -p rustcode-cli
-bin="./target/debug/rustcode-cli"
+cargo build -q -p rustcode
+bin="./target/debug/rustcode"
 listen="${1:-127.0.0.1:4319}"
 health_url="http://$listen/health"
 missing_url="http://$listen/does-not-exist"

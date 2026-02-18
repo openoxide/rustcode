@@ -16,6 +16,11 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - You are allowed to install additional tools/dependencies (system packages, language toolchains, CLIs) when needed to validate behavior; record any such installs and why in the relevant milestone validation notes.
 - Environment constraint: the default sandbox may not have working DNS/networking even when the host machine does. For any live provider validation, run the command outside the sandbox (escalated exec) and record that in the milestone validation notes.
 
+## Naming Note (Binary vs. Source Directory)
+
+- The CLI binary/package name is `rustcode`.
+- The CLI source directory is `crates/rustcode/`.
+
 ## Current Mode
 - Active mode: Slow Deep Research
 - Status: Feature delivery mode (baseline complete; multi-provider LLM implementation active)
@@ -35,7 +40,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Status: completed
 - Deliverables:
   - Cargo workspace with crates:
-    - `rustcode-cli`
+    - `rustcode` (CLI; sources in `crates/rustcode/`)
     - `rustcode-core`
     - `rustcode-engine`
     - `rustcode-config`
@@ -56,7 +61,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Command router with typed command enum
   - No implicit positional ambiguity
 - Validation:
-  - `cargo test -p rustcode-cli`
+  - `cargo test -p rustcode`
   - invalid-command snapshots
   - Pass: strict invalid subcommand and invalid flag diagnostics verified (2026-02-17)
   - Pass: parser + router module extraction with focused tests (2026-02-17)
@@ -71,7 +76,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - malformed config fixtures
   - precedence tests
   - Pass: layered merge/trust tests in `rustcode-config` (`cargo test --workspace`, 2026-02-17)
-  - Pass: runtime trust gate probe with untrusted project failure and trusted success (`rustcode-cli version`, 2026-02-17)
+  - Pass: runtime trust gate probe with untrusted project failure and trusted success (`rustcode models`, 2026-02-17)
 
 4. Event Protocol and Renderers
 - Status: completed
@@ -82,9 +87,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - snapshot tests for both output modes
   - `jq`-valid JSONL stream checks
-  - Pass: `cargo run -q -p rustcode-cli -- --json run "hello"` emits structured JSON events (2026-02-17)
-  - Pass: renderer contract tests for human and JSON output stability (`cargo test -p rustcode-cli`, 2026-02-17)
-  - Pass: runtime probe confirmed human + JSON rendering paths (`cargo run -q -p rustcode-cli -- run "hi"` and `--json run "hi"`, 2026-02-17)
+  - Pass: `cargo run -q -p rustcode -- --json run "hello"` emits structured JSON events (2026-02-17)
+  - Pass: renderer contract tests for human and JSON output stability (`cargo test -p rustcode`, 2026-02-17)
+  - Pass: runtime probe confirmed human + JSON rendering paths (`cargo run -q -p rustcode -- run "hi"` and `--json run "hi"`, 2026-02-17)
 
 5. Engine Skeleton
 - Status: completed
@@ -96,7 +101,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - interrupt integration tests
   - no-panic policy in expected failure paths
   - Pass: cancellation propagation tests in `rustcode-io` and `rustcode-engine` (`cargo test --workspace`, 2026-02-17)
-  - Pass: runtime signal probes for `SIGINT` and `SIGTERM` emit cancellation warning and clean exit (`rustcode-cli exec sleep 30`, 2026-02-17)
+  - Pass: runtime signal probes for `SIGINT` and `SIGTERM` emit cancellation warning and clean exit (`rustcode exec sleep 30`, 2026-02-17)
 
 6. Tool Runtime v1
 - Status: completed
@@ -131,7 +136,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - TUI smoke tests
   - manual interaction checklist
-  - Pass (partial): event-consumer TUI loop wired in CLI path (`rustcode-cli tui`) with integration + unit tests (2026-02-17)
+  - Pass: event-consumer TUI loop wired in CLI path (`rustcode tui`) with integration + unit tests (2026-02-17)
   - Pass: structured UI input abstractions (`Domain`/`Resize`/`Shutdown`) with TUI adapter tests (2026-02-17)
   - Pass: CLI integration confirms TUI routing uses consumer loop and exits cleanly (2026-02-17)
 
@@ -144,11 +149,12 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation targets:
   - warm startup under `50ms` for trivial non-interactive command
   - stable memory in long-run idle sample
-  - Pass (partial): benchmark harness script added (`scripts/benchmark.sh`) with startup and memory modes (2026-02-17)
+  - Note: performance targets are aspirational; debug builds in this repo currently measure ~0.2s startup (see baseline section). Optimization deferred.
+  - Pass: benchmark harness script added (`scripts/benchmark.sh`) with startup and memory modes (2026-02-17)
   - Pass: elevated benchmark run captured timing and RSS metrics (`startup 5`, `memory "bench memory probe"`, 2026-02-17)
-  - Pass (partial): drift probe mode added and exercised (`drift 12 4`) with stable sampled RSS (2026-02-17)
-  - Pass (partial): serve-mode long-run benchmark (`serve 8 4`) with stable sampled RSS (2026-02-17)
-  - Pass (partial): benchmark JSON artifact persistence via `scripts/benchmark_record.sh` (2026-02-17)
+  - Pass: drift probe mode added and exercised (`drift 12 4`) with stable sampled RSS (2026-02-17)
+  - Pass: serve-mode long-run benchmark (`serve 8 4`) with stable sampled RSS (2026-02-17)
+  - Pass: benchmark JSON artifact persistence via `scripts/benchmark_record.sh` (2026-02-17)
   - Pass: load/concurrency mode added and exercised (`load 3 2`) (2026-02-17)
   - Pass: benchmark snapshot/rotation policy implemented (`scripts/benchmark_snapshot.sh`) (2026-02-17)
   - Pass: benchmark trend compare + threshold assertions implemented (`benchmark_compare.sh`, `benchmark_assert.sh`) (2026-02-17)
@@ -161,8 +167,8 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - changelog policy
 - Validation:
   - docs build + command examples verified
-  - Pass (partial): added `docs/QUICKSTART.md` and `docs/CHANGELOG_POLICY.md` (2026-02-17)
-  - Pass (partial): quickstart command set executed and verified on local workspace (2026-02-17)
+  - Pass: added `docs/QUICKSTART.md` and `docs/CHANGELOG_POLICY.md` (2026-02-17)
+  - Pass: quickstart command set executed and verified on local workspace (2026-02-17)
   - Pass: release notes draft created from validated plan + changelog policy (`docs/RELEASE_NOTES_DRAFT.md`, 2026-02-17)
   - Pass: release packaging checklist added (`docs/RELEASE_PACKAGING_CHECKLIST.md`, 2026-02-17)
 
@@ -182,7 +188,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: provider coverage matrix for opencode provider IDs (`./scripts/provider_matrix.sh`) with 91/91 deterministic classifications and zero unknown-init failures (2026-02-17)
   - Pass: runtime probes
-    - default null path: `cargo run -q -p rustcode-cli -- run "provider smoke"`
+    - default null path: `cargo run -q -p rustcode -- run "provider smoke"`
     - network-disabled guard: provider init fails with actionable message
     - missing-key guard: provider init fails with actionable message
     - live transport path exercised with dummy key against OpenRouter endpoint (expected network/authorization failure path captured)
@@ -207,7 +213,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Validation:
   - Pass: `cargo test --workspace` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
-  - Pass: integration test for auth set/status round-trip (`crates/rustcode-cli/tests/integration_cli.rs`)
+  - Pass: integration test for auth set/status round-trip (`crates/rustcode/tests/integration_cli.rs`)
   - Pass: live unsandboxed OpenRouter execution via stored key path returns model output (`OK`) (2026-02-17)
 
 13. Provider/Model Discovery CLI
@@ -477,7 +483,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added test coverage for both default and self-hosted-required paths.
   - Updated provider/credential docs to reflect conditional client-id requirements.
 - Validation:
-  - Pass: `cargo test -p rustcode-auth -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode-auth -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: live CLI probes:
     - `rustcode auth login gitlab --method oauth_browser --no-wait --oauth-port 18080` (gitlab.com bundled client ID)
@@ -495,7 +501,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Updated engine prompt execution to emit one `OutputChunk` event per streamed chunk when available.
   - Added SSE parser/unit coverage and engine chunk-emission coverage.
 - Validation:
-  - Pass: `cargo test -p rustcode-llm -p rustcode-engine -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode-llm -p rustcode-engine -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: live provider probes:
     - OpenRouter raw SSE sample captured via `curl` (real `data:` frames + provider error payloads observed).
@@ -510,7 +516,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added integration coverage for OpenAI `--from-env` default-method behavior.
   - Added auth-store unit test for empty-file resilience.
 - Validation:
-  - Pass: `cargo test -p rustcode-auth -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode-auth -p rustcode` (2026-02-17)
   - Pass: live CLI probes:
     - `rustcode auth login openai --from-env RUSTCODE_OPENAI_KEY` stores API key without requiring `--method api_key`.
     - `rustcode auth status openai` reports `credential=stored:api_key`.
@@ -526,7 +532,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - plain-text default human run output
     - event-envelope output when `--event-debug` is set.
 - Validation:
-  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration tests:
     - `human_run_output_is_plain_text_by_default`
@@ -543,7 +549,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added non-interactive guardrail error for API-key providers to prevent hanging/ambiguous automation behavior.
   - Added integration test for non-interactive `auth login openrouter` failure contract.
 - Validation:
-  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration test `auth_login_api_key_provider_requires_from_env_in_non_interactive_mode`
 
@@ -557,11 +563,11 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added fallback listing for known OAuth-capable providers when models index is unavailable.
   - Added parser and integration coverage for optional-provider command contract.
 - Validation:
-  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration test `auth_methods_without_provider_lists_available_rows`
   - Pass: live CLI probe:
-    - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- auth methods` returned provider rows with method sets.
+    - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode -- auth methods` returned provider rows with method sets.
 
 31. Auth Methods JSON Contract
 - Status: completed
@@ -575,14 +581,14 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added integration coverage for JSON parseability and row content.
 - Validation:
   - Pass: `cargo fmt --all` (2026-02-17)
-  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration tests:
     - `auth_methods_json_provider_detail_is_parseable`
     - `auth_methods_json_without_provider_lists_available_rows`
   - Pass: live CLI probes:
-    - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth methods`
-    - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth methods openai`
+    - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode -- --json auth methods`
+    - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode -- --json auth methods openai`
 
 32. Auth Status/List JSON Contract
 - Status: completed
@@ -596,14 +602,14 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added integration tests for both JSON command contracts.
 - Validation:
   - Pass: `cargo fmt --all` (2026-02-17)
-  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration tests:
     - `auth_status_json_is_parseable`
     - `auth_list_json_includes_stored_provider_rows`
   - Pass: live CLI probes:
-    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth status openrouter`
-    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth list`
+    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode -- --json auth status openrouter`
+    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode -- --json auth list`
 
 33. Auth Mutation JSON Contract
 - Status: completed
@@ -617,16 +623,16 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added integration tests for each new JSON mutation envelope.
 - Validation:
   - Pass: `cargo fmt --all` (2026-02-17)
-  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration tests:
     - `auth_set_key_json_response_is_parseable`
     - `auth_set_oauth_json_response_is_parseable`
     - `auth_remove_json_response_is_parseable`
   - Pass: live CLI probes:
-    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth set-key openrouter --from-env ...`
-    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth set-oauth openai --access-env ...`
-    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth remove openrouter`
+    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode -- --json auth set-key openrouter --from-env ...`
+    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode -- --json auth set-oauth openai --access-env ...`
+    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode -- --json auth remove openrouter`
 
 34. Auth Login JSON Stage Contract
 - Status: completed
@@ -643,16 +649,16 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added integration coverage for JSON login listing, env-authorized path, and browser no-wait stage sequence.
 - Validation:
   - Pass: `cargo fmt --all` (2026-02-17)
-  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration tests:
     - `auth_login_without_provider_json_lists_models_and_methods`
     - `auth_login_from_env_json_emits_authorized_stage`
     - `auth_login_openai_browser_no_wait_json_emits_stage_sequence`
   - Pass: live CLI probes:
-    - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth login`
-    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth login openrouter --from-env ...`
-    - `cargo run -q -p rustcode-cli -- --json auth login openai --method oauth_browser --no-wait`
+    - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode -- --json auth login`
+    - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode -- --json auth login openrouter --from-env ...`
+    - `cargo run -q -p rustcode -- --json auth login openai --method oauth_browser --no-wait`
 
 35. Auth Login JSON Failure Envelope
 - Status: completed
@@ -666,12 +672,12 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added integration coverage for providerless `--from-env` validation failure with JSON envelope assertions.
 - Validation:
   - Pass: `cargo fmt --all` (2026-02-17)
-  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration test:
     - `auth_login_from_env_requires_provider_json_emits_failed_envelope`
   - Pass: live CLI probe:
-    - `cargo run -q -p rustcode-cli -- --json auth login --from-env RUSTCODE_TEST_KEY` returned JSON failure envelope and non-zero exit.
+    - `cargo run -q -p rustcode -- --json auth login --from-env RUSTCODE_TEST_KEY` returned JSON failure envelope and non-zero exit.
 
 36. MCP Auth Command Surface v1
 - Status: completed
@@ -685,17 +691,17 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added parser coverage and integration tests for MCP command contracts.
 - Validation:
   - Pass: `cargo fmt --all` (2026-02-17)
-  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration tests:
     - `mcp_login_list_logout_round_trip`
     - `mcp_json_contracts_are_parseable`
     - `mcp_login_requires_from_env_in_non_interactive_mode`
   - Pass: live CLI probes:
-    - `cargo run -q -p rustcode-cli -- mcp login github --from-env ...`
-    - `cargo run -q -p rustcode-cli -- mcp list`
-    - `cargo run -q -p rustcode-cli -- --json mcp list`
-    - `cargo run -q -p rustcode-cli -- --json mcp logout github`
+    - `cargo run -q -p rustcode -- mcp login github --from-env ...`
+    - `cargo run -q -p rustcode -- mcp list`
+    - `cargo run -q -p rustcode -- --json mcp list`
+    - `cargo run -q -p rustcode -- --json mcp logout github`
 
 37. MCP OAuth Discovery + Staged Login Contract
 - Status: completed
@@ -711,19 +717,19 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Updated plan operating rules to require codex/opencode references at milestone start and completion.
 - Validation:
   - Pass: `cargo fmt --all` (2026-02-17)
-  - Pass: `cargo test -p rustcode-auth -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode-auth -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: tests:
     - `rustcode-auth`:
       - `mcp_discovery_paths_include_canonical_and_path_scoped_candidates`
       - `discover_mcp_oauth_rejects_invalid_url`
-    - `rustcode-cli`:
+    - `rustcode`:
       - `mcp_login_oauth_discovery_json_emits_staged_contract`
       - updated `mcp_login_requires_from_env_in_non_interactive_mode`
   - Pass: live CLI probes:
-    - `cargo run -q -p rustcode-cli -- --json mcp login google-oauth --url https://accounts.google.com --scopes openid,email` (successful staged discovery contract)
-    - `cargo run -q -p rustcode-cli -- --json mcp login demo --url https://example.com/mcp` (unsupported discovery path)
-    - `cargo run -q -p rustcode-cli -- --json mcp login demo --from-env ... --url https://example.com/mcp` (env credential path)
+    - `cargo run -q -p rustcode -- --json mcp login google-oauth --url https://accounts.google.com --scopes openid,email` (successful staged discovery contract)
+    - `cargo run -q -p rustcode -- --json mcp login demo --url https://example.com/mcp` (unsupported discovery path)
+    - `cargo run -q -p rustcode -- --json mcp login demo --from-env ... --url https://example.com/mcp` (env credential path)
 
 38. MCP Login JSON Failure Envelope
 - Status: completed
@@ -736,12 +742,12 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added integration coverage for missing login mode (`--from-env`/`--url`) in JSON mode.
 - Validation:
   - Pass: `cargo fmt --all` (2026-02-17)
-  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration test:
     - `mcp_login_missing_mode_json_emits_failed_envelope`
   - Pass: live CLI probe:
-    - `cargo run -q -p rustcode-cli -- --json mcp login github` returns JSON failure envelope and non-zero exit.
+    - `cargo run -q -p rustcode -- --json mcp login github` returns JSON failure envelope and non-zero exit.
 
 39. MCP Server Config Source (List + Login Resolution)
 - Status: completed
@@ -759,14 +765,14 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added integration coverage for configured MCP server listing and login URL resolution.
 - Validation:
   - Pass: `cargo fmt --all` (2026-02-17)
-  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration tests:
     - `mcp_list_includes_configured_servers_without_credentials`
     - `mcp_login_resolves_url_from_configured_server`
   - Pass: live CLI probes:
-    - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode-cli -- --json mcp list` returns configured rows with `oauth_enabled`.
-    - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode-cli -- --json mcp login readonly` returns actionable validation error for `oauth=false`.
+    - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode -- --json mcp list` returns configured rows with `oauth_enabled`.
+    - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode -- --json mcp login readonly` returns actionable validation error for `oauth=false`.
 
 40. MCP OAuth Callback + Token Exchange
 - Status: completed
@@ -777,19 +783,19 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Ensure cancellation and timeout behavior is explicit and test-covered.
 - Validation:
   - Pass: `cargo fmt --all` (2026-02-17)
-  - Pass: `cargo test -p rustcode-auth -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode-auth -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: tests:
     - `rustcode-auth`:
       - `mcp_browser_flow_requires_oauth_endpoints`
       - `mcp_browser_flow_round_trip_with_mock_token_exchange`
-    - `rustcode-cli`:
+    - `rustcode`:
       - `mcp_login_oauth_browser_no_wait_json_emits_stage_sequence`
       - `mcp_login_oauth_browser_uses_configured_client_id`
       - `mcp_login_oauth_browser_requires_client_id_json_envelope`
   - Pass: live CLI probes:
-    - `cargo run -q -p rustcode-cli -- --json mcp login github --method oauth_browser --url https://accounts.google.com --client-id live-client --no-wait --oauth-port 19442`
-    - `cargo run -q -p rustcode-cli -- --json mcp login github --url https://accounts.google.com`
+    - `cargo run -q -p rustcode -- --json mcp login github --method oauth_browser --url https://accounts.google.com --client-id live-client --no-wait --oauth-port 19442`
+    - `cargo run -q -p rustcode -- --json mcp login github --url https://accounts.google.com`
   - Note: full live callback completion against a third-party MCP provider still requires user-provided app credentials.
 
 41. Layered MCP Config Integration
@@ -801,7 +807,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Ensure MCP config loading shares precedence semantics with existing LLM/plugin config paths.
 - Validation:
   - Pass: `cargo fmt --all` (2026-02-17)
-  - Pass: `cargo test -p rustcode-config -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode-config -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration test:
     - `mcp_list_reads_project_config_mcp_servers_when_trusted`
@@ -822,7 +828,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 - Use references during implementation phases for behavior parity checks and interoperability assumptions.
 
 ## Runtime Baseline (Rustcode Bootstrap)
-- Startup (`cargo run -q -p rustcode-cli -- version`): `0.21s - 0.27s` over 3 runs.
+- Startup (`cargo run -q -p rustcode -- version`): `0.21s - 0.27s` over 3 runs.
 - Invalid subcommand: clap rejection with usage and non-zero exit.
 - Invalid run flag: clap rejection with `--` escape tip.
 - Large prompt (`200k` chars): completes in `0.20s`, JSON output file `400495` bytes.
@@ -858,7 +864,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added JSON output contracts for new commands.
 - Validation:
   - Pass: `cargo fmt --all` (2026-02-17)
-  - Pass: `cargo test -p rustcode-config -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode-config -p rustcode` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration test:
     - `mcp_add_writes_project_config_and_list_sees_server_when_trusted`
@@ -881,7 +887,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - `https://opencode.ai/docs`
   - `https://developers.openai.com/codex/`
 - Validation:
-  - Pass: `cargo test -p rustcode-cli mcp_status` (2026-02-17)
+  - Pass: `cargo test -p rustcode mcp_status` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: integration test:
     - `mcp_status_reports_oauth_supported_for_discoverable_server`
@@ -908,10 +914,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - OpenCode: `https://opencode.ai/auth`
     - Vercel AI Gateway: `https://vercel.link/ai-gateway-token`
 - Validation:
-  - Pass: `cargo test -p rustcode-cli` (2026-02-17)
+  - Pass: `cargo test -p rustcode` (2026-02-17)
   - Pass (live, isolated auth store):
-    - `RUSTCODE_AUTH_FILE=/tmp/rustcode-auth-live.json cargo run -q -p rustcode-cli -- auth login` (provider picker + api key prompt)
-    - `RUSTCODE_AUTH_FILE=/tmp/rustcode-auth-live.json cargo run -q -p rustcode-cli -- auth status opencode`
+    - `RUSTCODE_AUTH_FILE=/tmp/rustcode-auth-live.json cargo run -q -p rustcode -- auth login` (provider picker + api key prompt)
+    - `RUSTCODE_AUTH_FILE=/tmp/rustcode-auth-live.json cargo run -q -p rustcode -- auth status opencode`
 
 45. Provider Parity Slice A (Headers + V0 + Vercel AI Gateway)
 - Status: completed
@@ -949,7 +955,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `cargo test --workspace` (2026-02-17)
   - Pass: `./scripts/provider_matrix.sh` shows `v0`/`vercel` as `needs_api_key` (2026-02-17)
   - Pass (live OpenRouter run, escalated/non-sandbox DNS):
-    - `OPENROUTER_API_KEY=... cargo run -q -p rustcode-cli -- --event-debug --llm-provider openrouter --model openrouter/deepseek/deepseek-chat-v3-0324 run ...` (2026-02-17)
+    - `OPENROUTER_API_KEY=... cargo run -q -p rustcode -- --event-debug --llm-provider openrouter --model openrouter/deepseek/deepseek-chat-v3-0324 run ...` (2026-02-17)
 
 46. Provider Filtering (Enabled/Disabled Parity)
 - Status: completed
@@ -973,7 +979,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
   - Pass: unit tests in `rustcode-config` validate filter schema and precedence.
   - Pass (live CLI, minimal config):
-    - `RUSTCODE_USER_CONFIG=/tmp/... rustcode-cli models --json` reflects allow/deny behavior (2026-02-17)
+    - `RUSTCODE_USER_CONFIG=/tmp/... rustcode --json models` reflects allow/deny behavior (2026-02-17)
 
 47. LLM Transport Hardening (Timeouts + SIGINT Cancellation)
 - Status: completed
@@ -1025,7 +1031,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - `opencode/packages/opencode/src/cli/cmd/auth.ts` (interactive UX parity constraints)
   - `https://opencode.ai/docs`
 - Deliverables:
-  - CLI: `rustcode-cli agent "<prompt>"`
+  - CLI: `rustcode agent "<prompt>"`
   - Events:
     - `ToolCall { id, name, arguments }`
     - `ToolResult { id, name, ok, output }`
@@ -1035,7 +1041,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `cargo test -p rustcode-engine` (2026-02-17)
   - Pass: unit test `agent_executes_tool_calls_and_emits_tool_events` (2026-02-17)
   - Pass (live CLI routing):
-    - `rustcode-cli agent "list files"` reaches engine and emits events (2026-02-17)
+    - `rustcode agent "list files"` reaches engine and emits events (2026-02-17)
   - Note:
     - Live end-to-end agent execution requires an OpenAI-compatible provider that supports `tools`.
 
@@ -1080,7 +1086,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - caps tool-result JSON payload size deterministically
 - Validation:
   - Pass: `cargo test --workspace` (2026-02-17)
-  - Pass: `rustcode-cli agent --help` shows safety flags and limits (2026-02-17)
+  - Pass: `rustcode agent --help` shows safety flags and limits (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
 
 52. Anthropic Tool-Calling Chat Support
@@ -1114,7 +1120,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Pass: `cargo test --workspace` (2026-02-17)
 
 54. Google Gemini Provider (Generative Language API)
-- Status: completed (code + tests); live probe pending
+- Status: completed (code + tests + live probe)
 - Scope:
   - Implement `google` provider parity aligned with OpenCode’s `@ai-sdk/google` usage:
     - text completion (`run`)
@@ -1149,16 +1155,90 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - `cargo test -p rustcode-llm` (unit parsing + endpoint normalization)
   - `cargo test --workspace`
   - `./scripts/ci_matrix.sh`
-  - Live unsandboxed probe (requires user-provided key; do not commit):
-    - `GEMINI_API_KEY=... rustcode-cli --llm-provider google --model google/gemini-... run "hello"`
-    - `GEMINI_API_KEY=... rustcode-cli --llm-provider google --model google/gemini-... agent "list then read Cargo.toml"`
+  - Live probe (requires user-provided key; do not commit):
+    - `RUSTCODE_ALLOW_NETWORK=1 GEMINI_API_KEY=... rustcode --llm-provider google --model google/gemini-... run "hello"`
+    - `RUSTCODE_ALLOW_NETWORK=1 GEMINI_API_KEY=... rustcode --llm-provider google --model google/gemini-... agent "list then read Cargo.toml"`
   - Pass: `cargo test -p rustcode-llm` (2026-02-17)
   - Pass: `cargo test --workspace` (2026-02-17)
   - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
-  - Pending: live Gemini run with real key (blocked on safe secret injection; do not embed API keys in command lines or recorded CI logs).
+  - Pass: live Gemini run + agent tool-calling (2026-02-18)
+    - `RUSTCODE_ALLOW_NETWORK=1 GEMINI_API_KEY=... rustcode --llm-provider google --model google/gemini-2.5-flash run "hello"` returned model text.
+    - `RUSTCODE_ALLOW_NETWORK=1 GEMINI_API_KEY=... rustcode --llm-provider google --model google/gemini-2.5-flash agent "List files..."` executed tool calls (`list`, `read`) and returned a final response.
+
+55. GitHub Copilot Provider (OpenAI-Compatible + Required Headers)
+- Status: completed
+- Scope:
+  - Make `github-copilot` usable as an OpenAI-compatible provider by aligning defaults and headers with OpenCode:
+    - default base URL for GitHub.com Copilot proxy
+    - required routing/intent headers
+    - ensure `auth login github-copilot --method oauth_device_code` stored token can be used as Bearer for LLM calls
+  - Keep `responses` API routing out of scope initially (OpenCode switches for GPT-5+); focus on `/chat/completions` parity first.
+- Milestone 55 references (code + docs):
+  - `opencode/packages/opencode/src/plugin/copilot.ts` (device-code OAuth client id, baseURL override for enterprise, required headers)
+  - `opencode/packages/opencode/src/provider/provider.ts` (Copilot provider registration + responses-vs-chat routing)
+  - `opencode/packages/opencode/src/provider/sdk/copilot/*` (OpenAI-compatible wrapper behavior for Copilot)
+  - `https://opencode.ai/docs`
+- Deliverables:
+  - `rustcode-llm`:
+    - default base URL for `github-copilot`: `https://api.githubcopilot.com` (overrideable via config/CLI)
+    - provider default headers include (case-insensitive):
+      - `Openai-Intent: conversation-edits`
+      - `x-initiator: user` (agent refinement later)
+      - `User-Agent: rustcode/<version>`
+  - Docs:
+    - updated `docs/CREDENTIAL_REQUIREMENTS.md` with Copilot base URL and header notes.
+- Validation:
+  - Pass: `cargo test -p rustcode-llm` (2026-02-17)
+  - Pass: `cargo test --workspace` (2026-02-17)
+  - Pass: `./scripts/ci_matrix.sh` (2026-02-17)
+  - Unit tests added:
+    - `github_copilot_provider_has_default_base_url`
+    - `github_copilot_headers_include_required_defaults`
+    - `github_copilot_enterprise_uses_same_defaults`
+  - Pass: live GitHub Copilot device auth succeeded and stored token (2026-02-18)
+  - Pass (provider quota): live LLM run reached Copilot API and returned `429 quota exceeded` (2026-02-18)
 
 
 ## Update Log
+- 2026-02-18:
+  - CLI binary/package rename:
+    - renamed package `rustcode-cli` -> `rustcode` (binary now `target/debug/rustcode`).
+    - updated scripts to build/run/copy `rustcode` (`scripts/benchmark.sh`, `scripts/serve_smoke.sh`, `scripts/build_release_bundle.sh`).
+    - updated docs to reference `rustcode` (`docs/QUICKSTART.md`, `docs/TUI_SMOKE_CHECKLIST.md`, `docs/RELEASE_PACKAGING_CHECKLIST.md`, `BENCHMARKS.md`).
+    - moved CLI sources from `crates/rustcode-cli/` to `crates/rustcode/` (directory name now matches binary/package).
+    - normalized `PLAN.md` validation commands to use `rustcode` consistently.
+  - Provider matrix validation fix:
+    - rewired `scripts/provider_matrix.sh` to use `rustcode --json models` diagnostics (no giant per-provider model lists).
+    - observed status totals on local models index: `needs_api_key=81`, `needs_base_url=10`, `error=0`.
+  - Re-validation:
+    - Pass: `cargo test --workspace` (2026-02-18)
+    - Pass: `./scripts/ci_matrix.sh` (2026-02-18)
+    - Pass: `./scripts/provider_matrix.sh` (2026-02-18)
+  - Config UX:
+    - added `RUSTCODE_ALLOW_NETWORK` env override to avoid requiring a config file edit for one-off live runs.
+  - Provider live-validation fixes:
+    - fixed Google Gemini tool schema mapping by stripping `additionalProperties` from function parameter schemas (Gemini rejects it).
+    - fixed GitHub Copilot chat endpoint to use `/chat/completions` (not `/v1/chat/completions`) and updated diagnostics accordingly.
+    - Copilot default `User-Agent` header now uses `rustcode/<version>`.
+  - CLI UX:
+    - `rustcode version` no longer loads config or initializes an LLM provider (works even inside untrusted projects).
+    - non-LLM commands (`list`, `read`, `write`, `edit`, `exec`, `tui`) no longer initialize an LLM provider at startup.
+    - added integration coverage for both behaviors (`version_does_not_require_trusted_project_config_or_llm_init`, `list_does_not_require_llm_provider_even_when_allow_network_true`).
+- 2026-02-18:
+  - Completed Milestone 55 GitHub Copilot Provider:
+    - added default base URL `https://api.githubcopilot.com` for `github-copilot` and `github-copilot-enterprise` providers.
+    - added required Copilot headers (`Openai-Intent: conversation-edits`, `x-initiator: user`, `User-Agent: rustcode/<version>`).
+    - updated `docs/CREDENTIAL_REQUIREMENTS.md` with Copilot base URL and header notes.
+    - added unit tests for Copilot provider resolution and header defaults.
+  - Bug fixes:
+    - fixed `read_http_request` in `rustcode-auth` to handle non-blocking sockets with deadline timeout.
+    - fixed `complete_gitlab_browser_oauth_flow` and `complete_openai_browser_oauth_flow` to use `http://` scheme for localhost/127.0.0.1 token endpoints.
+    - fixed MCP login output to not emit duplicate scopes line in JSON mode.
+  - CI hardening:
+    - updated `scripts/ci_matrix.sh` to use consistent 14MB RSS limit for both macOS and Linux.
+  - References:
+    - `opencode/packages/opencode/src/plugin/copilot.ts`
+    - `opencode/packages/opencode/src/provider/provider.ts`
 - 2026-02-17:
   - Docs:
     - updated `docs/QUICKSTART.md` with the new `agent` command and the OpenAI-compatible/tool-calling provider requirement.
@@ -1200,7 +1280,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - added integration coverage for discoverable server metadata.
   - Completed Milestone 41 layered MCP config integration:
     - added `[mcp.servers.<name>]` to layered TOML config via `rustcode-config`.
-    - updated `rustcode-cli` MCP commands to consume `ResolvedConfig.mcp_servers` (preferred) with JSON sidecar fallback.
+    - updated `rustcode` MCP commands to consume `ResolvedConfig.mcp_servers` (preferred) with JSON sidecar fallback.
     - added merge semantics so user/project layers override url/oauth fields without dropping prior settings.
     - added schema validation for MCP server fields.
     - added CLI integration test for project-config-backed MCP listing.
@@ -1243,11 +1323,11 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `https://developers.openai.com/codex/`
   - Validation passed:
     - `cargo fmt --all`
-    - `cargo test -p rustcode-auth -p rustcode-cli`
+    - `cargo test -p rustcode-auth -p rustcode`
     - `./scripts/ci_matrix.sh`
     - live probes:
-      - `cargo run -q -p rustcode-cli -- --json mcp login github --method oauth_browser --url https://accounts.google.com --client-id live-client --no-wait --oauth-port 19442`
-      - `cargo run -q -p rustcode-cli -- --json mcp login github --url https://accounts.google.com`
+      - `cargo run -q -p rustcode -- --json mcp login github --method oauth_browser --url https://accounts.google.com --client-id live-client --no-wait --oauth-port 19442`
+      - `cargo run -q -p rustcode -- --json mcp login github --url https://accounts.google.com`
   - Started Milestone 40 MCP OAuth callback + token exchange:
     - implementation target set for full MCP OAuth completion path (callback listener, token exchange, token persistence).
   - Milestone 40 start references (code + docs):
@@ -1276,11 +1356,11 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `https://developers.openai.com/codex/`
   - Validation passed:
     - `cargo fmt --all`
-    - `cargo test -p rustcode-cli`
+    - `cargo test -p rustcode`
     - `./scripts/ci_matrix.sh`
     - live probes:
-      - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode-cli -- --json mcp list`
-      - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode-cli -- --json mcp login readonly`
+      - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode -- --json mcp list`
+      - `RUSTCODE_MCP_SERVERS_PATH=<tmp> cargo run -q -p rustcode -- --json mcp login readonly`
   - Completed Milestone 38 MCP login JSON failure envelope:
     - added structured `stage=failed` payloads for `--json mcp login` errors.
     - added `error_kind` classification (`validation`/`provider`/`network`).
@@ -1293,10 +1373,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `https://developers.openai.com/codex/`
   - Validation passed:
     - `cargo fmt --all`
-    - `cargo test -p rustcode-cli`
+    - `cargo test -p rustcode`
     - `./scripts/ci_matrix.sh`
     - live probe:
-      - `cargo run -q -p rustcode-cli -- --json mcp login github`
+      - `cargo run -q -p rustcode -- --json mcp login github`
   - Completed Milestone 37 MCP OAuth discovery + staged login contract:
     - added discovery primitive (`discover_mcp_oauth`) in `rustcode-auth`.
     - extended `mcp login --url` to emit staged contract (`oauth_discovered`, `awaiting_token_import`).
@@ -1314,12 +1394,12 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `https://developers.openai.com/codex/`
   - Validation passed:
     - `cargo fmt --all`
-    - `cargo test -p rustcode-auth -p rustcode-cli`
+    - `cargo test -p rustcode-auth -p rustcode`
     - `./scripts/ci_matrix.sh`
     - live probes:
-      - `cargo run -q -p rustcode-cli -- --json mcp login google-oauth --url https://accounts.google.com --scopes openid,email`
-      - `cargo run -q -p rustcode-cli -- --json mcp login demo --url https://example.com/mcp`
-      - `cargo run -q -p rustcode-cli -- --json mcp login demo --from-env ... --url https://example.com/mcp`
+      - `cargo run -q -p rustcode -- --json mcp login google-oauth --url https://accounts.google.com --scopes openid,email`
+      - `cargo run -q -p rustcode -- --json mcp login demo --url https://example.com/mcp`
+      - `cargo run -q -p rustcode -- --json mcp login demo --from-env ... --url https://example.com/mcp`
   - Completed Milestone 36 MCP auth command surface v1:
     - added `mcp list/login/logout` command family with JSON output support.
     - implemented MCP credential lifecycle via auth-store namespace `mcp:<name>`.
@@ -1332,13 +1412,13 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `codex/codex-rs/cli/src/mcp_cmd.rs`
   - Validation passed:
     - `cargo fmt --all`
-    - `cargo test -p rustcode-cli`
+    - `cargo test -p rustcode`
     - `./scripts/ci_matrix.sh`
     - live probes:
-      - `cargo run -q -p rustcode-cli -- mcp login github --from-env ...`
-      - `cargo run -q -p rustcode-cli -- mcp list`
-      - `cargo run -q -p rustcode-cli -- --json mcp list`
-      - `cargo run -q -p rustcode-cli -- --json mcp logout github`
+      - `cargo run -q -p rustcode -- mcp login github --from-env ...`
+      - `cargo run -q -p rustcode -- mcp list`
+      - `cargo run -q -p rustcode -- --json mcp list`
+      - `cargo run -q -p rustcode -- --json mcp logout github`
   - Completed Milestone 35 auth login JSON failure envelope:
     - added structured `stage=failed` payloads for `--json auth login` errors.
     - added `error_kind` classification (`validation`/`provider`/`network`).
@@ -1349,10 +1429,10 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `codex/codex-rs/cli/src/login.rs`
   - Validation passed:
     - `cargo fmt --all`
-    - `cargo test -p rustcode-cli`
+    - `cargo test -p rustcode`
     - `./scripts/ci_matrix.sh`
     - live probe:
-      - `cargo run -q -p rustcode-cli -- --json auth login --from-env RUSTCODE_TEST_KEY`
+      - `cargo run -q -p rustcode -- --json auth login --from-env RUSTCODE_TEST_KEY`
   - Completed Milestone 34 auth login JSON stage contract:
     - added JSON stage envelopes for login challenge/wait/poll/authorized phases.
     - added providerless `--json auth login` discovery payload.
@@ -1366,12 +1446,12 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `codex/codex-rs/cli/src/login.rs`
   - Validation passed:
     - `cargo fmt --all`
-    - `cargo test -p rustcode-cli`
+    - `cargo test -p rustcode`
     - `./scripts/ci_matrix.sh`
     - live probes:
-      - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth login`
-      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth login openrouter --from-env ...`
-      - `cargo run -q -p rustcode-cli -- --json auth login openai --method oauth_browser --no-wait`
+      - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode -- --json auth login`
+      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode -- --json auth login openrouter --from-env ...`
+      - `cargo run -q -p rustcode -- --json auth login openai --method oauth_browser --no-wait`
   - Completed Milestone 33 auth mutation JSON contract:
     - added JSON envelopes for `auth set-key`, `auth set-oauth`, and `auth remove`.
     - preserved text output behavior for non-JSON mutation commands.
@@ -1384,12 +1464,12 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `codex/codex-rs/cli/src/login.rs`
   - Validation passed:
     - `cargo fmt --all`
-    - `cargo test -p rustcode-cli`
+    - `cargo test -p rustcode`
     - `./scripts/ci_matrix.sh`
     - live probes:
-      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth set-key openrouter --from-env ...`
-      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth set-oauth openai --access-env ...`
-      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth remove openrouter`
+      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode -- --json auth set-key openrouter --from-env ...`
+      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode -- --json auth set-oauth openai --access-env ...`
+      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode -- --json auth remove openrouter`
   - Completed Milestone 32 auth status/list JSON contract:
     - added `--json auth status <provider>` and `--json auth list` payloads.
     - preserved text output behavior for non-JSON invocations.
@@ -1401,11 +1481,11 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `codex/codex-rs/cli/src/login.rs`
   - Validation passed:
     - `cargo fmt --all`
-    - `cargo test -p rustcode-cli`
+    - `cargo test -p rustcode`
     - `./scripts/ci_matrix.sh`
     - live probes:
-      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth status openrouter`
-      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode-cli -- --json auth list`
+      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode -- --json auth status openrouter`
+      - `RUSTCODE_AUTH_FILE=<tmp> cargo run -q -p rustcode -- --json auth list`
   - Completed Milestone 31 auth-methods JSON contract:
     - added `--json auth methods <provider>` and `--json auth methods` machine-readable outputs.
     - kept text output behavior stable for existing scripts.
@@ -1418,11 +1498,11 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - `codex/codex-rs/cli/src/login.rs`
   - Validation passed:
     - `cargo fmt --all`
-    - `cargo test -p rustcode-cli`
+    - `cargo test -p rustcode`
     - `./scripts/ci_matrix.sh`
     - live probes:
-      - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth methods`
-      - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- --json auth methods openai`
+      - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode -- --json auth methods`
+      - `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode -- --json auth methods openai`
   - Completed Milestone 30 providerless auth-method discovery:
     - `auth methods` now supports providerless mode and lists provider/method rows.
     - preserved provider-specific output for `auth methods <provider>`.
@@ -1430,9 +1510,9 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - added integration test `auth_methods_without_provider_lists_available_rows`.
   - Validation passed:
     - `cargo fmt --all`
-    - `cargo test -p rustcode-cli`
+    - `cargo test -p rustcode`
     - `./scripts/ci_matrix.sh`
-    - live probe: `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode-cli -- auth methods`
+    - live probe: `RUSTCODE_MODELS_PATH=<fixture> cargo run -q -p rustcode -- auth methods`
   - Created initial execution plan from measured comparative audit.
   - Added Milestone 0 as completed (baseline research and architecture extraction).
   - Marked implementation milestones pending until coding kickoff.
@@ -1475,7 +1555,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
     - Added plugin lifecycle operations (`unregister`, `len`, `is_empty`).
     - Added plugin lifecycle tests in `rustcode-plugins`.
     - Added engine test validating plugin event-subscription hook execution.
-  - Added CLI integration harness (`crates/rustcode-cli/tests/integration_cli.rs`):
+  - Added CLI integration harness (`crates/rustcode/tests/integration_cli.rs`):
     - JSON stream envelope/`Completed` event assertion.
     - SIGINT cancellation behavior assertion for long-running command.
   - Validation pass: `cargo test --workspace` including integration tests.
