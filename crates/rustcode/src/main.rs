@@ -154,8 +154,27 @@ async fn main() -> Result<()> {
             // Non-interactive environments (tests, pipes) should not attempt to enter raw mode.
             return Ok(());
         }
+
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        let (defaults, initial_status) = match load_effective_config(&cli) {
+            Ok(config) => (
+                rustcode_tui::InteractiveDefaults {
+                    workspace_root: config.workspace_root.clone(),
+                    model: config.model.clone(),
+                },
+                None,
+            ),
+            Err(err) => (
+                rustcode_tui::InteractiveDefaults {
+                    workspace_root: cwd.clone(),
+                    model: "unknown".to_string(),
+                },
+                Some(format!("config not loaded: {err}")),
+            ),
+        };
+
         let store = SessionStore::open_default();
-        tokio::task::spawn_blocking(move || rustcode_tui::run_interactive(store))
+        tokio::task::spawn_blocking(move || rustcode_tui::run_interactive(store, defaults, initial_status))
             .await
             .context("tui join failed")?
             .context("tui failed")?;

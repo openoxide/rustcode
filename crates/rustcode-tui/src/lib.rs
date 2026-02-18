@@ -2,6 +2,9 @@ use thiserror::Error;
 use tokio::sync::mpsc;
 
 use rustcode_core::event::Event;
+use rustcode_state::SessionStore;
+
+use std::path::PathBuf;
 
 #[derive(Debug, Error)]
 pub enum TuiError {
@@ -15,7 +18,19 @@ pub enum TuiError {
 
 mod interactive;
 
-pub use interactive::run_interactive;
+#[derive(Debug, Clone)]
+pub struct InteractiveDefaults {
+    pub workspace_root: PathBuf,
+    pub model: String,
+}
+
+pub fn run_interactive(
+    store: SessionStore,
+    defaults: InteractiveDefaults,
+    initial_status: Option<String>,
+) -> Result<(), TuiError> {
+    interactive::run_interactive(store, defaults, initial_status)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiInput {

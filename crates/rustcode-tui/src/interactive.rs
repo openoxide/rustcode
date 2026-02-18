@@ -16,6 +16,7 @@ use ratatui::Terminal;
 use rustcode_core::session::{MessageRole, SessionInfo, StoredMessage};
 use rustcode_state::SessionStore;
 
+use crate::InteractiveDefaults;
 use crate::TuiError;
 
 enum Screen {
@@ -32,9 +33,14 @@ struct AppState {
     selected: usize,
     screen: Screen,
     status: Option<String>,
+    defaults: InteractiveDefaults,
 }
 
-pub fn run_interactive(store: SessionStore) -> Result<(), TuiError> {
+pub fn run_interactive(
+    store: SessionStore,
+    defaults: InteractiveDefaults,
+    initial_status: Option<String>,
+) -> Result<(), TuiError> {
     let mut stdout = io::stdout();
     enable_raw_mode().map_err(|err| TuiError::Io(err.to_string()))?;
     execute!(stdout, EnterAlternateScreen).map_err(|err| TuiError::Io(err.to_string()))?;
@@ -52,7 +58,8 @@ pub fn run_interactive(store: SessionStore) -> Result<(), TuiError> {
             .map_err(|err| TuiError::State(err.to_string()))?,
         selected: 0,
         screen: Screen::Sessions,
-        status: None,
+        status: initial_status,
+        defaults,
     };
 
     loop {
@@ -87,7 +94,13 @@ pub fn run_interactive(store: SessionStore) -> Result<(), TuiError> {
                                 }
                             };
 
-                            match store.create_session(None, None, &cwd, &cwd, "unknown") {
+                            match store.create_session(
+                                None,
+                                None,
+                                &cwd,
+                                state.defaults.workspace_root.as_path(),
+                                state.defaults.model.as_str(),
+                            ) {
                                 Ok(_session) => {
                                     state.sessions = store
                                         .list_sessions()
@@ -327,6 +340,10 @@ mod tests {
             selected: 0,
             screen: Screen::Sessions,
             status: None,
+            defaults: InteractiveDefaults {
+                workspace_root: std::path::PathBuf::from("/tmp"),
+                model: "null".to_string(),
+            },
         };
         terminal.draw(|frame| render(frame, &state)).expect("draw");
         let buf = terminal.backend().buffer();
