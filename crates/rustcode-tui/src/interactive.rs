@@ -646,6 +646,85 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
         return ChatNav::Stay;
     }
 
+    if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('n')) {
+        if chat.running.is_some() {
+            state.status = Some("cannot create session while running".to_string());
+            return ChatNav::Stay;
+        }
+        let cwd = match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(err) => {
+                state.status = Some(format!("failed to resolve cwd: {err}"));
+                return ChatNav::Stay;
+            }
+        };
+        match state.store.create_session(
+            None,
+            None,
+            &cwd,
+            state.defaults.workspace_root.as_path(),
+            state.defaults.model.as_str(),
+        ) {
+            Ok(session) => {
+                let messages = state
+                    .store
+                    .load_messages(&session.id)
+                    .map_err(|err| TuiError::State(err.to_string()))
+                    .unwrap_or_else(|err| {
+                        state.status = Some(err.to_string());
+                        Vec::new()
+                    });
+                chat.session = session;
+                chat.messages = messages;
+                chat.scroll = 0;
+                chat.composer.clear();
+                chat.focus = ChatFocus::Composer;
+                chat.activity.clear();
+                chat.activity_selected = 0;
+                chat.details_open = false;
+                chat.running = None;
+                state.status = None;
+            }
+            Err(err) => {
+                state.status = Some(format!("failed to create session: {err}"));
+            }
+        }
+        return ChatNav::Stay;
+    }
+
+    if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('f')) {
+        if chat.running.is_some() {
+            state.status = Some("cannot fork session while running".to_string());
+            return ChatNav::Stay;
+        }
+        match state.store.fork_session(&chat.session.id, None) {
+            Ok(forked) => {
+                let messages = state
+                    .store
+                    .load_messages(&forked.id)
+                    .map_err(|err| TuiError::State(err.to_string()))
+                    .unwrap_or_else(|err| {
+                        state.status = Some(err.to_string());
+                        Vec::new()
+                    });
+                chat.session = forked;
+                chat.messages = messages;
+                chat.scroll = 0;
+                chat.composer.clear();
+                chat.focus = ChatFocus::Composer;
+                chat.activity.clear();
+                chat.activity_selected = 0;
+                chat.details_open = false;
+                chat.running = None;
+                state.status = None;
+            }
+            Err(err) => {
+                state.status = Some(format!("failed to fork session: {err}"));
+            }
+        }
+        return ChatNav::Stay;
+    }
+
     if chat.details_open {
         match key.code {
             KeyCode::Esc | KeyCode::Enter => {
@@ -946,6 +1025,8 @@ fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState)
         Span::raw("Enter: submit/open  "),
         Span::raw("Up/Down: scroll/select  "),
         Span::raw("Ctrl+C: cancel  "),
+        Span::raw("Ctrl+N: new  "),
+        Span::raw("Ctrl+F: fork  "),
         Span::raw("r: refresh  "),
         Span::raw("Esc: clear/back  "),
         Span::raw("q: sessions"),
