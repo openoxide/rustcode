@@ -295,9 +295,12 @@ async fn main() -> Result<()> {
             }
         }
 
+        let backend: Arc<dyn rustcode_tui::SessionBackend> =
+            Arc::new(rustcode_tui::LocalSessionBackend::new(store.clone()));
+
         tokio::task::spawn_blocking(move || {
             let services = rustcode_tui::InteractiveServices {
-                store,
+                backend,
                 defaults,
                 initial_status,
                 start,

@@ -12,7 +12,10 @@ use rustcode_core::error::{ExecutionError, PublishError};
 use rustcode_core::ports::{CommandExecutor, EventPublisher, ToolApprover};
 use rustcode_core::tool_approval::ToolApprovalRequest;
 use rustcode_core::SessionInfo;
-use rustcode_state::SessionStore;
+
+mod backend;
+
+pub use backend::{CreateSessionOptions, LocalSessionBackend, SessionBackend};
 
 #[derive(Debug, Error)]
 pub enum TuiError {
@@ -111,7 +114,7 @@ impl ToolApprover for TuiToolApprover {
 }
 
 pub struct InteractiveServices {
-    pub store: SessionStore,
+    pub backend: Arc<dyn SessionBackend>,
     pub defaults: InteractiveDefaults,
     pub initial_status: Option<String>,
     pub start: InteractiveStart,

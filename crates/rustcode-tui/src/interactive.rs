@@ -22,11 +22,10 @@ use rustcode_core::event::EventPayload;
 use rustcode_core::ports::EventPublisher;
 use rustcode_core::{Command, CommandContext, ResolvedConfig, SessionInfo};
 use rustcode_core::{MessageRole, SessionMeta, StoredMessage, ToolApprovalRequest};
-use rustcode_state::SessionStore;
 
 use crate::{
-    InteractiveDefaults, InteractiveMsg, InteractiveServices, InteractiveStart, TuiError,
-    TuiPublisher,
+    CreateSessionOptions, InteractiveDefaults, InteractiveMsg, InteractiveServices,
+    InteractiveStart, TuiError, TuiPublisher,
 };
 
 enum Screen {
@@ -222,7 +221,7 @@ struct AppState {
 
     pending_approval: Option<PendingApproval>,
 
-    store: SessionStore,
+    backend: Arc<dyn crate::SessionBackend>,
     config: Option<Arc<ResolvedConfig>>,
     executor: Option<Arc<dyn rustcode_core::ports::CommandExecutor>>,
     runtime: tokio::runtime::Handle,
@@ -249,7 +248,7 @@ fn compute_sessions_view(sessions: &[SessionInfo], filter: &str) -> Vec<usize> {
 
 pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
     let InteractiveServices {
-        store,
+        backend: session_backend,
         defaults,
         initial_status,
         start,
@@ -264,15 +263,15 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
     execute!(stdout, EnterAlternateScreen).map_err(|err| TuiError::Io(err.to_string()))?;
     let _cleanup = TerminalCleanup;
 
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend).map_err(|err| TuiError::Io(err.to_string()))?;
+    let term_backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(term_backend).map_err(|err| TuiError::Io(err.to_string()))?;
     terminal
         .clear()
         .map_err(|err| TuiError::Io(err.to_string()))?;
 
-    let sessions = store
+    let sessions = session_backend
         .list_sessions()
-        .map_err(|err| TuiError::State(err.to_string()))?;
+        .map_err(TuiError::State)?;
     let sessions_view = compute_sessions_view(&sessions, "");
     let mut selected = 0usize;
     let mut screen = Screen::Sessions;
@@ -288,9 +287,9 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
             if let Some(idx) = sessions.iter().position(|candidate| candidate.id == session.id) {
                 selected = idx;
             }
-            let messages = store
+            let messages = session_backend
                 .load_messages(&session.id)
-                .map_err(|err| TuiError::State(err.to_string()))?;
+                .map_err(TuiError::State)?;
             let prompt_history = build_prompt_history(&messages);
             screen = Screen::Chat(ChatState {
                 session,
@@ -329,7 +328,7 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
         defaults,
 
         pending_approval: None,
-        store,
+        backend: session_backend,
         config,
         executor,
         runtime,
@@ -458,7 +457,7 @@ fn drain_messages(state: &mut AppState) {
                     }
 
                     if refresh {
-                        match state.store.load_messages(&chat.session.id) {
+                        match state.backend.load_messages(&chat.session.id) {
                             Ok(messages) => chat.messages = messages,
                             Err(err) => {
                                 state.status = Some(format!("failed to load transcript: {err}"));
@@ -481,7 +480,7 @@ fn drain_messages(state: &mut AppState) {
                     } else {
                         state.status = message;
                     }
-                    match state.store.load_messages(&chat.session.id) {
+                    match state.backend.load_messages(&chat.session.id) {
                         Ok(messages) => chat.messages = messages,
                         Err(err) => {
                             state.status = Some(format!("failed to load transcript: {err}"));
@@ -567,14 +566,10 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                     .and_then(|idx| state.sessions.get(*idx))
                     .cloned()
                 {
-                    let messages = state
-                        .store
-                        .load_messages(&session.id)
-                        .map_err(|err| TuiError::State(err.to_string()))
-                        .unwrap_or_else(|err| {
-                            state.status = Some(err.to_string());
-                            Vec::new()
-                        });
+                    let messages = state.backend.load_messages(&session.id).unwrap_or_else(|err| {
+                        state.status = Some(err);
+                        Vec::new()
+                    });
                     let prompt_history = build_prompt_history(&messages);
                     state.screen = Screen::Chat(ChatState {
                         session,
@@ -637,14 +632,10 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
         }
         KeyCode::Char('r') => {
             state.status = None;
-            state.sessions = state
-                .store
-                .list_sessions()
-                .map_err(|err| TuiError::State(err.to_string()))
-                .unwrap_or_else(|err| {
-                    state.status = Some(err.to_string());
-                    Vec::new()
-                });
+            state.sessions = state.backend.list_sessions().unwrap_or_else(|err| {
+                state.status = Some(err);
+                Vec::new()
+            });
             state.sessions_view = compute_sessions_view(&state.sessions, &state.sessions_filter);
             state.selected = state.selected.min(state.sessions_view.len().saturating_sub(1));
         }
@@ -659,33 +650,25 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                     return false;
                 }
             };
-            match state.store.create_session(
-                None,
-                None,
-                &cwd,
-                state.defaults.workspace_root.as_path(),
-                state.defaults.model.as_str(),
-            ) {
+            match state.backend.create_session(CreateSessionOptions {
+                title: None,
+                parent_id: None,
+                cwd,
+                workspace_root: state.defaults.workspace_root.clone(),
+                model: state.defaults.model.clone(),
+            }) {
                 Ok(session) => {
-                    state.sessions = state
-                        .store
-                        .list_sessions()
-                        .map_err(|err| TuiError::State(err.to_string()))
-                        .unwrap_or_else(|err| {
-                            state.status = Some(err.to_string());
-                            Vec::new()
-                        });
+                    state.sessions = state.backend.list_sessions().unwrap_or_else(|err| {
+                        state.status = Some(err);
+                        Vec::new()
+                    });
                     state.sessions_view = compute_sessions_view(&state.sessions, &state.sessions_filter);
                     state.selected = 0;
 
-                    let messages = state
-                        .store
-                        .load_messages(&session.id)
-                        .map_err(|err| TuiError::State(err.to_string()))
-                        .unwrap_or_else(|err| {
-                            state.status = Some(err.to_string());
-                            Vec::new()
-                        });
+                    let messages = state.backend.load_messages(&session.id).unwrap_or_else(|err| {
+                        state.status = Some(err);
+                        Vec::new()
+                    });
                     let prompt_history = build_prompt_history(&messages);
                     state.screen = Screen::Chat(ChatState {
                         session,
@@ -720,27 +703,19 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
             else {
                 return false;
             };
-            match state.store.fork_session(&session.id, None) {
+            match state.backend.fork_session(&session.id, None) {
                 Ok(forked) => {
-                    state.sessions = state
-                        .store
-                        .list_sessions()
-                        .map_err(|err| TuiError::State(err.to_string()))
-                        .unwrap_or_else(|err| {
-                            state.status = Some(err.to_string());
-                            Vec::new()
-                        });
+                    state.sessions = state.backend.list_sessions().unwrap_or_else(|err| {
+                        state.status = Some(err);
+                        Vec::new()
+                    });
                     state.sessions_view = compute_sessions_view(&state.sessions, &state.sessions_filter);
                     state.selected = 0;
 
-                    let messages = state
-                        .store
-                        .load_messages(&forked.id)
-                        .map_err(|err| TuiError::State(err.to_string()))
-                        .unwrap_or_else(|err| {
-                            state.status = Some(err.to_string());
-                            Vec::new()
-                        });
+                    let messages = state.backend.load_messages(&forked.id).unwrap_or_else(|err| {
+                        state.status = Some(err);
+                        Vec::new()
+                    });
                     let prompt_history = build_prompt_history(&messages);
                     state.screen = Screen::Chat(ChatState {
                         session: forked,
@@ -774,14 +749,10 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
             else {
                 return false;
             };
-            let messages = state
-                .store
-                .load_messages(&session.id)
-                .map_err(|err| TuiError::State(err.to_string()))
-                .unwrap_or_else(|err| {
-                    state.status = Some(err.to_string());
-                    Vec::new()
-                });
+            let messages = state.backend.load_messages(&session.id).unwrap_or_else(|err| {
+                state.status = Some(err);
+                Vec::new()
+            });
             let prompt_history = build_prompt_history(&messages);
             state.screen = Screen::Chat(ChatState {
                 session,
@@ -828,22 +799,18 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
                 return ChatNav::Stay;
             }
         };
-        match state.store.create_session(
-            None,
-            None,
-            &cwd,
-            state.defaults.workspace_root.as_path(),
-            state.defaults.model.as_str(),
-        ) {
+        match state.backend.create_session(CreateSessionOptions {
+            title: None,
+            parent_id: None,
+            cwd,
+            workspace_root: state.defaults.workspace_root.clone(),
+            model: state.defaults.model.clone(),
+        }) {
             Ok(session) => {
-                let messages = state
-                    .store
-                    .load_messages(&session.id)
-                    .map_err(|err| TuiError::State(err.to_string()))
-                    .unwrap_or_else(|err| {
-                        state.status = Some(err.to_string());
-                        Vec::new()
-                    });
+                let messages = state.backend.load_messages(&session.id).unwrap_or_else(|err| {
+                    state.status = Some(err);
+                    Vec::new()
+                });
                 chat.session = session;
                 chat.messages = messages;
                 chat.scroll = 0;
@@ -872,16 +839,12 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
             state.status = Some("cannot fork session while running".to_string());
             return ChatNav::Stay;
         }
-        match state.store.fork_session(&chat.session.id, None) {
+        match state.backend.fork_session(&chat.session.id, None) {
             Ok(forked) => {
-                let messages = state
-                    .store
-                    .load_messages(&forked.id)
-                    .map_err(|err| TuiError::State(err.to_string()))
-                    .unwrap_or_else(|err| {
-                        state.status = Some(err.to_string());
-                        Vec::new()
-                    });
+                let messages = state.backend.load_messages(&forked.id).unwrap_or_else(|err| {
+                    state.status = Some(err);
+                    Vec::new()
+                });
                 chat.session = forked;
                 chat.messages = messages;
                 chat.scroll = 0;
@@ -1014,7 +977,7 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
 }
 
 fn refresh_chat_messages(state: &mut AppState, chat: &mut ChatState) {
-    match state.store.load_messages(&chat.session.id) {
+    match state.backend.load_messages(&chat.session.id) {
         Ok(messages) => chat.messages = messages,
         Err(err) => state.status = Some(format!("failed to load transcript: {err}")),
     }
@@ -1030,7 +993,7 @@ fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: String) {
         return;
     };
 
-    let history = match state.store.load_messages(&chat.session.id) {
+    let history = match state.backend.load_messages(&chat.session.id) {
         Ok(history) => history,
         Err(err) => {
             state.status = Some(format!("failed to load history: {err}"));
@@ -1586,10 +1549,15 @@ impl Drop for TerminalCleanup {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::Terminal;
     use serde_json::Value;
+    use rustcode_state::SessionStore;
+
+    use crate::LocalSessionBackend;
 
     use super::*;
 
@@ -1631,7 +1599,9 @@ mod tests {
             },
 
             pending_approval: None,
-            store: SessionStore::with_root(std::path::PathBuf::from("/tmp")),
+            backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
+                std::path::PathBuf::from("/tmp"),
+            ))),
             config: None,
             executor: None,
             runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
@@ -1717,7 +1687,9 @@ mod tests {
             },
 
             pending_approval: None,
-            store: SessionStore::with_root(std::path::PathBuf::from("/tmp")),
+            backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
+                std::path::PathBuf::from("/tmp"),
+            ))),
             config: None,
             executor: None,
             runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
@@ -1781,7 +1753,9 @@ mod tests {
                 },
                 reply: reply_tx,
             }),
-            store: SessionStore::with_root(std::path::PathBuf::from("/tmp")),
+            backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
+                std::path::PathBuf::from("/tmp"),
+            ))),
             config: None,
             executor: None,
             runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
@@ -1846,7 +1820,9 @@ mod tests {
             },
 
             pending_approval: None,
-            store: SessionStore::with_root(std::path::PathBuf::from("/tmp")),
+            backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
+                std::path::PathBuf::from("/tmp"),
+            ))),
             config: None,
             executor: None,
             runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
