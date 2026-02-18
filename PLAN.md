@@ -1203,7 +1203,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
 
 
 56. Session Store + Resume/Fork (Opencode Parity Baseline)
-- Status: pending
+- Status: completed
 - Scope:
   - Add durable local sessions (threads) with:
     - create
