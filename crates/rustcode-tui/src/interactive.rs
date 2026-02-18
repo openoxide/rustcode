@@ -183,7 +183,10 @@ struct ChatState {
 
 struct AppState {
     sessions: Vec<SessionInfo>,
+    sessions_view: Vec<usize>,
     selected: usize,
+    sessions_filter: String,
+    sessions_filter_active: bool,
     screen: Screen,
     status: Option<String>,
     defaults: InteractiveDefaults,
@@ -197,6 +200,22 @@ struct AppState {
     tx: tokio::sync::mpsc::UnboundedSender<InteractiveMsg>,
     rx: tokio::sync::mpsc::UnboundedReceiver<InteractiveMsg>,
     request_seq: u64,
+}
+
+fn compute_sessions_view(sessions: &[SessionInfo], filter: &str) -> Vec<usize> {
+    if filter.trim().is_empty() {
+        return (0..sessions.len()).collect();
+    }
+    let needle = filter.to_ascii_lowercase();
+    let mut out = Vec::new();
+    for (idx, session) in sessions.iter().enumerate() {
+        let title = session.title.as_deref().unwrap_or("");
+        let haystack = format!("{}\t{}", session.id, title).to_ascii_lowercase();
+        if haystack.contains(&needle) {
+            out.push(idx);
+        }
+    }
+    out
 }
 
 pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
@@ -225,6 +244,7 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
     let sessions = store
         .list_sessions()
         .map_err(|err| TuiError::State(err.to_string()))?;
+    let sessions_view = compute_sessions_view(&sessions, "");
     let mut selected = 0usize;
     let mut screen = Screen::Sessions;
     let mut auto_submit = None;
@@ -265,7 +285,10 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
 
     let mut state = AppState {
         sessions,
+        sessions_view,
         selected,
+        sessions_filter: String::new(),
+        sessions_filter_active: false,
         screen,
         status: initial_status,
         defaults,
@@ -471,11 +494,85 @@ fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
 }
 
 fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
+    if state.sessions_filter_active {
+        match key.code {
+            KeyCode::Char('q') => return true,
+            KeyCode::Esc => {
+                if state.sessions_filter.is_empty() {
+                    state.sessions_filter_active = false;
+                } else {
+                    state.sessions_filter.clear();
+                    state.sessions_view = compute_sessions_view(&state.sessions, &state.sessions_filter);
+                    state.selected = 0;
+                }
+            }
+            KeyCode::Backspace => {
+                state.sessions_filter.pop();
+                state.sessions_view = compute_sessions_view(&state.sessions, &state.sessions_filter);
+                state.selected = state.selected.min(state.sessions_view.len().saturating_sub(1));
+            }
+            KeyCode::Enter => {
+                if let Some(session) = state
+                    .sessions_view
+                    .get(state.selected)
+                    .and_then(|idx| state.sessions.get(*idx))
+                    .cloned()
+                {
+                    let messages = state
+                        .store
+                        .load_messages(&session.id)
+                        .map_err(|err| TuiError::State(err.to_string()))
+                        .unwrap_or_else(|err| {
+                            state.status = Some(err.to_string());
+                            Vec::new()
+                        });
+                    state.screen = Screen::Chat(ChatState {
+                        session,
+                        messages,
+                        scroll: 0,
+                        composer: String::new(),
+                        focus: ChatFocus::Composer,
+                        activity: Vec::new(),
+                        activity_selected: 0,
+                        details_open: false,
+                        running: None,
+                    });
+                }
+                state.sessions_filter_active = false;
+            }
+            KeyCode::Down => {
+                if !state.sessions_view.is_empty() {
+                    state.selected =
+                        (state.selected + 1).min(state.sessions_view.len().saturating_sub(1));
+                }
+            }
+            KeyCode::Up => {
+                state.selected = state.selected.saturating_sub(1);
+            }
+            KeyCode::Char(ch) => {
+                if !key.modifiers.contains(KeyModifiers::CONTROL)
+                    && !key.modifiers.contains(KeyModifiers::ALT)
+                {
+                    state.sessions_filter.push(ch);
+                    state.sessions_view =
+                        compute_sessions_view(&state.sessions, &state.sessions_filter);
+                    state.selected = 0;
+                }
+            }
+            _ => {}
+        }
+        return false;
+    }
+
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => return true,
+        KeyCode::Char('/') => {
+            state.sessions_filter_active = true;
+        }
         KeyCode::Down => {
-            if !state.sessions.is_empty() {
-                state.selected = (state.selected + 1).min(state.sessions.len().saturating_sub(1));
+            if !state.sessions_view.is_empty() {
+                state.selected =
+                    (state.selected + 1).min(state.sessions_view.len().saturating_sub(1));
             }
         }
         KeyCode::Up => {
@@ -493,10 +590,13 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                     state.status = Some(err.to_string());
                     Vec::new()
                 });
-            state.selected = state.selected.min(state.sessions.len().saturating_sub(1));
+            state.sessions_view = compute_sessions_view(&state.sessions, &state.sessions_filter);
+            state.selected = state.selected.min(state.sessions_view.len().saturating_sub(1));
         }
         KeyCode::Char('n') => {
             state.status = None;
+            state.sessions_filter.clear();
+            state.sessions_filter_active = false;
             let cwd = match std::env::current_dir() {
                 Ok(cwd) => cwd,
                 Err(err) => {
@@ -520,15 +620,8 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                             state.status = Some(err.to_string());
                             Vec::new()
                         });
-                    if let Some(idx) = state
-                        .sessions
-                        .iter()
-                        .position(|candidate| candidate.id == session.id)
-                    {
-                        state.selected = idx;
-                    } else {
-                        state.selected = 0;
-                    }
+                    state.sessions_view = compute_sessions_view(&state.sessions, &state.sessions_filter);
+                    state.selected = 0;
 
                     let messages = state
                         .store
@@ -557,7 +650,13 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
         }
         KeyCode::Char('f') => {
             state.status = None;
-            let Some(session) = state.sessions.get(state.selected) else {
+            state.sessions_filter.clear();
+            state.sessions_filter_active = false;
+            let Some(session) = state
+                .sessions_view
+                .get(state.selected)
+                .and_then(|idx| state.sessions.get(*idx))
+            else {
                 return false;
             };
             match state.store.fork_session(&session.id, None) {
@@ -570,15 +669,8 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                             state.status = Some(err.to_string());
                             Vec::new()
                         });
-                    if let Some(idx) = state
-                        .sessions
-                        .iter()
-                        .position(|candidate| candidate.id == forked.id)
-                    {
-                        state.selected = idx;
-                    } else {
-                        state.selected = 0;
-                    }
+                    state.sessions_view = compute_sessions_view(&state.sessions, &state.sessions_filter);
+                    state.selected = 0;
 
                     let messages = state
                         .store
@@ -607,7 +699,12 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
         }
         KeyCode::Enter => {
             state.status = None;
-            let Some(session) = state.sessions.get(state.selected).cloned() else {
+            let Some(session) = state
+                .sessions_view
+                .get(state.selected)
+                .and_then(|idx| state.sessions.get(*idx))
+                .cloned()
+            else {
                 return false;
             };
             let messages = state
@@ -906,12 +1003,17 @@ fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) {
         .constraints([Constraint::Min(1), Constraint::Length(2)])
         .split(frame.area());
 
-    let items = if state.sessions.is_empty() {
-        vec![ListItem::new("(no sessions)")]
+    let items = if state.sessions_view.is_empty() {
+        if state.sessions_filter.trim().is_empty() {
+            vec![ListItem::new("(no sessions)")]
+        } else {
+            vec![ListItem::new("(no matches)")]
+        }
     } else {
         state
-            .sessions
+            .sessions_view
             .iter()
+            .filter_map(|idx| state.sessions.get(*idx))
             .map(|session| {
                 let title = session.title.as_deref().unwrap_or("-");
                 ListItem::new(format!("{}\t{}", session.id, title))
@@ -924,14 +1026,18 @@ fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) {
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
     let mut list_state = ratatui::widgets::ListState::default();
-    if !state.sessions.is_empty() {
-        list_state.select(Some(state.selected));
+    if !state.sessions_view.is_empty() {
+        let idx = state
+            .selected
+            .min(state.sessions_view.len().saturating_sub(1));
+        list_state.select(Some(idx));
     }
     frame.render_stateful_widget(list, chunks[0], &mut list_state);
 
     let help = Paragraph::new(Line::from(vec![
         Span::raw("Up/Down: select  "),
         Span::raw("Enter: open  "),
+        Span::raw("/: filter  "),
         Span::raw("n: new  "),
         Span::raw("f: fork  "),
         Span::raw("r: refresh  "),
@@ -940,6 +1046,11 @@ fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) {
         Span::styled(
             state.status.as_deref().unwrap_or(""),
             Style::default().fg(Color::Red),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("filter={}", if state.sessions_filter.is_empty() { "-" } else { &state.sessions_filter }),
+            Style::default().fg(Color::Gray),
         ),
     ]))
     .block(Block::default().borders(Borders::TOP));
@@ -1225,7 +1336,10 @@ mod tests {
                 workspace_root: "/tmp".to_string(),
                 model: "null".to_string(),
             }],
+            sessions_view: vec![0],
             selected: 0,
+            sessions_filter: String::new(),
+            sessions_filter_active: false,
             screen: Screen::Sessions,
             status: None,
             defaults: InteractiveDefaults {
