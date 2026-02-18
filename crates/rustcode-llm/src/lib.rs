@@ -375,6 +375,40 @@ pub fn diagnose_provider(
     })
 }
 
+pub fn builtin_provider_ids() -> &'static [&'static str] {
+    &[
+        "null",
+        "openai",
+        "openrouter",
+        "anthropic",
+        "google",
+        "vercel",
+        "github-copilot",
+        "github-copilot-enterprise",
+        "v0",
+        "ollama",
+        "groq",
+        "xai",
+        "mistral",
+        "togetherai",
+        "perplexity",
+        "deepinfra",
+        "cerebras",
+        "azure",
+        "azure-cognitive-services",
+        "cloudflare-workers-ai",
+        "cloudflare-ai-gateway",
+        "gitlab",
+        "opencode",
+        "amazon-bedrock",
+        "google-vertex",
+        "google-vertex-anthropic",
+        "sap-ai-core",
+        "zenmux",
+        "fetch",
+    ]
+}
+
 fn resolve_provider(config: &ResolvedConfig) -> Result<ResolvedProvider, LlmError> {
     let (model_provider, _model_id) = parse_model_prefix(&config.model).unwrap_or(("", ""));
     let provider_id: String =

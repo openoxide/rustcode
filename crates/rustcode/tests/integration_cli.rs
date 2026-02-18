@@ -1887,6 +1887,33 @@ fn models_json_summary_is_parseable() {
 }
 
 #[test]
+fn models_json_summary_falls_back_to_builtin_presets_when_models_index_missing() {
+    let missing_path = make_temp_file_path("models-json-summary-missing");
+    std::fs::write(&missing_path, "not-json").expect("must write broken models file");
+
+    let output = Command::new(rustcode_bin())
+        .args(["--json", "models"])
+        .env("RUSTCODE_MODELS_PATH", &missing_path)
+        .output()
+        .expect("must run rustcode models --json");
+    assert!(
+        output.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("stdout must be utf8");
+    let parsed: Value = serde_json::from_str(stdout.trim()).expect("stdout must be valid json");
+    assert_eq!(parsed["schema_version"].as_u64(), Some(1));
+    assert_eq!(
+        parsed["warning"].as_str(),
+        Some("models index unavailable; showing builtin presets only")
+    );
+    assert!(parsed["providers"].as_array().is_some());
+}
+
+#[test]
 fn models_json_provider_detail_includes_models_array() {
     let models_path = make_temp_file_path("models-json-provider");
     std::fs::write(

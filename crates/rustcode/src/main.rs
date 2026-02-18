@@ -28,7 +28,9 @@ use rustcode_core::event::EventPayload;
 use rustcode_core::ports::CommandExecutor;
 use rustcode_engine::{ChannelPublisher, Engine, WorkspacePermissionPolicy};
 use rustcode_io::LocalIo;
-use rustcode_llm::{build_client, diagnose_provider, ApiKeySource, ProviderProtocolName};
+use rustcode_llm::{
+    build_client, builtin_provider_ids, diagnose_provider, ApiKeySource, ProviderProtocolName,
+};
 use rustcode_plugins::PluginRegistry;
 use rustcode_tui::TuiApp;
 
@@ -1715,12 +1717,7 @@ fn handle_models_command(
 ) -> Result<()> {
     let index = match load_models_index() {
         Ok(index) => Some(index),
-        Err(err) => {
-            if provider_filter.is_none() {
-                return Err(err);
-            }
-            None
-        }
+        Err(_) => None,
     };
     let index_unavailable = index.is_none();
 
@@ -1862,6 +1859,23 @@ fn handle_models_command(
         .collect();
     providers.sort_by(|a, b| a.0.cmp(&b.0));
 
+    if providers.is_empty() && index_unavailable {
+        providers = builtin_provider_ids()
+            .iter()
+            .filter(|provider_id| config.provider_allowed(provider_id))
+            .map(|provider_id| {
+                (
+                    provider_id.to_string(),
+                    ModelsProvider {
+                        name: None,
+                        models: BTreeMap::new(),
+                    },
+                )
+            })
+            .collect();
+        providers.sort_by(|a, b| a.0.cmp(&b.0));
+    }
+
     if json_output {
         let mut rows = Vec::with_capacity(providers.len());
         for (provider_id, entry) in providers {
@@ -1883,6 +1897,7 @@ fn handle_models_command(
         }
         let payload = serde_json::json!({
             "schema_version": 1,
+            "warning": if index_unavailable { Some("models index unavailable; showing builtin presets only".to_string()) } else { None },
             "providers": rows,
         });
         if !write_stdout_line(
