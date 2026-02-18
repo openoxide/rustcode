@@ -149,7 +149,14 @@ async fn main() -> Result<()> {
         return handle_session_command(command.clone(), cli.json, &config);
     }
 
-    if matches!(&cli.command, TopCommand::Tui) {
+    if let TopCommand::Tui {
+        continue_session,
+        session,
+        fork,
+        title,
+        prompt,
+    } = &cli.command
+    {
         if !is_interactive_terminal() {
             // Non-interactive environments (tests, pipes) should not attempt to enter raw mode.
             return Ok(());
@@ -160,7 +167,7 @@ async fn main() -> Result<()> {
         let handles = rustcode_tui::InteractiveHandles::new();
 
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        let (defaults, initial_status, config, executor) = match load_effective_config(&cli) {
+        let (defaults, mut initial_status, config, executor) = match load_effective_config(&cli) {
             Ok(config) => {
                 let defaults = rustcode_tui::InteractiveDefaults {
                     workspace_root: config.workspace_root.clone(),
@@ -213,11 +220,87 @@ async fn main() -> Result<()> {
             ),
         };
 
+        if *fork && !*continue_session && session.is_none() {
+            initial_status = Some("--fork requires --continue or --session <SESSION_ID>".to_string());
+        }
+
+        let mut start = rustcode_tui::InteractiveStart::Sessions;
+        if !(*fork && !*continue_session && session.is_none())
+            && (*continue_session || session.is_some() || prompt.is_some())
+        {
+            let base: Result<rustcode_core::SessionInfo> = if *continue_session {
+                match store.list_sessions() {
+                    Ok(sessions) => sessions
+                        .into_iter()
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("no sessions exist to continue")),
+                    Err(err) => Err(anyhow::anyhow!("failed to list sessions: {err}")),
+                }
+            } else if let Some(session_id) = session.as_deref() {
+                store
+                    .get_session(session_id)
+                    .with_context(|| format!("failed to load session {session_id}"))
+            } else if let Some(prompt) = prompt.as_deref() {
+                if prompt.trim().is_empty() {
+                    Err(anyhow::anyhow!("--prompt must not be empty"))
+                } else if let Some(config) = config.as_deref() {
+                    match std::env::current_dir() {
+                        Ok(cwd) => store
+                            .create_session(
+                                title.clone(),
+                                None,
+                                &cwd,
+                                &config.workspace_root,
+                                &config.model,
+                            )
+                            .map_err(|err| anyhow::anyhow!("failed to create session: {err}")),
+                        Err(err) => Err(anyhow::anyhow!("failed to resolve cwd: {err}")),
+                    }
+                } else {
+                    initial_status =
+                        Some("config not loaded; cannot create session for --prompt".to_string());
+                    Err(anyhow::anyhow!("config unavailable"))
+                }
+            } else {
+                Err(anyhow::anyhow!("no session selection provided"))
+            };
+
+            match base {
+                Ok(base) => {
+                    let chosen = if *fork {
+                        match store.fork_session(&base.id, title.clone()) {
+                            Ok(forked) => forked,
+                            Err(err) => {
+                                initial_status =
+                                    Some(format!("failed to fork session {}: {err}", base.id));
+                                base
+                            }
+                        }
+                    } else {
+                        base
+                    };
+
+                    let auto_submit = prompt.is_some() && config.is_some() && executor.is_some();
+                    start = rustcode_tui::InteractiveStart::Chat {
+                        session: chosen,
+                        prompt: prompt.clone(),
+                        auto_submit,
+                    };
+                }
+                Err(err) => {
+                    if initial_status.is_none() {
+                        initial_status = Some(err.to_string());
+                    }
+                }
+            }
+        }
+
         tokio::task::spawn_blocking(move || {
             let services = rustcode_tui::InteractiveServices {
                 store,
                 defaults,
                 initial_status,
+                start,
                 runtime,
                 handles,
                 config,
@@ -472,7 +555,7 @@ async fn main() -> Result<()> {
         TopCommand::Read { path } => rustcode_core::Command::Read { path },
         TopCommand::Write { path, contents } => rustcode_core::Command::Write { path, contents },
         TopCommand::Edit { path, from, to } => rustcode_core::Command::Edit { path, from, to },
-        TopCommand::Tui => rustcode_core::Command::Tui,
+        TopCommand::Tui { .. } => rustcode_core::Command::Tui,
         TopCommand::Serve { listen } => rustcode_core::Command::Serve { listen },
         TopCommand::Version => rustcode_core::Command::Version,
         TopCommand::Models { .. } => {

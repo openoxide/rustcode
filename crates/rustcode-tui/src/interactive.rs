@@ -24,7 +24,10 @@ use rustcode_core::{Command, CommandContext, ResolvedConfig, SessionInfo};
 use rustcode_core::{MessageRole, SessionMeta, StoredMessage, ToolApprovalRequest};
 use rustcode_state::SessionStore;
 
-use crate::{InteractiveDefaults, InteractiveMsg, InteractiveServices, TuiError, TuiPublisher};
+use crate::{
+    InteractiveDefaults, InteractiveMsg, InteractiveServices, InteractiveStart, TuiError,
+    TuiPublisher,
+};
 
 enum Screen {
     Sessions,
@@ -68,6 +71,17 @@ struct AppState {
 }
 
 pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
+    let InteractiveServices {
+        store,
+        defaults,
+        initial_status,
+        start,
+        runtime,
+        handles,
+        config,
+        executor,
+    } = services;
+
     let mut stdout = io::stdout();
     enable_raw_mode().map_err(|err| TuiError::Io(err.to_string()))?;
     execute!(stdout, EnterAlternateScreen).map_err(|err| TuiError::Io(err.to_string()))?;
@@ -79,25 +93,66 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
         .clear()
         .map_err(|err| TuiError::Io(err.to_string()))?;
 
+    let sessions = store
+        .list_sessions()
+        .map_err(|err| TuiError::State(err.to_string()))?;
+    let mut selected = 0usize;
+    let mut screen = Screen::Sessions;
+    let mut auto_submit = None;
+
+    match start {
+        InteractiveStart::Sessions => {}
+        InteractiveStart::Chat {
+            session,
+            prompt,
+            auto_submit: should_submit,
+        } => {
+            if let Some(idx) = sessions.iter().position(|candidate| candidate.id == session.id) {
+                selected = idx;
+            }
+            let messages = store
+                .load_messages(&session.id)
+                .map_err(|err| TuiError::State(err.to_string()))?;
+            screen = Screen::Chat(ChatState {
+                session,
+                messages,
+                scroll: 0,
+                composer: if should_submit {
+                    String::new()
+                } else {
+                    prompt.clone().unwrap_or_default()
+                },
+                activity: Vec::new(),
+                running: None,
+            });
+            if should_submit {
+                auto_submit = prompt;
+            }
+        }
+    }
+
     let mut state = AppState {
-        sessions: services
-            .store
-            .list_sessions()
-            .map_err(|err| TuiError::State(err.to_string()))?,
-        selected: 0,
-        screen: Screen::Sessions,
-        status: services.initial_status,
-        defaults: services.defaults,
+        sessions,
+        selected,
+        screen,
+        status: initial_status,
+        defaults,
 
         pending_approval: None,
-        store: services.store,
-        config: services.config,
-        executor: services.executor,
-        runtime: services.runtime,
-        tx: services.handles.tx,
-        rx: services.handles.rx,
+        store,
+        config,
+        executor,
+        runtime,
+        tx: handles.tx,
+        rx: handles.rx,
         request_seq: 0,
     };
+
+    if let Some(prompt) = auto_submit {
+        if !prompt.trim().is_empty() {
+            start_auto_submit(&mut state, prompt);
+        }
+    }
 
     loop {
         drain_messages(&mut state);
@@ -117,6 +172,14 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
             }
         }
     }
+}
+
+fn start_auto_submit(state: &mut AppState, prompt: String) {
+    let Screen::Chat(mut chat) = std::mem::replace(&mut state.screen, Screen::Sessions) else {
+        return;
+    };
+    submit_prompt(state, &mut chat, prompt);
+    state.screen = Screen::Chat(chat);
 }
 
 fn drain_messages(state: &mut AppState) {

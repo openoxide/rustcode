@@ -11,6 +11,7 @@ use rustcode_core::event::Event;
 use rustcode_core::error::{ExecutionError, PublishError};
 use rustcode_core::ports::{CommandExecutor, EventPublisher, ToolApprover};
 use rustcode_core::tool_approval::ToolApprovalRequest;
+use rustcode_core::SessionInfo;
 use rustcode_state::SessionStore;
 
 #[derive(Debug, Error)]
@@ -29,6 +30,16 @@ mod interactive;
 pub struct InteractiveDefaults {
     pub workspace_root: PathBuf,
     pub model: String,
+}
+
+#[derive(Debug, Clone)]
+pub enum InteractiveStart {
+    Sessions,
+    Chat {
+        session: SessionInfo,
+        prompt: Option<String>,
+        auto_submit: bool,
+    },
 }
 
 #[derive(Debug)]
@@ -103,6 +114,7 @@ pub struct InteractiveServices {
     pub store: SessionStore,
     pub defaults: InteractiveDefaults,
     pub initial_status: Option<String>,
+    pub start: InteractiveStart,
     pub runtime: Handle,
     pub handles: InteractiveHandles,
 

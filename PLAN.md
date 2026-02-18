@@ -1323,6 +1323,7 @@ Source audit: `rustcode/ARCHITECTURE_AUDIT.md`
   - Added initial ratatui/crossterm interactive TUI skeleton with session list + transcript viewer
   - Added basic session actions: new (`n`) and fork (`f`)
   - Added local agent runner inside TUI (prompt composer + activity pane) with tool approval modal
+  - Added `rustcode tui` start flags (`--continue`, `--session`, `--fork`, `--prompt`) to jump into a session and optionally auto-submit
   - `rustcode tui` now launches interactive UI only when running in a real terminal (no-op when piped)
 
 62. Export/Import/Share

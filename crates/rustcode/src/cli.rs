@@ -138,7 +138,22 @@ pub enum TopCommand {
         from: String,
         to: String,
     },
-    Tui,
+    Tui {
+        #[arg(long = "continue", default_value_t = false, conflicts_with = "session")]
+        continue_session: bool,
+
+        #[arg(long, value_name = "SESSION_ID")]
+        session: Option<String>,
+
+        #[arg(long, default_value_t = false)]
+        fork: bool,
+
+        #[arg(long)]
+        title: Option<String>,
+
+        #[arg(long)]
+        prompt: Option<String>,
+    },
     Serve {
         #[arg(long, default_value = "127.0.0.1:4317")]
         listen: String,
