@@ -569,7 +569,12 @@ When you are done, respond with a final plain-text answer."
 
         if is_mutating_tool(name) {
             let (permission, pattern, reason) = approval_fields(name, &args);
-            let decision = resolve_permission_action(&context.config.permission_rules, &permission, &pattern)?;
+            let match_targets = approval_match_targets(name, &args);
+            let decision = resolve_permission_action(
+                &context.config.permission_rules,
+                &permission,
+                &match_targets,
+            )?;
 
             match decision {
                 Some(PermissionAction::Deny) => {
@@ -1516,9 +1521,13 @@ fn truncate_utf8_bytes(input: &str, max_bytes: usize) -> String {
 fn resolve_permission_action(
     rules: &[rustcode_core::PermissionRule],
     permission: &str,
-    target: &str,
+    targets: &[String],
 ) -> Result<Option<PermissionAction>, ExecutionError> {
-    let normalized_target = target.replace('\\', "/");
+    let normalized_targets = targets
+        .iter()
+        .map(|target| target.replace('\\', "/"))
+        .collect::<Vec<_>>();
+
     for rule in rules.iter().rev() {
         if !rule.permission.eq_ignore_ascii_case(permission) {
             continue;
@@ -1531,10 +1540,15 @@ fn resolve_permission_action(
                 ))
             })?
             .compile_matcher();
-        if matcher.is_match(&normalized_target) {
+
+        if normalized_targets
+            .iter()
+            .any(|target| !target.is_empty() && matcher.is_match(target))
+        {
             return Ok(Some(rule.action));
         }
     }
+
     Ok(None)
 }
 
@@ -1604,9 +1618,16 @@ fn approval_fields(tool: &str, args: &Value) -> (String, String, String) {
                 .get("command")
                 .and_then(Value::as_str)
                 .unwrap_or("<unknown>");
+            let mut rendered = command.to_string();
+            if let Some(items) = args.get("args").and_then(Value::as_array) {
+                for item in items.iter().filter_map(Value::as_str) {
+                    rendered.push(' ');
+                    rendered.push_str(item);
+                }
+            }
             (
-                command.to_string(),
-                format!("agent requests permission to execute {command}"),
+                rendered.clone(),
+                format!("agent requests permission to execute {rendered}"),
             )
         }
         _ => (
@@ -1616,6 +1637,44 @@ fn approval_fields(tool: &str, args: &Value) -> (String, String, String) {
     };
 
     (permission, pattern, reason)
+}
+
+fn approval_match_targets(tool: &str, args: &Value) -> Vec<String> {
+    match tool {
+        "exec" => {
+            let command = args
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let mut targets = Vec::new();
+            if !command.is_empty() {
+                targets.push(command.clone());
+            }
+            if let Some(items) = args.get("args").and_then(Value::as_array) {
+                let mut rendered = command.clone();
+                for item in items.iter().filter_map(Value::as_str) {
+                    if !rendered.is_empty() {
+                        rendered.push(' ');
+                    }
+                    rendered.push_str(item);
+                }
+                if !rendered.is_empty() && rendered != command {
+                    targets.push(rendered);
+                }
+            }
+            if targets.is_empty() {
+                targets.push(String::new());
+            }
+            targets
+        }
+        "write" | "edit" => vec![args
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()],
+        _ => vec!["*".to_string()],
+    }
 }
 
 #[cfg(test)]
@@ -2459,6 +2518,129 @@ mod tests {
             .await
             .expect("exec should be allowed");
         assert!(output.contains("exit_code=0"), "output={output}");
+    }
+
+    #[tokio::test]
+    async fn exec_permission_rule_can_match_full_command_line() {
+        let mut cfg = ResolvedConfig::default();
+        cfg.permission_rules = vec![rustcode_core::PermissionRule {
+            permission: "exec".to_string(),
+            action: PermissionAction::Allow,
+            pattern: "echo hi".to_string(),
+        }];
+        let context = CommandContext::new(
+            Arc::new(cfg),
+            SessionMeta {
+                session_id: "s-approve-exec-full-1".to_string(),
+                request_id: "r-approve-exec-full-1".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(StubProcess {
+                stdout: "hello".to_string(),
+                stderr: String::new(),
+                code: 0,
+            }),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+
+        let options = AgentOptions {
+            max_steps: 1,
+            max_tool_calls_per_step: 1,
+            allow_write: false,
+            allow_edit: false,
+            allow_exec: true,
+            max_read_bytes: 1024,
+            max_list_entries: 100,
+            max_tool_result_bytes: 4096,
+            max_write_bytes: 1024,
+        };
+        let mut state = AgentState::default();
+        let output = engine
+            .execute_agent_tool_call(
+                "exec",
+                r#"{"command":"echo","args":["hi"]}"#,
+                &context,
+                &options,
+                &mut state,
+            )
+            .await
+            .expect("exec should be allowed");
+        assert!(output.contains("exit_code=0"), "output={output}");
+    }
+
+    #[tokio::test]
+    async fn exec_permission_rule_precedence_prefers_last_match_across_targets() {
+        let mut cfg = ResolvedConfig::default();
+        cfg.permission_rules = vec![
+            rustcode_core::PermissionRule {
+                permission: "exec".to_string(),
+                action: PermissionAction::Allow,
+                pattern: "echo".to_string(),
+            },
+            rustcode_core::PermissionRule {
+                permission: "exec".to_string(),
+                action: PermissionAction::Deny,
+                pattern: "echo hi".to_string(),
+            },
+        ];
+        let context = CommandContext::new(
+            Arc::new(cfg),
+            SessionMeta {
+                session_id: "s-approve-exec-full-2".to_string(),
+                request_id: "r-approve-exec-full-2".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let approver = Arc::new(CountingApprover {
+            approved: true,
+            calls: AtomicUsize::new(0),
+        });
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(StubProcess {
+                stdout: "hello".to_string(),
+                stderr: String::new(),
+                code: 0,
+            }),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            Some(approver.clone()),
+        );
+
+        let options = AgentOptions {
+            max_steps: 1,
+            max_tool_calls_per_step: 1,
+            allow_write: false,
+            allow_edit: false,
+            allow_exec: true,
+            max_read_bytes: 1024,
+            max_list_entries: 100,
+            max_tool_result_bytes: 1024,
+            max_write_bytes: 1024,
+        };
+        let mut state = AgentState::default();
+        let result = engine
+            .execute_agent_tool_call(
+                "exec",
+                r#"{"command":"echo","args":["hi"]}"#,
+                &context,
+                &options,
+                &mut state,
+            )
+            .await;
+        assert!(matches!(result, Err(ExecutionError::Dispatch(_))));
+        assert_eq!(approver.calls.load(Ordering::Relaxed), 0);
     }
 
     #[tokio::test]
