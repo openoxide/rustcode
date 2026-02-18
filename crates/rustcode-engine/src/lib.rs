@@ -1678,7 +1678,7 @@ fn html_to_plainish_text(html: &str) -> String {
 }
 
 fn is_mutating_tool(name: &str) -> bool {
-    matches!(name, "write" | "edit" | "exec")
+    matches!(name, "write" | "edit" | "exec") || name.starts_with("mcp:")
 }
 
 fn is_parallel_safe_tool(name: &str) -> bool {
@@ -1686,7 +1686,11 @@ fn is_parallel_safe_tool(name: &str) -> bool {
 }
 
 fn approval_fields(tool: &str, args: &Value) -> (String, String, String) {
-    let permission = tool.to_string();
+    let permission = if tool.starts_with("mcp:") {
+        "mcp".to_string()
+    } else {
+        tool.to_string()
+    };
     let (pattern, reason) = match tool {
         "write" => {
             let path = args
@@ -1726,8 +1730,8 @@ fn approval_fields(tool: &str, args: &Value) -> (String, String, String) {
             )
         }
         _ => (
-            "*".to_string(),
-            "agent requests permission for tool execution".to_string(),
+            tool.to_string(),
+            format!("agent requests permission to call MCP tool {tool}"),
         ),
     };
 
@@ -1736,6 +1740,7 @@ fn approval_fields(tool: &str, args: &Value) -> (String, String, String) {
 
 fn approval_match_targets(tool: &str, args: &Value) -> Vec<String> {
     match tool {
+        _ if tool.starts_with("mcp:") => vec![tool.to_string()],
         "exec" => {
             let command = args
                 .get("command")
@@ -2614,6 +2619,51 @@ mod tests {
             .execute_agent_tool_call(
                 "exec",
                 r#"{"command":"echo","args":["hi"]}"#,
+                &context,
+                &options,
+                &mut state,
+            )
+            .await;
+        match result {
+            Err(ExecutionError::Dispatch(message)) => {
+                assert!(message.contains("approval required"), "message={message}");
+            }
+            other => panic!("expected dispatch error, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_tools_require_approval_when_no_allow_rule_and_no_approver() {
+        let cfg = ResolvedConfig::default();
+        let context = CommandContext::new(
+            Arc::new(cfg),
+            SessionMeta {
+                session_id: "s-approve-mcp-1".to_string(),
+                request_id: "r-approve-mcp-1".to_string(),
+                started_at: SystemTime::now(),
+            },
+        );
+
+        let engine = Engine::new(
+            Arc::new(NullLlmClient),
+            Arc::new(DummyFs),
+            Arc::new(StubProcess {
+                stdout: "ok".to_string(),
+                stderr: String::new(),
+                code: 0,
+            }),
+            Arc::new(WorkspacePermissionPolicy),
+            PluginRegistry::default(),
+            None,
+            None,
+        );
+
+        let options = AgentOptions::default();
+        let mut state = AgentState::default();
+        let result = engine
+            .execute_agent_tool_call(
+                "mcp:demo:tool",
+                r#"{}"#,
                 &context,
                 &options,
                 &mut state,
