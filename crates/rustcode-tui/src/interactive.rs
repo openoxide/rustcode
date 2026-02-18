@@ -43,12 +43,141 @@ struct RunningCommand {
     cancellation: CancellationToken,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChatFocus {
+    Composer,
+    Transcript,
+    Activity,
+}
+
+#[derive(Debug, Clone)]
+enum ActivityItem {
+    CommandAccepted { name: String },
+    ToolCall {
+        id: String,
+        name: String,
+        arguments: String,
+    },
+    ToolResult {
+        id: String,
+        name: String,
+        ok: bool,
+        output: String,
+    },
+    OutputChunk { text: String },
+    Warning { message: String },
+    Failure { message: String },
+    Completed,
+}
+
+impl ActivityItem {
+    fn title(&self) -> String {
+        match self {
+            ActivityItem::CommandAccepted { name } => format!("command: {name}"),
+            ActivityItem::ToolCall { name, .. } => format!("tool: {name}"),
+            ActivityItem::ToolResult { name, ok, .. } => format!("tool result: {name} ok={ok}"),
+            ActivityItem::OutputChunk { .. } => "assistant".to_string(),
+            ActivityItem::Warning { .. } => "warning".to_string(),
+            ActivityItem::Failure { .. } => "failure".to_string(),
+            ActivityItem::Completed => "completed".to_string(),
+        }
+    }
+
+    fn summary(&self) -> String {
+        let mut s = match self {
+            ActivityItem::CommandAccepted { name } => name.clone(),
+            ActivityItem::ToolCall { id, name, .. } => format!("{name} ({id})"),
+            ActivityItem::ToolResult { id, name, ok, .. } => format!("{name} ({id}) ok={ok}"),
+            ActivityItem::OutputChunk { text } => text.replace('\n', " "),
+            ActivityItem::Warning { message } => message.clone(),
+            ActivityItem::Failure { message } => message.clone(),
+            ActivityItem::Completed => "done".to_string(),
+        };
+        if s.len() > 140 {
+            s.truncate(140);
+            s.push_str("...");
+        }
+        s
+    }
+
+    fn details_lines(&self) -> Vec<Line<'static>> {
+        let mut out = Vec::new();
+        out.push(Line::from(vec![Span::styled(
+            self.title(),
+            Style::default().add_modifier(Modifier::BOLD),
+        )]));
+        out.push(Line::raw(""));
+        match self {
+            ActivityItem::CommandAccepted { name } => {
+                out.push(Line::raw(format!("name: {name}")));
+            }
+            ActivityItem::ToolCall {
+                id,
+                name,
+                arguments,
+            } => {
+                out.push(Line::raw(format!("id: {id}")));
+                out.push(Line::raw(format!("tool: {name}")));
+                out.push(Line::raw(""));
+                out.push(Line::raw("arguments:"));
+                let pretty = serde_json::from_str::<serde_json::Value>(arguments)
+                    .ok()
+                    .and_then(|value| serde_json::to_string_pretty(&value).ok())
+                    .unwrap_or_else(|| arguments.clone());
+                for line in pretty.lines().take(32) {
+                    out.push(Line::raw(line.to_string()));
+                }
+            }
+            ActivityItem::ToolResult {
+                id,
+                name,
+                ok,
+                output,
+            } => {
+                out.push(Line::raw(format!("id: {id}")));
+                out.push(Line::raw(format!("tool: {name}")));
+                out.push(Line::raw(format!("ok: {ok}")));
+                out.push(Line::raw(""));
+                out.push(Line::raw("output:"));
+                let pretty = serde_json::from_str::<serde_json::Value>(output)
+                    .ok()
+                    .and_then(|value| serde_json::to_string_pretty(&value).ok())
+                    .unwrap_or_else(|| output.clone());
+                for line in pretty.lines().take(48) {
+                    out.push(Line::raw(line.to_string()));
+                }
+            }
+            ActivityItem::OutputChunk { text } => {
+                for line in text.lines().take(64) {
+                    out.push(Line::raw(line.to_string()));
+                }
+            }
+            ActivityItem::Warning { message } => {
+                for line in message.lines().take(64) {
+                    out.push(Line::raw(line.to_string()));
+                }
+            }
+            ActivityItem::Failure { message } => {
+                for line in message.lines().take(64) {
+                    out.push(Line::raw(line.to_string()));
+                }
+            }
+            ActivityItem::Completed => {}
+        }
+
+        out
+    }
+}
+
 struct ChatState {
     session: SessionInfo,
     messages: Vec<StoredMessage>,
     scroll: u16,
     composer: String,
-    activity: Vec<String>,
+    focus: ChatFocus,
+    activity: Vec<ActivityItem>,
+    activity_selected: usize,
+    details_open: bool,
     running: Option<RunningCommand>,
 }
 
@@ -122,7 +251,10 @@ pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
                 } else {
                     prompt.clone().unwrap_or_default()
                 },
+                focus: ChatFocus::Composer,
                 activity: Vec::new(),
+                activity_selected: 0,
+                details_open: false,
                 running: None,
             });
             if should_submit {
@@ -195,42 +327,63 @@ fn drain_messages(state: &mut AppState) {
             InteractiveMsg::EngineEvent(event) => {
                 if let Screen::Chat(chat) = &mut screen {
                     let mut refresh = false;
-                    match &event.payload {
+                    let item = match &event.payload {
                         EventPayload::CommandAccepted { name } => {
-                            chat.activity.push(format!("command: {name}"));
+                            Some(ActivityItem::CommandAccepted { name: name.clone() })
                         }
-                        EventPayload::ToolCall { id, name, .. } => {
-                            chat.activity.push(format!("tool call: {name} ({id})"));
-                        }
-                        EventPayload::ToolResult { id, name, ok, .. } => {
-                            chat.activity
-                                .push(format!("tool result: {name} ({id}) ok={ok}"));
+                        EventPayload::ToolCall {
+                            id,
+                            name,
+                            arguments,
+                        } => Some(ActivityItem::ToolCall {
+                            id: id.clone(),
+                            name: name.clone(),
+                            arguments: arguments.clone(),
+                        }),
+                        EventPayload::ToolResult {
+                            id,
+                            name,
+                            ok,
+                            output,
+                        } => Some(ActivityItem::ToolResult {
+                            id: id.clone(),
+                            name: name.clone(),
+                            ok: *ok,
+                            output: output.clone(),
+                        }),
+                        EventPayload::OutputChunk { text } => {
+                            Some(ActivityItem::OutputChunk { text: text.clone() })
                         }
                         EventPayload::Warning { message } => {
-                            chat.activity.push(format!("warning: {message}"));
+                            Some(ActivityItem::Warning { message: message.clone() })
                         }
                         EventPayload::Failure { message } => {
-                            chat.activity.push(format!("failure: {message}"));
                             state.status = Some(message.clone());
                             refresh = true;
-                        }
-                        EventPayload::OutputChunk { text } => {
-                            let mut snippet = text.replace('\n', " ");
-                            snippet.truncate(120);
-                            if !snippet.is_empty() {
-                                chat.activity.push(format!("assistant: {snippet}"));
-                            }
+                            Some(ActivityItem::Failure {
+                                message: message.clone(),
+                            })
                         }
                         EventPayload::Completed => {
-                            chat.activity.push("completed".to_string());
                             chat.running = None;
                             refresh = true;
+                            Some(ActivityItem::Completed)
                         }
-                        EventPayload::ServeRequest { .. } => {}
+                        EventPayload::ServeRequest { .. } => None,
+                    };
+
+                    if let Some(item) = item {
+                        chat.activity.push(item);
                     }
 
                     while chat.activity.len() > 200 {
                         chat.activity.remove(0);
+                        if chat.activity_selected > 0 {
+                            chat.activity_selected -= 1;
+                        }
+                    }
+                    if chat.activity_selected >= chat.activity.len() {
+                        chat.activity_selected = chat.activity.len().saturating_sub(1);
                     }
 
                     if refresh {
@@ -390,7 +543,10 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         messages,
                         scroll: 0,
                         composer: String::new(),
+                        focus: ChatFocus::Composer,
                         activity: Vec::new(),
+                        activity_selected: 0,
+                        details_open: false,
                         running: None,
                     });
                 }
@@ -437,7 +593,10 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         messages,
                         scroll: 0,
                         composer: String::new(),
+                        focus: ChatFocus::Composer,
                         activity: Vec::new(),
+                        activity_selected: 0,
+                        details_open: false,
                         running: None,
                     });
                 }
@@ -464,7 +623,10 @@ fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 messages,
                 scroll: 0,
                 composer: String::new(),
+                focus: ChatFocus::Composer,
                 activity: Vec::new(),
+                activity_selected: 0,
+                details_open: false,
                 running: None,
             });
         }
@@ -477,12 +639,31 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
     if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
         if let Some(running) = &chat.running {
             running.cancellation.cancel();
-            chat.activity.push("cancel requested".to_string());
+            chat.activity.push(ActivityItem::Warning {
+                message: "cancel requested".to_string(),
+            });
+        }
+        return ChatNav::Stay;
+    }
+
+    if chat.details_open {
+        match key.code {
+            KeyCode::Esc | KeyCode::Enter => {
+                chat.details_open = false;
+            }
+            _ => {}
         }
         return ChatNav::Stay;
     }
 
     match key.code {
+        KeyCode::Tab => {
+            chat.focus = match chat.focus {
+                ChatFocus::Composer => ChatFocus::Transcript,
+                ChatFocus::Transcript => ChatFocus::Activity,
+                ChatFocus::Activity => ChatFocus::Composer,
+            };
+        }
         KeyCode::Esc => {
             if !chat.composer.is_empty() {
                 chat.composer.clear();
@@ -497,15 +678,35 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
             refresh_chat_messages(state, chat);
         }
         KeyCode::Down => {
-            chat.scroll = chat.scroll.saturating_add(1);
+            if chat.focus == ChatFocus::Activity {
+                if !chat.activity.is_empty() {
+                    chat.activity_selected =
+                        (chat.activity_selected + 1).min(chat.activity.len().saturating_sub(1));
+                }
+            } else {
+                chat.scroll = chat.scroll.saturating_add(1);
+            }
         }
         KeyCode::Up => {
-            chat.scroll = chat.scroll.saturating_sub(1);
+            if chat.focus == ChatFocus::Activity {
+                chat.activity_selected = chat.activity_selected.saturating_sub(1);
+            } else {
+                chat.scroll = chat.scroll.saturating_sub(1);
+            }
         }
         KeyCode::Backspace => {
-            chat.composer.pop();
+            if chat.focus == ChatFocus::Composer {
+                chat.composer.pop();
+            }
         }
         KeyCode::Enter => {
+            if chat.focus == ChatFocus::Activity {
+                if !chat.activity.is_empty() {
+                    chat.details_open = true;
+                }
+                return ChatNav::Stay;
+            }
+
             if chat.running.is_some() {
                 return ChatNav::Stay;
             }
@@ -520,7 +721,9 @@ fn handle_chat_key(state: &mut AppState, chat: &mut ChatState, key: KeyEvent) ->
             if !key.modifiers.contains(KeyModifiers::CONTROL)
                 && !key.modifiers.contains(KeyModifiers::ALT)
             {
-                chat.composer.push(ch);
+                if chat.focus == ChatFocus::Composer {
+                    chat.composer.push(ch);
+                }
             }
         }
         _ => {}
@@ -559,6 +762,8 @@ fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: String) {
         cancellation: cancellation.clone(),
     });
     state.status = None;
+
+    chat.focus = ChatFocus::Transcript;
 
     state.request_seq = state.request_seq.saturating_add(1);
     let seq = state.request_seq;
@@ -692,8 +897,18 @@ fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState)
         lines.push(Line::raw(""));
     }
 
+    let transcript_border = if chat.focus == ChatFocus::Transcript {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
     let transcript = Paragraph::new(lines)
-        .block(Block::default().title(title).borders(Borders::ALL))
+        .block(
+            Block::default()
+                .title(title)
+                .borders(Borders::ALL)
+                .border_style(transcript_border),
+        )
         .wrap(Wrap { trim: false })
         .scroll((chat.scroll, 0));
     frame.render_widget(transcript, left[0]);
@@ -703,14 +918,33 @@ fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState)
     } else {
         "Prompt"
     };
+    let composer_border = if chat.focus == ChatFocus::Composer {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
     let composer = Paragraph::new(chat.composer.as_str())
-        .block(Block::default().title(composer_title).borders(Borders::ALL))
+        .block(
+            Block::default()
+                .title(composer_title)
+                .borders(Borders::ALL)
+                .border_style(composer_border),
+        )
         .wrap(Wrap { trim: false });
     frame.render_widget(composer, left[1]);
 
+    let focus_label = match chat.focus {
+        ChatFocus::Composer => "focus: composer",
+        ChatFocus::Transcript => "focus: transcript",
+        ChatFocus::Activity => "focus: activity",
+    };
+
     let help = Paragraph::new(Line::from(vec![
-        Span::raw("Enter: submit  "),
-        Span::raw("Up/Down: scroll  "),
+        Span::raw("Tab: focus  "),
+        Span::raw(focus_label),
+        Span::raw("  "),
+        Span::raw("Enter: submit/open  "),
+        Span::raw("Up/Down: scroll/select  "),
         Span::raw("Ctrl+C: cancel  "),
         Span::raw("r: refresh  "),
         Span::raw("Esc: clear/back  "),
@@ -725,23 +959,80 @@ fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState)
     frame.render_widget(help, left[2]);
 
     render_activity(frame, root[1], chat);
+
+    if chat.details_open {
+        render_activity_details_modal(frame, chat);
+    }
 }
 
 fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: &ChatState) {
-    let items = if chat.activity.is_empty() {
-        vec![ListItem::new("(no activity)")]
+    let border = if chat.focus == ChatFocus::Activity {
+        Style::default().fg(Color::Cyan)
     } else {
-        chat.activity
-            .iter()
-            .rev()
-            .take(80)
-            .rev()
-            .map(|line| ListItem::new(line.clone()))
-            .collect::<Vec<_>>()
+        Style::default()
     };
 
-    let list = List::new(items).block(Block::default().title("Activity").borders(Borders::ALL));
-    frame.render_widget(list, area);
+    if chat.activity.is_empty() {
+        let list = List::new(vec![ListItem::new("(no activity)")]).block(
+            Block::default()
+                .title("Activity")
+                .borders(Borders::ALL)
+                .border_style(border),
+        );
+        frame.render_widget(list, area);
+        return;
+    }
+
+    let available = area.height.saturating_sub(2).max(1) as usize;
+    let selected = chat.activity_selected.min(chat.activity.len().saturating_sub(1));
+    let half = available / 2;
+    let start = if selected > half {
+        selected - half
+    } else {
+        0
+    };
+    let end = (start + available).min(chat.activity.len());
+
+    let items = chat.activity[start..end]
+        .iter()
+        .map(|item| ListItem::new(item.summary()))
+        .collect::<Vec<_>>();
+
+    let mut list_state = ratatui::widgets::ListState::default();
+    list_state.select(Some(selected.saturating_sub(start)));
+    let list = List::new(items)
+        .block(
+            Block::default()
+                .title("Activity")
+                .borders(Borders::ALL)
+                .border_style(border),
+        )
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    frame.render_stateful_widget(list, area, &mut list_state);
+}
+
+fn render_activity_details_modal(frame: &mut ratatui::Frame<'_>, chat: &ChatState) {
+    let Some(item) = chat.activity.get(chat.activity_selected) else {
+        return;
+    };
+    let area = centered_rect(90, 80, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title("Details")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Magenta));
+
+    let mut lines = item.details_lines();
+    lines.push(Line::raw(""));
+    lines.push(Line::from(vec![
+        Span::raw("Enter/Esc: close"),
+        Span::raw("  "),
+        Span::raw("Tab: focus"),
+    ]));
+
+    let modal = Paragraph::new(lines).block(block).wrap(Wrap { trim: false });
+    frame.render_widget(modal, area);
 }
 
 fn render_approval_modal(frame: &mut ratatui::Frame<'_>, pending: &PendingApproval) {
