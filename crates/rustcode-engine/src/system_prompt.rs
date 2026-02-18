@@ -98,18 +98,6 @@ fn build_environment_block(model: &str, workspace_root: &Path, is_git_repo: bool
         "Unknown"
     };
 
-    let date = {
-        use std::time::SystemTime;
-        let now = SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
-        // Simple date formatting (YYYY-MM-DD)
-        let days = now / 86400;
-        let years = 1970 + days / 365;
-        format!("{years}")
-    };
-
     format!(
         "<environment>\n\
          Model: {model}\n\

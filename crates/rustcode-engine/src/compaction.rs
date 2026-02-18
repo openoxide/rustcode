@@ -5,7 +5,7 @@
 //! 2. Sends the conversation to the LLM for summarization
 //! 3. Replaces the message history with: system prompt + summary + recent messages
 
-use rustcode_llm::{ChatMessage, ChatRequest, ChatResponse, ChatRole, RequestInitiator};
+use rustcode_llm::{ChatMessage, ChatRequest, ChatRole, RequestInitiator};
 use serde_json::Value;
 
 use super::{CommandContext, Engine, ExecutionError};

@@ -86,7 +86,7 @@ struct Hunk {
 
 enum HunkLine {
     Context(String),
-    Remove(String),
+    Remove(()),
     Add(String),
 }
 
@@ -147,8 +147,8 @@ fn parse_hunk(lines: &[&str]) -> Result<(Hunk, usize), ExecutionError> {
         }
         consumed += 1;
 
-        if let Some(rest) = line.strip_prefix('-') {
-            hunk_lines.push(HunkLine::Remove(rest.to_string()));
+        if let Some(_) = line.strip_prefix('-') {
+            hunk_lines.push(HunkLine::Remove(()));
         } else if let Some(rest) = line.strip_prefix('+') {
             hunk_lines.push(HunkLine::Add(rest.to_string()));
         } else if let Some(rest) = line.strip_prefix(' ') {
