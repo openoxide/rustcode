@@ -125,6 +125,7 @@ pub async fn handle_tui_command(tui: TuiCommand, cli: &Cli) -> Result<()> {
                     handles,
                     config,
                     executor,
+                    llm_cell: None,
                     submit_mode: rustcode_tui::InteractiveSubmitMode::Run,
                 };
                 rustcode_tui::run_interactive(services)
@@ -153,7 +154,7 @@ pub async fn handle_tui_default(
     let handles = rustcode_tui::InteractiveHandles::new();
     let store = SessionStore::open_default();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let (defaults, mut initial_status, config, executor) = match load_effective_config(cli) {
+    let (defaults, mut initial_status, config, executor, llm_cell) = match load_effective_config(cli) {
         Ok(config) => {
             let skills = rustcode_skills::SkillsManager::load(&config.workspace_root)
                 .all()
@@ -165,15 +166,18 @@ pub async fn handle_tui_default(
             };
 
             let config = Arc::new(config);
-            let (initial_status, executor) = match build_client(&config) {
+            let (initial_status, executor, llm_cell) = match build_client(&config) {
                 Ok(llm_client) => {
                     let recorder: Option<Arc<dyn rustcode_core::TranscriptRecorder>> =
                         Some(Arc::new(FileTranscriptRecorder::new(store.clone())));
 
+                    let (swappable, llm_cell) =
+                        rustcode_llm::SwappableLlmClient::new(llm_client);
+
                     let mut engine = {
                         let io = Arc::new(LocalIo);
                         Engine::new(
-                            llm_client,
+                            Arc::new(swappable),
                             io.clone(),
                             io,
                             Arc::new(WorkspacePermissionPolicy),
@@ -194,12 +198,13 @@ pub async fn handle_tui_default(
                     (
                         None,
                         Some(Arc::new(engine) as Arc<dyn rustcode_core::CommandExecutor>),
+                        Some(llm_cell),
                     )
                 }
-                Err(err) => (Some(format!("llm init failed: {err}")), None),
+                Err(err) => (Some(format!("llm init failed: {err}")), None, None),
             };
 
-            (defaults, initial_status, Some(config), executor)
+            (defaults, initial_status, Some(config), executor, llm_cell)
         }
         Err(err) => (
             rustcode_tui::InteractiveDefaults {
@@ -208,6 +213,7 @@ pub async fn handle_tui_default(
                 skills: Vec::new(),
             },
             Some(format!("config not loaded: {err}")),
+            None,
             None,
             None,
         ),
@@ -321,6 +327,7 @@ pub async fn handle_tui_default(
             handles,
             config,
             executor,
+            llm_cell,
             submit_mode: rustcode_tui::InteractiveSubmitMode::Agent,
         };
         rustcode_tui::run_interactive(services)

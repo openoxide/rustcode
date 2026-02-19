@@ -78,6 +78,56 @@ pub fn list_models(provider: &str) -> Vec<&'static str> {
         .collect()
 }
 
+/// Return all known model IDs as `"provider/model"` strings.
+///
+/// Sources (in priority order, deduped):
+/// 1. Built-in presets hardcoded in this crate
+/// 2. Shared provider registry (`~/.cache/opencode/models.json`) — tool-call capable only
+/// 3. Flat external index (`~/.cache/rustcode/models.json`, etc.)
+#[must_use]
+pub fn all_model_entries() -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut result = Vec::new();
+
+    // 1. Built-in models
+    for (model_id, preset) in BUILTIN_MODELS {
+        let entry = format!("{}/{model_id}", preset.2);
+        if seen.insert(entry.clone()) {
+            result.push(entry);
+        }
+    }
+
+    // 2. Shared provider registry (the rich nested format with 2500+ models)
+    let registry = REGISTRY_ENTRIES.get_or_init(load_registry_entries);
+    for entry in registry {
+        if seen.insert(entry.clone()) {
+            result.push(entry.clone());
+        }
+    }
+
+    // 3. Flat external index (rustcode-specific models.json)
+    let index = EXTERNAL_INDEX.get_or_init(load_external_index);
+    if let Some(index) = index.as_ref() {
+        for (key, entry) in index {
+            let full = if key.contains('/') {
+                key.clone()
+            } else if let Some(provider) = &entry.provider {
+                if provider.is_empty() {
+                    continue;
+                }
+                format!("{provider}/{key}")
+            } else {
+                continue;
+            };
+            if seen.insert(full.clone()) {
+                result.push(full);
+            }
+        }
+    }
+
+    result
+}
+
 // ── Built-in model presets ─────────────────────────────────────────
 
 /// (`context_window`, `max_output`, provider, tools, vision, streaming)
@@ -327,6 +377,52 @@ fn load_external_index() -> Option<BTreeMap<String, ExternalModelEntry>> {
         return Some(parsed);
     }
     None
+}
+
+// ── Shared provider-registry format ──────────────────────────────
+//
+// The shared registry at ~/.cache/opencode/models.json uses a nested structure:
+//   { "<provider_id>": { "models": { "<model_id>": { "tool_call": bool, ... } } } }
+//
+// This is different from the flat external index above.
+
+#[derive(Debug, Clone, Deserialize)]
+struct RegistryProvider {
+    #[serde(default)]
+    models: BTreeMap<String, RegistryModel>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RegistryModel {
+    #[serde(default)]
+    tool_call: bool,
+}
+
+/// Cached list of `"provider/model"` entries from the shared provider registry.
+static REGISTRY_ENTRIES: OnceLock<Vec<String>> = OnceLock::new();
+
+fn load_registry_entries() -> Vec<String> {
+    let Some(home) = std::env::var_os("HOME") else {
+        return Vec::new();
+    };
+    let path = PathBuf::from(home).join(".cache/opencode/models.json");
+    let Ok(raw) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let Ok(parsed) = serde_json::from_str::<BTreeMap<String, RegistryProvider>>(&raw) else {
+        return Vec::new();
+    };
+
+    let mut entries = Vec::new();
+    for (provider_id, provider) in &parsed {
+        for (model_id, model) in &provider.models {
+            if model.tool_call {
+                entries.push(format!("{provider_id}/{model_id}"));
+            }
+        }
+    }
+    entries.sort_unstable();
+    entries
 }
 
 // ── Tests ─────────────────────────────────────────────────────────

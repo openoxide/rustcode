@@ -6,8 +6,8 @@ use super::{
     DisableMouseCapture, Duration, EnableMouseCapture, EnterAlternateScreen, EventPayload,
     EventPublisher, ExecutableCommand, InteractiveMsg, InteractiveServices, InteractiveStart,
     InteractiveSubmitMode, KeyEventKind, Layout, LeaveAlternateScreen, Modal, MouseButton,
-    MouseEvent, MouseEventKind, PendingApproval, Rect, RunningCommand, Screen, SessionMeta,
-    SystemTime, Terminal, ToastVariant, TuiError, TuiPublisher,
+    MouseEvent, MouseEventKind, PendingApproval, ProviderManagerStep, Rect, RunningCommand, Screen,
+    SessionMeta, SystemTime, Terminal, ToastVariant, TuiError, TuiPublisher,
 };
 use rustcode_core::event::EventScope;
 
@@ -21,6 +21,7 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
         handles,
         config,
         executor,
+        llm_cell,
         submit_mode,
     } = services;
 
@@ -128,6 +129,9 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
         last_area: terminal
             .size()
             .map_err(|err| TuiError::Io(err.to_string()))?,
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell,
     };
 
     if let Some(prompt) = auto_submit {
@@ -142,6 +146,7 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
         }
         drain_toasts(&mut state);
         drain_messages(&mut state);
+        poll_provider_oauth(&mut state);
 
         terminal
             .draw(|frame| render(frame, &state))
@@ -254,10 +259,7 @@ fn handle_feedback_mouse(state: &mut AppState, mouse: MouseEvent) {
         return;
     }
 
-    if let Some(Modal::Feedback {
-        ref mut rating, ..
-    }) = state.modal
-    {
+    if let Some(Modal::Feedback { ref mut rating, .. }) = state.modal {
         *rating = Some(clicked_up);
     }
 }
@@ -346,11 +348,15 @@ pub(super) fn drain_messages(state: &mut AppState) {
                             })
                         }
                         EventPayload::Failure { message } => {
-                            state.status = Some(message.clone());
+                            // Show a clean, actionable message in the footer and
+                            // toast; preserve the full technical detail in the
+                            // Activity panel (Ctrl+E to expand).
+                            let clean = clean_failure_message(&message);
+                            state.status = Some(clean.clone());
                             push_toast(
                                 state,
                                 ToastVariant::Error,
-                                message.clone(),
+                                clean,
                                 Duration::from_secs(6),
                             );
                             refresh = true;
@@ -411,8 +417,9 @@ pub(super) fn drain_messages(state: &mut AppState) {
                     if ok {
                         state.status = None;
                     } else {
-                        state.status = message;
-                        if let Some(msg) = state.status.clone() {
+                        let clean = message.as_deref().map(clean_failure_message);
+                        state.status = clean.clone();
+                        if let Some(msg) = clean {
                             push_toast(state, ToastVariant::Error, msg, Duration::from_secs(6));
                         }
                     }
@@ -546,6 +553,186 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
         };
         let _ = tx.send(InteractiveMsg::RunEnded { ok, message });
     });
+}
+
+/// Poll the OAuth background-task channels and update the provider manager modal.
+///
+/// Called every loop iteration (50 ms). Non-blocking — uses `try_recv`.
+pub(super) fn poll_provider_oauth(state: &mut AppState) {
+    // Poll the "device code started" channel.
+    if let Some(rx) = &state.provider_oauth_start_rx {
+        match rx.try_recv() {
+            Ok(Ok(started)) => {
+                if let Some(Modal::ProviderManager { step }) = &mut state.modal {
+                    if let ProviderManagerStep::OAuthStarting { display_name, .. } = step {
+                        let display_name = display_name.clone();
+                        *step = ProviderManagerStep::OAuthPending {
+                            provider_id: started.provider_id,
+                            display_name,
+                            verification_uri: started.verification_uri,
+                            user_code: started.user_code,
+                        };
+                    }
+                }
+                state.provider_oauth_start_rx = None;
+            }
+            Ok(Err(err)) => {
+                push_toast(
+                    state,
+                    ToastVariant::Error,
+                    format!("OAuth failed to start: {err}"),
+                    Duration::from_secs(6),
+                );
+                state.modal = None;
+                state.provider_oauth_start_rx = None;
+                state.provider_oauth_done_rx = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                state.provider_oauth_start_rx = None;
+            }
+        }
+    }
+
+    // Poll the "credential ready" channel.
+    if let Some(rx) = &state.provider_oauth_done_rx {
+        match rx.try_recv() {
+            Ok(Ok(done)) => {
+                let store = rustcode_auth::AuthStore::open_default();
+                match store.set_oauth(
+                    &done.provider_id,
+                    &done.access_token,
+                    done.refresh_token.as_deref(),
+                    done.expires_at_unix,
+                    done.account_id.as_deref(),
+                ) {
+                    Ok(()) => push_toast(
+                        state,
+                        ToastVariant::Success,
+                        format!("{} connected!", done.provider_id),
+                        Duration::from_secs(4),
+                    ),
+                    Err(err) => push_toast(
+                        state,
+                        ToastVariant::Error,
+                        format!("failed to save credential: {err}"),
+                        Duration::from_secs(6),
+                    ),
+                }
+                state.modal = None;
+                state.provider_oauth_done_rx = None;
+            }
+            Ok(Err(err)) => {
+                push_toast(
+                    state,
+                    ToastVariant::Error,
+                    format!("OAuth authorization failed: {err}"),
+                    Duration::from_secs(6),
+                );
+                state.modal = None;
+                state.provider_oauth_done_rx = None;
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                state.provider_oauth_done_rx = None;
+            }
+        }
+    }
+}
+
+/// Convert a raw executor/LLM error string into a short, actionable message
+/// suitable for the status footer and toast notification.
+///
+/// The full technical detail is preserved in `ActivityItem::Failure` for
+/// debugging via Ctrl+E.  The pattern matching targets the `{kind:?}` Debug
+/// representations embedded by `LlmError::Classified`'s Display impl.
+fn clean_failure_message(msg: &str) -> String {
+    let lower = msg.to_lowercase();
+
+    // Auth failures — API key missing or rejected
+    if lower.contains("authfailed")
+        || lower.contains("authentication failed")
+        || lower.contains("invalid api key")
+        || lower.contains("invalid_api_key")
+        || lower.contains("unauthorized")
+        || lower.contains("api key")
+        || (lower.contains("401") && lower.contains("provider"))
+    {
+        return "Authentication failed — connect your provider in /providers (Ctrl+A)".to_string();
+    }
+
+    // Rate limit / quota exhausted
+    if lower.contains("ratelimit")
+        || lower.contains("rate limit")
+        || lower.contains("too many requests")
+        || lower.contains("quota")
+        || lower.contains("429")
+    {
+        return "Rate limit or usage quota reached — please wait before retrying".to_string();
+    }
+
+    // Context window overflow
+    if lower.contains("contextoverflow")
+        || lower.contains("context limit")
+        || lower.contains("context_length_exceeded")
+        || lower.contains("context window")
+        || lower.contains("maximum context")
+    {
+        return "Context limit exceeded — use /compact or send a shorter message".to_string();
+    }
+
+    // Provider service temporarily unavailable
+    if lower.contains("serviceunavailable")
+        || lower.contains("service unavailable")
+        || lower.contains("temporarily unavailable")
+        || lower.contains("overloaded")
+        || lower.contains("internal server error")
+        || lower.contains("500")
+        || lower.contains("502")
+        || lower.contains("503")
+    {
+        return "Provider temporarily unavailable — please try again".to_string();
+    }
+
+    // Invalid request
+    if lower.contains("invalidrequest") {
+        return "Request rejected by provider — see activity for details".to_string();
+    }
+
+    // Config / no executor — no provider connected
+    if lower.contains("configuration error")
+        || lower.contains("not set")
+        || lower.contains("api key env")
+        || lower.contains("executor not available")
+        || lower.contains("llm init failed")
+    {
+        return "No provider connected — use /providers (Ctrl+A) to connect one".to_string();
+    }
+
+    // Network / transport errors
+    if lower.contains("network error")
+        || lower.contains("connection")
+        || lower.contains("timed out")
+        || lower.contains("transport")
+    {
+        return "Network error — check your connection and try again".to_string();
+    }
+
+    // Generic: strip "provider error (X): " prefix to expose the clean body
+    if let Some(idx) = msg.find("): ") {
+        let rest = msg[idx + 3..].trim();
+        if !rest.is_empty() && rest.len() < 120 {
+            return format!("Request failed: {rest}");
+        }
+    }
+
+    // Last resort: return as-is but capped at 120 chars
+    let capped: String = msg.chars().take(120).collect();
+    if capped.len() < msg.len() {
+        format!("{capped}…")
+    } else {
+        capped
+    }
 }
 
 struct TerminalCleanup;

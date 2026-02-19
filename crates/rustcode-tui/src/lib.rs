@@ -213,6 +213,11 @@ pub struct InteractiveServices {
     pub config: Option<Arc<ResolvedConfig>>,
     pub executor: Option<Arc<dyn CommandExecutor>>,
 
+    /// Shared cell for hot-swapping the LLM client when the user switches models.
+    ///
+    /// `None` in remote/attach mode where the executor lives on a remote server.
+    pub llm_cell: Option<Arc<std::sync::RwLock<Arc<dyn rustcode_llm::LlmClient>>>>,
+
     pub submit_mode: InteractiveSubmitMode,
 }
 

@@ -171,6 +171,14 @@ pub(super) fn handle_chat_key(
                 execute_command(state, CommandId::Feedback);
                 return ChatNav::Stay;
             }
+            KeyCode::Char('m' | 'M') => {
+                execute_command(state, CommandId::SwitchModel);
+                return ChatNav::Stay;
+            }
+            KeyCode::Char('a' | 'A') => {
+                execute_command(state, CommandId::ManageProviders);
+                return ChatNav::Stay;
+            }
             KeyCode::Char('r' | 'R') => {
                 refresh_chat_messages(state, chat);
                 push_toast(

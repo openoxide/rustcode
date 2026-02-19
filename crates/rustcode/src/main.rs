@@ -49,10 +49,21 @@ use worktree_cmds::handle_worktree_command;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing + optional OTel export.
-    // Must happen before setting the panic hook so OTel spans capture panics.
-    let otel_endpoint = std::env::var("RUSTCODE_OTEL_ENDPOINT").ok();
-    let _otel_guard = rustcode_logging::init_with_otel(otel_endpoint.as_deref());
+    // Parse CLI args first so we can choose the right logging mode before
+    // claiming the global tracing subscriber slot.
+    let cli = Cli::parse();
+
+    // In TUI mode, tracing output must be suppressed: log messages written to
+    // stderr bleed through ratatui's alternate-screen buffer and corrupt the UI.
+    // For non-TUI commands, keep the usual stderr + optional OTel setup.
+    let is_tui = matches!(&cli.command, TopCommand::Tui(_));
+    let _otel_guard = if is_tui {
+        rustcode_logging::init_silent();
+        None
+    } else {
+        let otel_endpoint = std::env::var("RUSTCODE_OTEL_ENDPOINT").ok();
+        rustcode_logging::init_with_otel(otel_endpoint.as_deref())
+    };
 
     // Chain a panic hook that emits a tracing error before propagating.
     // This ensures panics are captured in log files / OTel when available.
@@ -61,8 +72,6 @@ async fn main() -> Result<()> {
         tracing::error!("panic: {info}");
         prev_hook(info);
     }));
-
-    let cli = Cli::parse();
 
     if matches!(&cli.command, TopCommand::Version) {
         let version = env!("CARGO_PKG_VERSION");

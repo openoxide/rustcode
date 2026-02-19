@@ -120,10 +120,37 @@ pub(crate) fn normalize_endpoint_for_provider(
 }
 
 pub(crate) fn truncate_for_error(body: &str) -> String {
-    const LIMIT: usize = 320;
-    if body.len() <= LIMIT {
+    // Prefer a human-readable "message" field from JSON error bodies so we
+    // never embed raw JSON in user-visible error strings.
+    //
+    // Handles the most common provider formats:
+    //   OpenAI / OpenRouter: {"error": {"message": "...", "type": "...", ...}}
+    //   Anthropic:           {"error": {"message": "...", "type": "..."}}
+    //   Generic:             {"message": "..."}
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(body) {
+        // Nested: {"error": {"message": "..."}}
+        if let Some(msg) = v
+            .get("error")
+            .and_then(|e| e.get("message"))
+            .and_then(|m| m.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            return msg.to_string();
+        }
+        // Top-level: {"message": "..."}
+        if let Some(msg) = v
+            .get("message")
+            .and_then(|m| m.as_str())
+            .filter(|s| !s.is_empty())
+        {
+            return msg.to_string();
+        }
+    }
+    // Fallback: plain-text body, truncated
+    const LIMIT: usize = 200;
+    if body.chars().count() <= LIMIT {
         body.to_string()
     } else {
-        format!("{}...", &body[..LIMIT])
+        format!("{}…", body.chars().take(LIMIT).collect::<String>())
     }
 }

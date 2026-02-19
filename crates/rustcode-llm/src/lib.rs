@@ -22,14 +22,14 @@ use reqwest::header::HeaderMap;
 #[cfg(test)]
 use serde_json::json;
 
-pub use model_registry::ModelInfo;
+pub use model_registry::{all_model_entries, ModelInfo};
 pub use provider::{
-    builtin_provider_ids, derive_copilot_enterprise_base_url, diagnose_provider, ApiKeySource,
-    ProviderDiagnostics, ProviderProtocolName,
+    builtin_provider_ids, connected_provider_ids, derive_copilot_enterprise_base_url,
+    diagnose_provider, ApiKeySource, ProviderDiagnostics, ProviderProtocolName,
 };
 pub use types::{
     ChatMessage, ChatRequest, ChatResponse, ChatRole, LlmClient, LlmError, LlmRequest, LlmResponse,
-    NullLlmClient, RequestInitiator, TokenUsage, ToolCall, ToolSpec,
+    NullLlmClient, RequestInitiator, SwappableLlmClient, TokenUsage, ToolCall, ToolSpec,
 };
 
 pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmError> {

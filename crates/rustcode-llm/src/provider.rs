@@ -145,6 +145,43 @@ pub fn diagnose_provider(
     })
 }
 
+/// Return the IDs of providers that have credentials available (env vars or auth store).
+///
+/// A provider is "connected" if it does not require an API key (e.g. `ollama`)
+/// or if a non-empty API key is found in the process environment or auth store.
+/// The `"null"` pseudo-provider is always excluded.
+#[must_use]
+pub fn connected_provider_ids() -> Vec<String> {
+    let store = AuthStore::open_default();
+    builtin_provider_ids()
+        .iter()
+        .filter(|&&id| {
+            if id == "null" {
+                return false;
+            }
+            let preset = provider_preset(id);
+            if !preset.requires_api_key {
+                // Keyless providers (e.g. ollama) are only usable if they have
+                // a default endpoint. Providers with neither a key requirement
+                // nor a default base URL (e.g. amazon-bedrock, zenmux,
+                // google-vertex) need explicit config and are not auto-included.
+                return preset.default_base_url.is_some();
+            }
+            // Check process environment
+            let has_env = preset
+                .default_api_key_envs
+                .iter()
+                .any(|env| std::env::var(env).is_ok_and(|v| !v.trim().is_empty()));
+            if has_env {
+                return true;
+            }
+            // Fall back to auth store
+            store.get(id).ok().flatten().is_some()
+        })
+        .map(|&id| id.to_string())
+        .collect()
+}
+
 #[must_use]
 pub fn builtin_provider_ids() -> &'static [&'static str] {
     &[

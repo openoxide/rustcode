@@ -1,9 +1,24 @@
 use super::{
-    build_prompt_history, build_transcript_lines, composer_clear, composer_insert_str,
-    compute_find_matches, compute_sessions_view, filter_files, open_command_palette, push_toast,
-    scan_workspace_files, sort_sessions, AppState, ChatFocus, ChatNav, ChatState, CommandId,
-    CreateSessionOptions, Duration, Modal, Screen, ToastVariant,
+    build_prompt_history, build_provider_entries, build_transcript_lines, composer_clear,
+    composer_insert_str, compute_find_matches, compute_sessions_view, filter_files,
+    filter_provider_entries, open_command_palette, push_toast, scan_workspace_files, sort_sessions,
+    AppState, ChatFocus, ChatNav, ChatState, CommandId, CreateSessionOptions, Duration, Modal,
+    ProviderManagerStep, Screen, ToastVariant,
 };
+
+/// Filter `entries` (each a `"provider/model"` string) by case-insensitive substring match.
+pub(super) fn filter_models(entries: &[String], query: &str) -> Vec<usize> {
+    if query.trim().is_empty() {
+        return (0..entries.len()).collect();
+    }
+    let needle = query.trim().to_ascii_lowercase();
+    entries
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| e.to_ascii_lowercase().contains(&needle))
+        .map(|(i, _)| i)
+        .collect()
+}
 
 pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
     match id {
@@ -338,7 +353,103 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                 comment_active: false,
             });
         }
+        CommandId::SwitchModel => {
+            let entries = build_model_entries(&state.defaults.model);
+            let view = filter_models(&entries, "");
+            state.modal = Some(Modal::ModelSelect {
+                current_model: state.defaults.model.clone(),
+                entries,
+                query: String::new(),
+                view,
+                selected: 0,
+            });
+        }
+        CommandId::ManageProviders => {
+            let entries = build_provider_entries();
+            let view = filter_provider_entries(&entries, "");
+            state.modal = Some(Modal::ProviderManager {
+                step: ProviderManagerStep::List {
+                    entries,
+                    query: String::new(),
+                    view,
+                    selected: 0,
+                },
+            });
+        }
     }
+}
+
+/// Build the ordered list of `"provider/model"` entries for the model picker.
+///
+/// Only shows models from providers that have credentials configured (env vars
+/// or auth store). Falls back to all built-in models if nothing is connected.
+/// The current model's provider is surfaced first; priority providers follow.
+fn build_model_entries(current_model: &str) -> Vec<String> {
+    let current_provider = current_model
+        .split_once('/')
+        .map(|(p, _)| p)
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    const PRIORITY: &[&str] = &[
+        "anthropic",
+        "openai",
+        "google",
+        "groq",
+        "xai",
+        "mistral",
+        "deepseek",
+        "deepinfra",
+        "cerebras",
+        "togetherai",
+        "perplexity",
+        "ollama",
+        "openrouter",
+        "azure",
+    ];
+
+    // Determine which providers have credentials configured.
+    let connected: std::collections::HashSet<String> =
+        rustcode_llm::connected_provider_ids().into_iter().collect();
+
+    // Get every known model entry (built-in + shared registry + flat external).
+    let all = rustcode_llm::all_model_entries();
+
+    // Filter to only connected providers; if none configured, show everything.
+    let filtered: Vec<String> = if connected.is_empty() {
+        all
+    } else {
+        all.into_iter()
+            .filter(|entry| {
+                let provider = entry.split('/').next().unwrap_or("");
+                connected.contains(provider)
+            })
+            .collect()
+    };
+
+    // Sort: current provider first, then priority order, then alpha.
+    let priority_rank = |provider: &str| -> usize {
+        if provider == current_provider {
+            return 0;
+        }
+        PRIORITY
+            .iter()
+            .position(|&p| p == provider)
+            .map(|i| i + 1)
+            .unwrap_or(usize::MAX)
+    };
+
+    let mut entries = filtered;
+    entries.sort_by(|a, b| {
+        let pa = a.split('/').next().unwrap_or("");
+        let pb = b.split('/').next().unwrap_or("");
+        priority_rank(pa)
+            .cmp(&priority_rank(pb))
+            .then_with(|| pa.cmp(pb))
+            .then_with(|| a.cmp(b))
+    });
+
+    entries
 }
 
 pub(super) fn handle_slash_command(
@@ -404,13 +515,11 @@ pub(super) fn handle_slash_command(
             ChatNav::Stay
         }
         "model" => {
-            let model = state.defaults.model.clone();
-            push_toast(
-                state,
-                ToastVariant::Info,
-                format!("model: {model}"),
-                Duration::from_secs(4),
-            );
+            execute_command(state, CommandId::SwitchModel);
+            ChatNav::Stay
+        }
+        "providers" | "auth" | "connect" => {
+            execute_command(state, CommandId::ManageProviders);
             ChatNav::Stay
         }
         "new" => {

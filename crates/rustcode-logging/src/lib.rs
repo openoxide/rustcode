@@ -64,6 +64,24 @@ pub fn init() {
     let _ = init_with_otel(None);
 }
 
+/// Initialize tracing in silent mode — all output suppressed.
+///
+/// Used when running the interactive TUI so that log messages do not bleed
+/// through the ratatui alternate-screen terminal buffer.  The global
+/// subscriber slot is claimed (so no later init can override it), but the
+/// effective filter is `"off"` — zero messages are ever written.
+///
+/// Safe to call multiple times — subsequent calls are no-ops.
+pub fn init_silent() {
+    let _ = tracing_subscriber::registry()
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_filter(EnvFilter::new("off")),
+        )
+        .try_init();
+}
+
 /// Initialize structured tracing with a specified default log level.
 ///
 /// The `default_level` is used when `RUST_LOG` is not set.

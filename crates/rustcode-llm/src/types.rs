@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use serde_json::Value;
+use std::sync::Arc;
 use std::time::Duration;
 use thiserror::Error;
 
@@ -307,6 +308,51 @@ pub(crate) fn llm_http_client() -> Result<reqwest::Client, LlmError> {
         .connect_timeout(HTTP_CONNECT_TIMEOUT)
         .build()
         .map_err(|err| LlmError::Transport(format!("failed to build http client: {err}")))
+}
+
+/// A [`LlmClient`] wrapper that allows hot-swapping the underlying client at runtime.
+///
+/// The TUI constructs the engine with a `SwappableLlmClient` and retains the
+/// shared `Arc<RwLock<…>>` cell.  When the user switches models in the model
+/// picker the TUI calls [`build_client`](crate::build_client) with the new
+/// config and writes the new client into the cell — no engine restart required.
+pub struct SwappableLlmClient {
+    inner: Arc<std::sync::RwLock<Arc<dyn LlmClient>>>,
+}
+
+impl SwappableLlmClient {
+    /// Wrap `initial` in a `SwappableLlmClient`.
+    ///
+    /// Returns the wrapper **and** the shared cell so the caller can swap the
+    /// inner client later (e.g. after a model switch in the TUI).
+    #[must_use]
+    pub fn new(
+        initial: Arc<dyn LlmClient>,
+    ) -> (Self, Arc<std::sync::RwLock<Arc<dyn LlmClient>>>) {
+        let cell = Arc::new(std::sync::RwLock::new(initial));
+        (Self { inner: cell.clone() }, cell)
+    }
+}
+
+#[async_trait]
+impl LlmClient for SwappableLlmClient {
+    async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
+        let client = self
+            .inner
+            .read()
+            .expect("llm client lock not poisoned")
+            .clone();
+        client.complete(request).await
+    }
+
+    async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, LlmError> {
+        let client = self
+            .inner
+            .read()
+            .expect("llm client lock not poisoned")
+            .clone();
+        client.chat(request).await
+    }
 }
 
 #[derive(Debug, Default)]

@@ -37,15 +37,17 @@ mod file_search;
 mod input;
 mod markdown;
 mod palette;
+mod provider_manager;
 mod render_activity;
 mod render_main;
 mod render_modals;
+mod render_provider;
 mod runtime;
 mod state;
 mod transcript;
 mod types;
 
-use commands::{execute_command, handle_slash_command, refresh_chat_messages};
+use commands::{execute_command, filter_models, handle_slash_command, refresh_chat_messages};
 use composer::{
     composer_backspace, composer_clear, composer_cursor_visual, composer_delete,
     composer_insert_str, composer_move_down, composer_move_end, composer_move_home,
@@ -54,11 +56,16 @@ use composer::{
 use file_search::{filter_files, scan_workspace_files};
 use input::handle_key;
 use palette::{compute_palette_view, maybe_execute_palette_query, open_command_palette};
+use provider_manager::{
+    build_provider_entries, filter_provider_entries, provider_connect_methods,
+    provider_display_name, provider_env_hint,
+};
 use render_activity::{
     render_activity, render_activity_details_modal, render_approval_modal, render_settings,
 };
 use render_main::render;
 use render_modals::{centered_rect, render_help_modal, render_modal};
+use render_provider::render_provider_manager_modal;
 use runtime::submit_prompt;
 use state::{
     compute_sessions_view, drain_toasts, format_age, push_toast, sort_sessions,
@@ -70,7 +77,9 @@ use transcript::{
 };
 use types::{
     build_prompt_history, ActivityItem, AppState, ChatFocus, ChatNav, ChatState, CommandId,
-    CommandItem, FindState, Modal, PendingApproval, RunningCommand, Screen, Toast, ToastVariant,
+    CommandItem, ConnectMethod, FindState, Modal, PendingApproval, ProviderEntry,
+    ProviderManagerStep, ProviderOAuthDone, ProviderOAuthStarted, RunningCommand, Screen, Toast,
+    ToastVariant,
 };
 
 pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {

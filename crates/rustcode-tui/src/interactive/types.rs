@@ -89,6 +89,96 @@ pub(super) enum Modal {
         /// Whether keyboard focus is in the comment field.
         comment_active: bool,
     },
+    /// Model picker — searchable list of all built-in models.
+    ModelSelect {
+        /// All model IDs formatted as `"provider/model-id"`, ordered by provider priority.
+        entries: Vec<String>,
+        /// Current search query for filtering.
+        query: String,
+        /// Filtered indices into `entries`.
+        view: Vec<usize>,
+        /// Selected index within `view`.
+        selected: usize,
+        /// Snapshot of the active model at the time the modal was opened.
+        current_model: String,
+    },
+    /// Provider connection manager — connect/disconnect LLM providers.
+    ProviderManager {
+        step: ProviderManagerStep,
+    },
+}
+
+/// An entry in the provider manager list.
+#[derive(Debug, Clone)]
+pub(super) struct ProviderEntry {
+    pub(super) provider_id: String,
+    pub(super) display_name: String,
+    pub(super) connected: bool,
+}
+
+/// Auth method offered in the provider manager.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ConnectMethod {
+    ApiKey,
+    OAuthDeviceCode,
+    Disconnect,
+}
+
+/// Sent from OAuth background task when the device code is ready.
+#[derive(Debug, Clone)]
+pub(super) struct ProviderOAuthStarted {
+    pub(super) provider_id: String,
+    pub(super) verification_uri: String,
+    pub(super) user_code: String,
+}
+
+/// Sent from OAuth background task when authentication completes.
+#[derive(Debug, Clone)]
+pub(super) struct ProviderOAuthDone {
+    pub(super) provider_id: String,
+    pub(super) access_token: String,
+    pub(super) refresh_token: Option<String>,
+    pub(super) expires_at_unix: Option<i64>,
+    pub(super) account_id: Option<String>,
+}
+
+/// State machine for the provider manager modal.
+#[derive(Debug, Clone)]
+pub(super) enum ProviderManagerStep {
+    /// Browse / search the provider list.
+    List {
+        entries: Vec<ProviderEntry>,
+        query: String,
+        view: Vec<usize>,
+        selected: usize,
+    },
+    /// Choose how to connect the selected provider.
+    MethodSelect {
+        provider_id: String,
+        display_name: String,
+        methods: Vec<ConnectMethod>,
+        selected: usize,
+    },
+    /// Type an API key.
+    ApiKeyInput {
+        provider_id: String,
+        display_name: String,
+        env_hint: Option<String>,
+        input: String,
+        cursor: usize,
+    },
+    /// Waiting for background task to start the device code flow.
+    OAuthStarting {
+        provider_id: String,
+        display_name: String,
+    },
+    /// Device code ready — user must open browser and authorize.
+    OAuthPending {
+        provider_id: String,
+        display_name: String,
+        verification_uri: String,
+        user_code: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +202,10 @@ pub(super) enum CommandId {
     ToggleSkills,
     /// Open feedback overlay.
     Feedback,
+    /// Open model picker overlay.
+    SwitchModel,
+    /// Open provider connection manager overlay.
+    ManageProviders,
 }
 
 #[derive(Debug, Clone)]
@@ -308,6 +402,21 @@ pub(super) struct AppState {
     pub(super) request_seq: u64,
 
     pub(super) last_area: Size,
+
+    /// Receives `DeviceCodeFlowStart`-derived info once the OAuth device code is ready.
+    /// Stored here (not in Modal) because Receiver is not Clone.
+    pub(super) provider_oauth_start_rx:
+        Option<std::sync::mpsc::Receiver<Result<ProviderOAuthStarted, String>>>,
+    /// Receives the final credential once the user completes OAuth authorization.
+    pub(super) provider_oauth_done_rx:
+        Option<std::sync::mpsc::Receiver<Result<ProviderOAuthDone, String>>>,
+    /// Shared cell that controls the engine's active LLM client.
+    ///
+    /// Writing a new `Arc<dyn LlmClient>` here causes all subsequent LLM
+    /// requests to use the new client, enabling live model/provider switching
+    /// without restarting the engine.  `None` in remote/attach mode.
+    pub(super) llm_cell:
+        Option<Arc<std::sync::RwLock<Arc<dyn rustcode_llm::LlmClient>>>>,
 }
 
 pub(super) fn build_prompt_history(messages: &[StoredMessage]) -> Vec<String> {

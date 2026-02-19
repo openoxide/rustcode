@@ -6,7 +6,9 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+rustcode-auth = { path = "../rustcode-auth" }
 rustcode-core = { path = "../rustcode-core" }
+rustcode-llm = { path = "../rustcode-llm" }
 rustcode-memories = { path = "../rustcode-memories" }
 rustcode-skills = { path = "../rustcode-skills" }
 rustcode-state = { path = "../rustcode-state" }

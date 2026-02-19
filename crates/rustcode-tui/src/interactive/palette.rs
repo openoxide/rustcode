@@ -175,6 +175,22 @@ pub(super) fn build_command_items(state: &AppState) -> Vec<CommandItem> {
     });
 
     items.push(CommandItem {
+        id: CommandId::SwitchModel,
+        title: "Switch model".to_string(),
+        detail: "Pick a different LLM model for this session (Ctrl+M)".to_string(),
+        enabled: true,
+        disabled_reason: None,
+    });
+
+    items.push(CommandItem {
+        id: CommandId::ManageProviders,
+        title: "Providers".to_string(),
+        detail: "Connect/disconnect LLM providers (Ctrl+A)".to_string(),
+        enabled: true,
+        disabled_reason: None,
+    });
+
+    items.push(CommandItem {
         id: CommandId::Quit,
         title: "Quit".to_string(),
         detail: "Exit the app".to_string(),
@@ -234,6 +250,14 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
         }
         "tools" => {
             execute_command(state, CommandId::ToggleTools);
+            true
+        }
+        "model" | "models" => {
+            execute_command(state, CommandId::SwitchModel);
+            true
+        }
+        "providers" | "auth" | "connect" => {
+            execute_command(state, CommandId::ManageProviders);
             true
         }
         "search" | "find" => {

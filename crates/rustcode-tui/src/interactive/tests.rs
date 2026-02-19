@@ -66,6 +66,9 @@ fn sessions_screen_renders_title_and_help() {
             width: 60,
             height: 10,
         },
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -167,6 +170,9 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
             width: 120,
             height: 30,
         },
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -277,6 +283,9 @@ fn chat_screen_hides_system_messages() {
             width: 120,
             height: 20,
         },
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -341,6 +350,9 @@ fn approval_modal_renders_tool_name() {
             width: 120,
             height: 30,
         },
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -406,6 +418,9 @@ fn approval_modal_shows_allow_all_edits_for_write() {
             width: 120,
             height: 30,
         },
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -469,6 +484,9 @@ fn approval_modal_keeps_actions_visible_with_long_arguments() {
             width: 120,
             height: 30,
         },
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -548,6 +566,9 @@ fn alt_tab_cycles_focus_in_chat() {
             width: 120,
             height: 30,
         },
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell: None,
     };
 
     let key = KeyEvent::new(KeyCode::Tab, KeyModifiers::ALT);
@@ -630,6 +651,9 @@ fn tab_does_not_change_focus_in_chat() {
             width: 120,
             height: 30,
         },
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell: None,
     };
 
     let key = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
@@ -712,6 +736,9 @@ fn mouse_click_changes_chat_focus() {
             width: 120,
             height: 30,
         },
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell: None,
     };
 
     runtime::handle_mouse(
@@ -815,6 +842,9 @@ fn activity_details_modal_renders_tool_arguments() {
             width: 120,
             height: 30,
         },
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -869,6 +899,9 @@ fn command_palette_renders_actions_and_search() {
             width: 100,
             height: 24,
         },
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell: None,
     };
 
     open_command_palette(&mut state);
