@@ -39,10 +39,6 @@ pub fn now_unix_ms() -> i64 {
         .unwrap_or(0)
 }
 
-pub fn init_tracing() {
-    rustcode_logging::init();
-}
-
 pub fn load_effective_config(cli: &Cli) -> Result<ResolvedConfig> {
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let mut sources = ConfigSources::new(cwd);

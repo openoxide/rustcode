@@ -12,6 +12,7 @@ use crate::agent_util::{
 use crate::context_tracker::ContextTracker;
 
 impl Engine {
+    #[tracing::instrument(skip_all, fields(model = %context.config.model, steps = options.max_steps))]
     pub(crate) async fn run_agent(
         &self,
         prompt: String,
@@ -27,8 +28,10 @@ impl Engine {
         );
 
         if context.config.allow_network {
-            self.load_mcp_tools(&mut tools, publisher.clone(), context)
-                .await?;
+            tokio::select! {
+                () = context.cancellation.cancelled() => return Err(ExecutionError::Cancelled),
+                result = self.load_mcp_tools(&mut tools, publisher.clone(), context) => result?,
+            }
         }
 
         let mut state = AgentState::default();
@@ -55,7 +58,8 @@ impl Engine {
 
         let mut context_tracker = ContextTracker::new(&context.config.model);
 
-        for _step in 0..options.max_steps {
+        for step in 0..options.max_steps {
+            tracing::debug!(step, "agent step");
             // Check for context overflow and compact if needed
             if context_tracker.is_overflow() {
                 tracing::info!(
@@ -236,6 +240,7 @@ impl Engine {
         Ok(messages)
     }
 
+    #[tracing::instrument(skip_all, fields(model = %context.config.model, messages = messages.len(), tools = tools.len()))]
     async fn run_llm_step(
         &self,
         messages: &[ChatMessage],
@@ -297,6 +302,7 @@ impl Engine {
         .await
     }
 
+    #[tracing::instrument(skip_all, fields(n = all_calls.len()))]
     async fn execute_tool_calls(
         &self,
         all_calls: &[ToolCall],
@@ -332,7 +338,7 @@ impl Engine {
                 .all(|call| is_parallel_safe_tool(call.name.as_str()));
 
         let results = if can_parallelize {
-            join_all(calls.iter().map(|call| async {
+            let futs = join_all(calls.iter().map(|call| async {
                 let mut local_state = AgentState::default();
                 (
                     call.id.clone(),
@@ -346,8 +352,11 @@ impl Engine {
                     )
                     .await,
                 )
-            }))
-            .await
+            }));
+            tokio::select! {
+                () = context.cancellation.cancelled() => return Err(ExecutionError::Cancelled),
+                results = futs => results,
+            }
         } else {
             let mut out = Vec::with_capacity(calls.len());
             for call in &calls {
@@ -422,6 +431,7 @@ impl Engine {
         Ok(())
     }
 
+    #[tracing::instrument(skip_all, fields(tool = %name))]
     pub(crate) async fn execute_agent_tool_call(
         &self,
         name: &str,
@@ -440,6 +450,8 @@ impl Engine {
         if is_mutating_tool(name) {
             self.check_tool_permission(name, &args, context).await?;
         }
+
+        tracing::debug!(tool = %name, "executing tool");
 
         if name.starts_with("mcp:") {
             return self.execute_mcp_tool(name, args).await;

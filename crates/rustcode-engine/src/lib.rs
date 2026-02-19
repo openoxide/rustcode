@@ -133,6 +133,9 @@ pub struct Engine {
     scheduler: scheduler::SchedulerHandle,
     /// LSP manager for the workspace (None if no server detected / no workspace set).
     pub(crate) lsp_manager: Option<Arc<rustcode_lsp::LspManager>>,
+    /// File system watcher for the workspace root (None if not started / no workspace).
+    #[allow(dead_code)]
+    pub(crate) watcher: Option<Arc<rustcode_watcher::FileWatcher>>,
     next_event_id: AtomicU64,
     next_message_id: AtomicU64,
 }
@@ -165,6 +168,7 @@ impl Engine {
             memories: None,
             scheduler: scheduler::SchedulerHandle::default(),
             lsp_manager: None,
+            watcher: None,
             next_event_id: AtomicU64::new(1),
             next_message_id: AtomicU64::new(1),
         }
@@ -189,6 +193,9 @@ impl Engine {
         self.memories = memories;
         self.scheduler = sched;
         self.lsp_manager = rustcode_lsp::LspManager::detect(workspace_root).map(Arc::new);
+        self.watcher = rustcode_watcher::FileWatcher::new(workspace_root)
+            .ok()
+            .map(Arc::new);
         self
     }
 

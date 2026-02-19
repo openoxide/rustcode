@@ -11,6 +11,7 @@ rustcode-io = { path = "../rustcode-io" }
 rustcode-llm = { path = "../rustcode-llm" }
 rustcode-mcp = { path = "../rustcode-mcp" }
 rustcode-lsp = { path = "../rustcode-lsp" }
+rustcode-watcher = { path = "../rustcode-watcher" }
 rustcode-memories = { path = "../rustcode-memories" }
 rustcode-plugins = { path = "../rustcode-plugins" }
 rustcode-skills = { path = "../rustcode-skills" }

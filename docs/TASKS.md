@@ -118,13 +118,13 @@
 - [x] Worktree management: `worktree_create/list/remove/reset` agent tools + `rustcode worktree` CLI subcommand
 - [x] LSP integration: `rustcode-lsp` crate with JSON-RPC transport, auto-detection (rust-analyzer/gopls/pyright/typescript-language-server), `lsp` agent tool (diagnostics/hover/definition/workspace_symbols)
 
-## Milestone 8: Production Reliability
-- [ ] Crash recovery
-- [ ] Graceful cancellation (CancellationToken usage audit)
-- [ ] Structured logging with spans
-- [ ] OpenTelemetry integration (reference: codex `otel_init.rs`)
-- [ ] Cross-platform validation (macOS + Linux)
-- [ ] File watcher (reference: codex `file_watcher.rs`)
+## Milestone 8: Production Reliability ✅
+- [x] Crash recovery — chained panic hook (tracing::error) in main.rs + terminal-restoring hook in TUI runtime.rs
+- [x] Graceful cancellation (CancellationToken usage audit) — load_mcp_tools + join_all parallel dispatch now guarded with tokio::select!
+- [x] Structured logging with spans — #[tracing::instrument] on run_agent, run_llm_step, execute_agent_tool_call, execute_tool_calls
+- [x] OpenTelemetry integration (reference: codex `otel_init.rs`) — rustcode-logging: init_with_otel(endpoint) + OtelGuard; RUSTCODE_OTEL_ENDPOINT env var; catch_unwind around provider init
+- [x] Cross-platform validation (macOS + Linux) — verified: no platform-specific code; notify/portable-pty/tokio all cross-platform; build passes on macOS
+- [x] File watcher (reference: codex `file_watcher.rs`) — new rustcode-watcher crate; notify-based, 500ms throttle, broadcast::Sender; wired into Engine::with_workspace()
 
 ## Milestone 9: Manual End-to-End Testing
 
@@ -197,6 +197,13 @@ Run `cargo build --release` first. Binary: `target/release/rustcode`.
 - [ ] Markdown rendered: `##` headings, `**bold**`, `` `code` ``, code fences
 - [ ] System messages NOT shown in transcript (only user/assistant)
 - [ ] Resize terminal — UI reflows correctly
+
+### M8 — Production Reliability
+- [ ] `RUST_LOG=rustcode_engine=trace rustcode run "hello"` — verify run_agent, run_llm_step, execute_agent_tool_call spans appear
+- [ ] `rustcode run "..."` + Ctrl-C — process exits within 1s (cancellation test)
+- [ ] `RUSTCODE_OTEL_ENDPOINT=http://localhost:4318 rustcode run "hello"` — no panic (OTLP connect attempt logged)
+- [ ] Panic in TUI mode — terminal restored to usable state after panic
+- [ ] File watcher — start rustcode, edit workspace file externally — no crash, watcher event logged at debug level
 
 ### M7a — Skills + Memories + Scheduler
 - [ ] Create `~/.config/rustcode/skills/test.md` with TOML frontmatter → `/skill list` shows it

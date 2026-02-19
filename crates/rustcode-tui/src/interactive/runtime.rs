@@ -24,6 +24,18 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
         submit_mode,
     } = services;
 
+    // Install a terminal-restoring panic hook so the panic message is legible.
+    // Without this, the message prints while the terminal is still in raw mode.
+    // TerminalCleanup's Drop still runs during unwinding, so double-restore is harmless.
+    let prev_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = disable_raw_mode();
+        let mut stdout = io::stdout();
+        let _ = stdout.execute(DisableMouseCapture);
+        let _ = stdout.execute(LeaveAlternateScreen);
+        prev_panic_hook(info);
+    }));
+
     let mut stdout = io::stdout();
     enable_raw_mode().map_err(|err| TuiError::Io(err.to_string()))?;
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)

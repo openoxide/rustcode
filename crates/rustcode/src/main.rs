@@ -42,14 +42,25 @@ use session_cmds::{
 };
 use tui_cmds::{handle_tui_command, handle_tui_default};
 use utils::{
-    init_tracing, is_interactive_terminal, load_effective_config, now_unix_ms,
-    wait_for_shutdown_signal, write_stdout_line, write_stdout_raw,
+    is_interactive_terminal, load_effective_config, now_unix_ms, wait_for_shutdown_signal,
+    write_stdout_line, write_stdout_raw,
 };
 use worktree_cmds::handle_worktree_command;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_tracing();
+    // Initialize tracing + optional OTel export.
+    // Must happen before setting the panic hook so OTel spans capture panics.
+    let otel_endpoint = std::env::var("RUSTCODE_OTEL_ENDPOINT").ok();
+    let _otel_guard = rustcode_logging::init_with_otel(otel_endpoint.as_deref());
+
+    // Chain a panic hook that emits a tracing error before propagating.
+    // This ensures panics are captured in log files / OTel when available.
+    let prev_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        tracing::error!("panic: {info}");
+        prev_hook(info);
+    }));
 
     let cli = Cli::parse();
 
