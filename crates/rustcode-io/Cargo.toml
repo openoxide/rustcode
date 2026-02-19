@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 rustcode-core = { path = "../rustcode-core" }
 async-trait.workspace = true
+portable-pty.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 tokio-util.workspace = true

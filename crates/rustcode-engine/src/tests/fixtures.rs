@@ -209,6 +209,16 @@ impl ProcessPort for CancelledProcess {
     ) -> Result<ProcessOutput, IoError> {
         Err(IoError::Cancelled)
     }
+
+    async fn run_pty(
+        &self,
+        _program: &str,
+        _args: &[String],
+        _cwd: &Path,
+        _cancellation: CancellationToken,
+    ) -> Result<rustcode_io::PtyOutput, IoError> {
+        Err(IoError::Cancelled)
+    }
 }
 
 #[async_trait]
@@ -245,6 +255,19 @@ impl ProcessPort for StubProcess {
             code: self.code,
             stdout: self.stdout.clone(),
             stderr: self.stderr.clone(),
+        })
+    }
+
+    async fn run_pty(
+        &self,
+        _program: &str,
+        _args: &[String],
+        _cwd: &Path,
+        _cancellation: CancellationToken,
+    ) -> Result<rustcode_io::PtyOutput, IoError> {
+        Ok(rustcode_io::PtyOutput {
+            output: self.stdout.clone(),
+            exit_code: self.code,
         })
     }
 }

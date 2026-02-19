@@ -89,7 +89,7 @@ impl Engine {
 }
 
 /// Detect the user's preferred shell.
-fn detect_shell() -> String {
+pub(crate) fn detect_shell() -> String {
     if let Ok(shell) = std::env::var("SHELL") {
         if !shell.is_empty() {
             return shell;
@@ -104,7 +104,7 @@ fn detect_shell() -> String {
 }
 
 /// Return the shell flag for executing a command string.
-fn shell_exec_args(shell: &str) -> &'static str {
+pub(crate) fn shell_exec_args(shell: &str) -> &'static str {
     if shell.ends_with("cmd.exe") || shell.ends_with("cmd") {
         "/C"
     } else {
@@ -113,7 +113,7 @@ fn shell_exec_args(shell: &str) -> &'static str {
 }
 
 /// Truncate output preserving head and tail with a marker in between.
-fn truncate_output(output: &str, max_bytes: usize) -> String {
+pub(crate) fn truncate_output(output: &str, max_bytes: usize) -> String {
     let keep = max_bytes / 2;
     let head = &output[..keep];
     let tail = &output[output.len() - keep..];

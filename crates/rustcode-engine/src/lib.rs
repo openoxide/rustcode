@@ -50,6 +50,7 @@ mod agent_handlers_fs;
 mod agent_handlers_interactive;
 mod agent_handlers_multiedit;
 mod agent_handlers_patch;
+mod agent_handlers_pty;
 mod agent_handlers_search;
 mod agent_handlers_web;
 mod agent_runtime;

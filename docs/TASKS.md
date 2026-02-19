@@ -110,9 +110,9 @@
 - [x] `/skill` and `/memory` TUI slash commands
 - [x] Skills and memory summary injected into system prompt
 
-### M7b: PTY + IDE (planned)
-- [ ] PTY subprocess (reference: opencode `pty/`)
-- [ ] IDE integration hooks (reference: opencode `ide/`)
+### M7b: PTY + IDE ✅
+- [x] PTY subprocess — `process_pty.rs` in `rustcode-io`, `pty_exec` agent tool (reference: opencode `pty/`, codex `utils/pty/`)
+- [x] IDE detection — `ide.rs` in `rustcode-core`, env-var based detection of VS Code, Cursor, Windsurf, etc. (reference: opencode `ide/`)
 
 ### M7c: Worktree + LSP (planned)
 - [ ] Worktree management (reference: opencode `worktree/`)

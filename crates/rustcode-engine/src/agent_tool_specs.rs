@@ -98,6 +98,23 @@ pub fn tool_specs(options: &AgentOptions, allow_network: bool) -> Vec<ToolSpec> 
         }),
     });
 
+    // pty_exec — available when exec is allowed; like bash but with a real TTY
+    if options.allow_exec {
+        specs.push(ToolSpec {
+            name: "pty_exec".to_string(),
+            description: "Execute a command inside a real pseudo-terminal (PTY). Use instead of bash when the command requires TTY detection — interactive REPLs, npm test, python scripts that call sys.stdout.isatty(), programs that only emit colour output when attached to a terminal, etc.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": "Shell command to execute in the PTY" },
+                    "timeout_secs": { "type": "integer", "description": "Timeout in seconds (default: 120, max: 600)" }
+                },
+                "required": ["command"],
+                "additionalProperties": false
+            }),
+        });
+    }
+
     // apply_patch + multiedit — available if write/edit allowed
     if options.allow_write || options.allow_edit {
         specs.push(ToolSpec {

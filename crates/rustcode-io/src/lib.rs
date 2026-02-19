@@ -6,6 +6,9 @@ use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio_util::sync::CancellationToken;
 
+pub mod process_pty;
+pub use process_pty::PtyOutput;
+
 #[derive(Debug, Error)]
 pub enum IoError {
     #[error("io error: {0}")]
@@ -80,6 +83,19 @@ pub trait ProcessPort: Send + Sync {
         cwd: &Path,
         cancellation: CancellationToken,
     ) -> Result<ProcessOutput, IoError>;
+
+    /// Spawn a process under a real PTY, collecting merged output.
+    ///
+    /// Unlike `run_capture`, the subprocess sees `isatty() == true`.
+    /// Use for interactive programs or commands that change behaviour based on
+    /// whether they are attached to a terminal.
+    async fn run_pty(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: &Path,
+        cancellation: CancellationToken,
+    ) -> Result<PtyOutput, IoError>;
 }
 
 #[derive(Debug, Default)]
@@ -291,6 +307,16 @@ impl ProcessPort for LocalIo {
             stdout: String::from_utf8_lossy(&output.stdout).to_string(),
             stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         })
+    }
+
+    async fn run_pty(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: &Path,
+        cancellation: CancellationToken,
+    ) -> Result<PtyOutput, IoError> {
+        process_pty::run_pty(program, args, cwd, cancellation).await
     }
 }
 

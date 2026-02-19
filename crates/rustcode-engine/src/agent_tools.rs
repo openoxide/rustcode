@@ -181,6 +181,21 @@ impl AgentToolRegistry {
                     let timeout_secs = opt_u64(&args, "timeout_secs")?;
                     engine.agent_tool_bash(command, timeout_secs, context).await
                 }
+                "pty_exec" => {
+                    ensure_allowed_keys(&args, &["command", "timeout_secs"])?;
+                    if !options.allow_exec {
+                        return Err(ExecutionError::Dispatch(
+                            "pty_exec is disabled; rerun with --allow-exec".to_string(),
+                        ));
+                    }
+                    let command = opt_str(&args, "command")?.ok_or_else(|| {
+                        ExecutionError::Dispatch("pty_exec tool requires command".to_string())
+                    })?;
+                    let timeout_secs = opt_u64(&args, "timeout_secs")?;
+                    engine
+                        .agent_tool_pty_exec(command, timeout_secs, context)
+                        .await
+                }
                 "apply_patch" => {
                     ensure_allowed_keys(&args, &["patch_text"])?;
                     if !options.allow_write && !options.allow_edit {
