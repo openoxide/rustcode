@@ -79,6 +79,7 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                 tool_details: false,
                 find: None,
                 running: None,
+                pending_prompt: None,
             });
             if should_submit {
                 auto_submit = prompt;
@@ -283,6 +284,7 @@ pub(super) fn drain_messages(state: &mut AppState) {
             InteractiveMsg::RunEnded { ok, message } => {
                 if let Screen::Chat(chat) = &mut screen {
                     chat.running = None;
+                    chat.pending_prompt = None;
                     chat.live_assistant.clear();
                     if ok {
                         state.status = None;
@@ -314,23 +316,22 @@ pub(super) fn drain_messages(state: &mut AppState) {
 
 pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: String) {
     let Some(config) = state.config.clone() else {
-        state.status = Some("config not loaded; cannot run".to_string());
-        push_toast(
-            state,
-            ToastVariant::Error,
-            "config not loaded; cannot run",
-            Duration::from_secs(4),
-        );
+        let msg = state
+            .status
+            .clone()
+            .unwrap_or_else(|| "config not loaded — check your rustcode config file".to_string());
+        state.status = Some(msg.clone());
+        push_toast(state, ToastVariant::Error, msg, Duration::from_secs(6));
         return;
     };
     let Some(executor) = state.executor.clone() else {
-        state.status = Some("executor not available; cannot run".to_string());
-        push_toast(
-            state,
-            ToastVariant::Error,
-            "executor not available; cannot run",
-            Duration::from_secs(4),
-        );
+        // Preserve the original init error (e.g. missing API key) if already set
+        let msg = state
+            .status
+            .clone()
+            .unwrap_or_else(|| "LLM executor not available — check API key in config".to_string());
+        state.status = Some(msg.clone());
+        push_toast(state, ToastVariant::Error, msg, Duration::from_secs(6));
         return;
     };
 
@@ -356,6 +357,7 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
     chat.running = Some(RunningCommand {
         cancellation: cancellation.clone(),
     });
+    chat.pending_prompt = Some(prompt.clone());
     state.status = None;
     chat.live_assistant.clear();
 

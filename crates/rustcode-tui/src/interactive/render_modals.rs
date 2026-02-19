@@ -156,6 +156,80 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                 frame.set_cursor_position((x, y));
             }
         }
+        Modal::FileSearch {
+            query,
+            entries,
+            view,
+            selected,
+        } => {
+            let area = centered_rect(80, 75, frame.area());
+            frame.render_widget(Clear, area);
+
+            let block = Block::default()
+                .title("File search")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan));
+            let inner = block.inner(area);
+            frame.render_widget(block, area);
+
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([
+                    Constraint::Length(3),
+                    Constraint::Min(3),
+                    Constraint::Length(2),
+                ])
+                .split(inner);
+
+            let input_line = Paragraph::new(Line::from(vec![
+                Span::styled(
+                    "> ",
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::raw(query.clone()),
+            ]))
+            .block(Block::default().title("Search").borders(Borders::ALL));
+            frame.render_widget(input_line, rows[0]);
+
+            let total = entries.len();
+            let shown = view.len();
+            let list_title = format!("Files ({shown}/{total})");
+            let list_items = if view.is_empty() {
+                vec![ListItem::new("(no matches)")]
+            } else {
+                view.iter()
+                    .filter_map(|idx| entries.get(*idx))
+                    .map(|path| ListItem::new(Span::raw(path.clone())))
+                    .collect::<Vec<_>>()
+            };
+            let list = List::new(list_items)
+                .block(Block::default().title(list_title).borders(Borders::ALL))
+                .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+            let mut list_state = ratatui::widgets::ListState::default();
+            if !view.is_empty() {
+                list_state.select(Some((*selected).min(view.len().saturating_sub(1))));
+            }
+            frame.render_stateful_widget(list, rows[1], &mut list_state);
+
+            let hint = Paragraph::new(Line::from(vec![
+                Span::raw("Enter: insert path  "),
+                Span::raw("Esc: close  "),
+                Span::raw("Up/Down: select"),
+            ]))
+            .block(Block::default().borders(Borders::TOP));
+            frame.render_widget(hint, rows[2]);
+
+            let x = rows[0]
+                .x
+                .saturating_add(4)
+                .saturating_add(query.chars().count() as u16);
+            let y = rows[0].y.saturating_add(1);
+            if x < area.x + area.width && y < area.y + area.height {
+                frame.set_cursor_position((x, y));
+            }
+        }
         Modal::Rename {
             session_id,
             input,
@@ -209,6 +283,33 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
             ];
             frame.render_widget(Paragraph::new(lines).block(block), area);
         }
+        Modal::ErrorDetail { message } => {
+            let area = centered_rect(80, 60, frame.area());
+            frame.render_widget(Clear, area);
+            let block = Block::default()
+                .title("Error details")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Red));
+            let inner = block.inner(area);
+            frame.render_widget(block, area);
+
+            let rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(1), Constraint::Length(2)])
+                .split(inner);
+
+            let body = Paragraph::new(message.clone())
+                .style(Style::default().fg(Color::Red))
+                .wrap(Wrap { trim: false });
+            frame.render_widget(body, rows[0]);
+
+            let hint = Paragraph::new(Line::from(vec![Span::styled(
+                "Esc / Enter: dismiss",
+                Style::default().fg(Color::DarkGray),
+            )]))
+            .block(Block::default().borders(Borders::TOP));
+            frame.render_widget(hint, rows[1]);
+        }
     }
 }
 
@@ -240,36 +341,54 @@ pub(super) fn render_help_modal(frame: &mut ratatui::Frame<'_>, state: &AppState
         "Sessions",
         Style::default().add_modifier(Modifier::BOLD),
     )]));
-    lines.push(Line::raw("  Up/Down: select"));
-    lines.push(Line::raw("  Enter: open"));
-    lines.push(Line::raw("  /: filter"));
-    lines.push(Line::raw("  n: new"));
-    lines.push(Line::raw("  f: fork"));
-    lines.push(Line::raw("  e: rename"));
-    lines.push(Line::raw("  d: delete"));
-    lines.push(Line::raw("  r: refresh"));
+    lines.push(Line::raw(
+        "  Up/Down/PgUp/PgDn: select  Home/End: first/last",
+    ));
+    lines.push(Line::raw("  Enter: open session"));
+    lines.push(Line::raw("  /: search/filter sessions"));
+    lines.push(Line::raw("  Ctrl+N: new session"));
+    lines.push(Line::raw("  Ctrl+E: rename session"));
+    lines.push(Line::raw("  Ctrl+D: delete session"));
+    lines.push(Line::raw("  Ctrl+R: refresh list"));
+    lines.push(Line::raw("  Esc / Q: quit"));
     lines.push(Line::raw(""));
 
     lines.push(Line::from(vec![Span::styled(
         "Chat",
         Style::default().add_modifier(Modifier::BOLD),
     )]));
-    lines.push(Line::raw("  Tab: focus (composer/transcript/activity)"));
-    lines.push(Line::raw("  Enter: submit (composer) / open (activity)"));
-    lines.push(Line::raw("  Alt+Enter: newline (composer)"));
     lines.push(Line::raw(
-        "  Arrow keys: edit (composer) / scroll (transcript) / select (activity)",
+        "  Tab: cycle focus (composer → transcript → activity)",
     ));
-    lines.push(Line::raw("  / (transcript): search"));
-    lines.push(Line::raw("  n/N (transcript): next/prev match"));
-    lines.push(Line::raw("  Alt+Up/Down: prompt history"));
-    lines.push(Line::raw("  Ctrl+C: cancel running"));
-    lines.push(Line::raw("  Ctrl+N: new session"));
-    lines.push(Line::raw("  Ctrl+F: fork session"));
-    lines.push(Line::raw("  r: refresh transcript"));
-    lines.push(Line::raw("  t: toggle tool transcript mode"));
     lines.push(Line::raw(
-        "  /commands: /help /sessions /new /fork /reload /tools",
+        "  Esc: focus back to composer / clear composer / back to sessions",
+    ));
+    lines.push(Line::raw(
+        "  Enter: submit prompt (composer) / next match (transcript) / details (activity)",
+    ));
+    lines.push(Line::raw("  Alt+Enter: insert newline in composer"));
+    lines.push(Line::raw("  Alt+Up/Down: browse prompt history"));
+    lines.push(Line::raw(
+        "  Arrow keys: edit text (composer) / scroll (transcript) / select (activity)",
+    ));
+    lines.push(Line::raw(
+        "  / (any focus): move to composer and insert / for slash commands",
+    ));
+    lines.push(Line::raw("  Ctrl+C: cancel running agent"));
+    lines.push(Line::raw("  Ctrl+N: new session"));
+    lines.push(Line::raw("  Ctrl+F: fork current session"));
+    lines.push(Line::raw("  Ctrl+R: refresh transcript"));
+    lines.push(Line::raw(
+        "  Ctrl+T: file search (inserts @path into composer)",
+    ));
+    lines.push(Line::raw("  Ctrl+Q: go to sessions list"));
+    lines.push(Line::raw("  Ctrl+P: open command palette"));
+    lines.push(Line::raw(""));
+    lines.push(Line::raw(
+        "  Slash commands (type in composer, press Enter):",
+    ));
+    lines.push(Line::raw(
+        "  /help  /sessions  /new  /fork  /reload  /tools  /find  /model  /clear",
     ));
 
     if state.submit_mode == InteractiveSubmitMode::Run {

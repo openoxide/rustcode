@@ -245,7 +245,6 @@ pub fn is_git_repo(workspace_root: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     fn mock_tools() -> Vec<rustcode_llm::ToolSpec> {
         vec![

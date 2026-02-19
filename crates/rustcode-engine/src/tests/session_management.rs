@@ -2,7 +2,6 @@
 
 use super::*;
 use crate::{instructions, retry, session_summary, system_prompt};
-use std::path::Path;
 
 #[test]
 fn instructions_load_from_workspace() {

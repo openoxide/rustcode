@@ -1,7 +1,8 @@
 use super::{
     build_prompt_history, build_transcript_lines, composer_clear, compute_find_matches,
-    compute_sessions_view, push_toast, sort_sessions, AppState, ChatFocus, ChatNav, ChatState,
-    CommandId, CreateSessionOptions, Duration, Modal, Screen, ToastVariant,
+    compute_sessions_view, filter_files, open_command_palette, push_toast, scan_workspace_files,
+    sort_sessions, AppState, ChatFocus, ChatNav, ChatState, CommandId, CreateSessionOptions,
+    Duration, Modal, Screen, ToastVariant,
 };
 
 pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
@@ -67,6 +68,7 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                         tool_details: false,
                         find: None,
                         running: None,
+                        pending_prompt: None,
                     });
                     push_toast(
                         state,
@@ -238,6 +240,16 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
             );
             state.screen = Screen::Chat(chat);
         }
+        CommandId::FileSearch => {
+            let entries = scan_workspace_files(&state.defaults.workspace_root.clone());
+            let view = filter_files(&entries, "");
+            state.modal = Some(Modal::FileSearch {
+                query: String::new(),
+                entries,
+                view,
+                selected: 0,
+            });
+        }
         CommandId::Search => {
             let Screen::Chat(mut chat) = std::mem::replace(&mut state.screen, Screen::Sessions)
             else {
@@ -310,11 +322,16 @@ pub(super) fn handle_slash_command(
     let raw = input.trim();
     let cmd = raw.trim_start_matches('/').trim();
     match cmd {
-        "help" => {
+        // Empty "/" → open command palette so user can discover commands
+        "" => {
+            open_command_palette(state);
+            ChatNav::Stay
+        }
+        "help" | "?" => {
             state.help_open = true;
             ChatNav::Stay
         }
-        "sessions" | "home" => ChatNav::ToSessions,
+        "sessions" | "home" | "back" => ChatNav::ToSessions,
         "clear" => {
             composer_clear(chat);
             ChatNav::Stay
@@ -340,6 +357,32 @@ pub(super) fn handle_slash_command(
                     "tools: summary"
                 },
                 Duration::from_secs(2),
+            );
+            ChatNav::Stay
+        }
+        "find" | "search" => {
+            let query = chat
+                .find
+                .as_ref()
+                .map(|f| f.query.clone())
+                .unwrap_or_default();
+            let transcript = build_transcript_lines(chat);
+            let matches = compute_find_matches(&transcript, &query);
+            state.modal = Some(Modal::Search {
+                query,
+                current: chat.find.as_ref().map_or(0, |f| f.current),
+                matches,
+            });
+            chat.focus = ChatFocus::Transcript;
+            ChatNav::Stay
+        }
+        "model" => {
+            let model = state.defaults.model.clone();
+            push_toast(
+                state,
+                ToastVariant::Info,
+                format!("model: {model}"),
+                Duration::from_secs(4),
             );
             ChatNav::Stay
         }

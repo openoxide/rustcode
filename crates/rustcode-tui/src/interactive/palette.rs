@@ -115,6 +115,14 @@ pub(super) fn build_command_items(state: &AppState) -> Vec<CommandItem> {
     });
 
     items.push(CommandItem {
+        id: CommandId::FileSearch,
+        title: "File search".to_string(),
+        detail: "Browse workspace files (Ctrl+T)".to_string(),
+        enabled: true,
+        disabled_reason: None,
+    });
+
+    items.push(CommandItem {
         id: CommandId::FocusComposer,
         title: "Focus composer".to_string(),
         detail: "Move focus to prompt input".to_string(),
@@ -294,6 +302,7 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
                         tool_details: false,
                         find: None,
                         running: None,
+                        pending_prompt: None,
                     });
                     push_toast(
                         state,

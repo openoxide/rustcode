@@ -1,11 +1,11 @@
 use super::{
-    build_prompt_history, build_transcript_lines, composer_backspace, composer_clear,
-    composer_delete, composer_insert_str, composer_move_down, composer_move_end,
-    composer_move_home, composer_move_left, composer_move_right, composer_move_up,
-    compute_find_matches, find_next, find_prev, handle_slash_command, history_next, history_prev,
-    open_command_palette, push_toast, refresh_chat_messages, submit_prompt, transcript_area_height,
-    ActivityItem, AppState, ChatFocus, ChatNav, ChatState, CreateSessionOptions, Duration, KeyCode,
-    KeyEvent, KeyModifiers, Modal, ToastVariant,
+    build_prompt_history, composer_backspace, composer_clear, composer_delete, composer_insert_str,
+    composer_move_down, composer_move_end, composer_move_home, composer_move_left,
+    composer_move_right, composer_move_up, execute_command, find_next, handle_slash_command,
+    history_next, history_prev, open_command_palette, push_toast, refresh_chat_messages,
+    submit_prompt, transcript_area_height, ActivityItem, AppState, ChatFocus, ChatNav, ChatState,
+    CommandId, CreateSessionOptions, Duration, KeyCode, KeyEvent, KeyModifiers, Modal,
+    ToastVariant,
 };
 
 pub(super) fn handle_chat_key(
@@ -13,124 +13,158 @@ pub(super) fn handle_chat_key(
     chat: &mut ChatState,
     key: KeyEvent,
 ) -> ChatNav {
-    if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('c')) {
-        if let Some(running) = &chat.running {
-            running.cancellation.cancel();
-            chat.activity.push(ActivityItem::Warning {
-                message: "cancel requested".to_string(),
-            });
-        }
-        return ChatNav::Stay;
-    }
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
 
-    if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('p')) {
-        open_command_palette(state);
-        return ChatNav::Stay;
-    }
-
-    if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('n')) {
-        if chat.running.is_some() {
-            state.status = Some("cannot create session while running".to_string());
-            push_toast(
-                state,
-                ToastVariant::Warning,
-                "cannot create session while running",
-                Duration::from_secs(3),
-            );
-            return ChatNav::Stay;
-        }
-        let cwd = match std::env::current_dir() {
-            Ok(cwd) => cwd,
-            Err(err) => {
-                state.status = Some(format!("failed to resolve cwd: {err}"));
+    // ── Ctrl+key shortcuts (work regardless of focus) ───────────────
+    if ctrl {
+        match key.code {
+            KeyCode::Char('c' | 'C') => {
+                if let Some(running) = &chat.running {
+                    running.cancellation.cancel();
+                    chat.activity.push(ActivityItem::Warning {
+                        message: "cancel requested".to_string(),
+                    });
+                }
                 return ChatNav::Stay;
             }
-        };
-        match state.backend.create_session(CreateSessionOptions {
-            title: None,
-            parent_id: None,
-            cwd,
-            workspace_root: state.defaults.workspace_root.clone(),
-            model: state.defaults.model.clone(),
-        }) {
-            Ok(session) => {
-                let messages = state
-                    .backend
-                    .load_messages(&session.id)
-                    .unwrap_or_else(|err| {
-                        state.status = Some(err.clone());
-                        push_toast(state, ToastVariant::Error, err, Duration::from_secs(4));
-                        Vec::new()
-                    });
-                chat.session = session;
-                chat.messages = messages;
-                chat.scroll = 0;
-                chat.live_assistant.clear();
-                composer_clear(chat);
-                chat.prompt_history = build_prompt_history(&chat.messages);
-                chat.history_cursor = None;
-                chat.history_draft.clear();
-                chat.focus = ChatFocus::Composer;
-                chat.activity.clear();
-                chat.activity_selected = 0;
-                chat.details_open = false;
-                chat.tool_details = false;
-                chat.find = None;
-                chat.running = None;
-                state.status = None;
+            KeyCode::Char('p' | 'P') => {
+                open_command_palette(state);
+                return ChatNav::Stay;
             }
-            Err(err) => {
-                let msg = format!("failed to create session: {err}");
-                state.status = Some(msg.clone());
-                push_toast(state, ToastVariant::Error, msg, Duration::from_secs(4));
+            KeyCode::Char('n' | 'N') => {
+                if chat.running.is_some() {
+                    push_toast(
+                        state,
+                        ToastVariant::Warning,
+                        "cannot create session while running",
+                        Duration::from_secs(3),
+                    );
+                    return ChatNav::Stay;
+                }
+                let cwd = match std::env::current_dir() {
+                    Ok(cwd) => cwd,
+                    Err(err) => {
+                        state.status = Some(format!("failed to resolve cwd: {err}"));
+                        return ChatNav::Stay;
+                    }
+                };
+                match state.backend.create_session(CreateSessionOptions {
+                    title: None,
+                    parent_id: None,
+                    cwd,
+                    workspace_root: state.defaults.workspace_root.clone(),
+                    model: state.defaults.model.clone(),
+                }) {
+                    Ok(session) => {
+                        let messages =
+                            state
+                                .backend
+                                .load_messages(&session.id)
+                                .unwrap_or_else(|err| {
+                                    state.status = Some(err.clone());
+                                    push_toast(
+                                        state,
+                                        ToastVariant::Error,
+                                        err,
+                                        Duration::from_secs(4),
+                                    );
+                                    Vec::new()
+                                });
+                        chat.session = session;
+                        chat.messages = messages;
+                        chat.scroll = 0;
+                        chat.live_assistant.clear();
+                        composer_clear(chat);
+                        chat.prompt_history = build_prompt_history(&chat.messages);
+                        chat.history_cursor = None;
+                        chat.history_draft.clear();
+                        chat.focus = ChatFocus::Composer;
+                        chat.activity.clear();
+                        chat.activity_selected = 0;
+                        chat.details_open = false;
+                        chat.tool_details = false;
+                        chat.find = None;
+                        chat.running = None;
+                        state.status = None;
+                    }
+                    Err(err) => {
+                        let msg = format!("failed to create session: {err}");
+                        state.status = Some(msg.clone());
+                        push_toast(state, ToastVariant::Error, msg, Duration::from_secs(4));
+                    }
+                }
+                return ChatNav::Stay;
             }
+            KeyCode::Char('f' | 'F') => {
+                if chat.running.is_some() {
+                    push_toast(
+                        state,
+                        ToastVariant::Warning,
+                        "cannot fork session while running",
+                        Duration::from_secs(3),
+                    );
+                    return ChatNav::Stay;
+                }
+                match state.backend.fork_session(&chat.session.id, None) {
+                    Ok(forked) => {
+                        let messages =
+                            state
+                                .backend
+                                .load_messages(&forked.id)
+                                .unwrap_or_else(|err| {
+                                    state.status = Some(err.clone());
+                                    push_toast(
+                                        state,
+                                        ToastVariant::Error,
+                                        err,
+                                        Duration::from_secs(4),
+                                    );
+                                    Vec::new()
+                                });
+                        chat.session = forked;
+                        chat.messages = messages;
+                        chat.scroll = 0;
+                        chat.live_assistant.clear();
+                        composer_clear(chat);
+                        chat.prompt_history = build_prompt_history(&chat.messages);
+                        chat.history_cursor = None;
+                        chat.history_draft.clear();
+                        chat.focus = ChatFocus::Composer;
+                        chat.activity.clear();
+                        chat.activity_selected = 0;
+                        chat.details_open = false;
+                        chat.tool_details = false;
+                        chat.find = None;
+                        chat.running = None;
+                        state.status = None;
+                    }
+                    Err(err) => state.status = Some(format!("failed to fork session: {err}")),
+                }
+                return ChatNav::Stay;
+            }
+            KeyCode::Char('t' | 'T') => {
+                execute_command(state, CommandId::FileSearch);
+                return ChatNav::Stay;
+            }
+            KeyCode::Char('r' | 'R') => {
+                refresh_chat_messages(state, chat);
+                push_toast(
+                    state,
+                    ToastVariant::Info,
+                    "refreshed transcript",
+                    Duration::from_secs(2),
+                );
+                return ChatNav::Stay;
+            }
+            KeyCode::Char('q' | 'Q') => {
+                return ChatNav::ToSessions;
+            }
+            _ => {}
         }
-        return ChatNav::Stay;
     }
 
-    if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('f')) {
-        if chat.running.is_some() {
-            state.status = Some("cannot fork session while running".to_string());
-            push_toast(
-                state,
-                ToastVariant::Warning,
-                "cannot fork session while running",
-                Duration::from_secs(3),
-            );
-            return ChatNav::Stay;
-        }
-        match state.backend.fork_session(&chat.session.id, None) {
-            Ok(forked) => {
-                let messages = state
-                    .backend
-                    .load_messages(&forked.id)
-                    .unwrap_or_else(|err| {
-                        state.status = Some(err.clone());
-                        push_toast(state, ToastVariant::Error, err, Duration::from_secs(4));
-                        Vec::new()
-                    });
-                chat.session = forked;
-                chat.messages = messages;
-                chat.scroll = 0;
-                chat.live_assistant.clear();
-                composer_clear(chat);
-                chat.prompt_history = build_prompt_history(&chat.messages);
-                chat.history_cursor = None;
-                chat.history_draft.clear();
-                chat.focus = ChatFocus::Composer;
-                chat.activity.clear();
-                chat.activity_selected = 0;
-                chat.details_open = false;
-                chat.tool_details = false;
-                chat.find = None;
-                chat.running = None;
-                state.status = None;
-            }
-            Err(err) => state.status = Some(format!("failed to fork session: {err}")),
-        }
-        return ChatNav::Stay;
-    }
-
+    // ── Activity details modal ───────────────────────────────────────
     if chat.details_open {
         match key.code {
             KeyCode::Esc | KeyCode::Enter => chat.details_open = false,
@@ -139,7 +173,8 @@ pub(super) fn handle_chat_key(
         return ChatNav::Stay;
     }
 
-    if chat.focus == ChatFocus::Composer && key.modifiers.contains(KeyModifiers::ALT) {
+    // ── Alt+key: prompt history navigation ──────────────────────────
+    if chat.focus == ChatFocus::Composer && alt {
         match key.code {
             KeyCode::Up => {
                 history_prev(chat);
@@ -153,6 +188,16 @@ pub(super) fn handle_chat_key(
         }
     }
 
+    // ── When the composer is focused, all plain character keys type ──
+    // This must come before any single-key shortcut matches.
+    if chat.focus == ChatFocus::Composer && !ctrl && !alt {
+        if let KeyCode::Char(ch) = key.code {
+            composer_insert_str(chat, &ch.to_string());
+            return ChatNav::Stay;
+        }
+    }
+
+    // ── Non-character keys and shortcuts ────────────────────────────
     match key.code {
         KeyCode::Tab => {
             chat.focus = match chat.focus {
@@ -161,49 +206,30 @@ pub(super) fn handle_chat_key(
                 ChatFocus::Activity => ChatFocus::Composer,
             };
         }
-        KeyCode::Char('/') => {
-            if chat.focus == ChatFocus::Transcript {
-                let query = chat
-                    .find
-                    .as_ref()
-                    .map(|find| find.query.clone())
-                    .unwrap_or_default();
-                let transcript = build_transcript_lines(chat);
-                let matches = compute_find_matches(&transcript, &query);
-                state.modal = Some(Modal::Search {
-                    query,
-                    current: chat.find.as_ref().map_or(0, |f| f.current),
-                    matches,
-                });
+        KeyCode::Char('?') => state.help_open = true,
+        KeyCode::Esc => {
+            if chat.focus != ChatFocus::Composer {
+                chat.focus = ChatFocus::Composer;
                 return ChatNav::Stay;
             }
-        }
-        KeyCode::Char('?') => state.help_open = true,
-        KeyCode::Char('t') => chat.tool_details = !chat.tool_details,
-        KeyCode::Esc => {
             if chat.composer.is_empty() {
                 return ChatNav::ToSessions;
             }
             composer_clear(chat);
         }
-        KeyCode::Char('q') => return ChatNav::ToSessions,
-        KeyCode::Char('r') => refresh_chat_messages(state, chat),
-        KeyCode::Char('n') => {
-            if chat.focus == ChatFocus::Transcript {
-                find_next(state, chat, transcript_area_height(state));
+        // "/" from non-composer focus: move to composer and insert "/" so user can type /commands
+        KeyCode::Char('/') => {
+            if chat.focus != ChatFocus::Composer {
+                chat.focus = ChatFocus::Composer;
+                composer_insert_str(chat, "/");
                 return ChatNav::Stay;
             }
         }
-        KeyCode::Char('N') => {
-            if chat.focus == ChatFocus::Transcript {
-                find_prev(state, chat, transcript_area_height(state));
-                return ChatNav::Stay;
-            }
-        }
+        // Scroll / selection
         KeyCode::PageUp => {
             if chat.focus == ChatFocus::Activity {
                 chat.activity_selected = chat.activity_selected.saturating_sub(10);
-            } else if chat.focus != ChatFocus::Composer {
+            } else if chat.focus == ChatFocus::Transcript {
                 chat.scroll = chat.scroll.saturating_add(5);
             }
         }
@@ -211,7 +237,7 @@ pub(super) fn handle_chat_key(
             if chat.focus == ChatFocus::Activity {
                 chat.activity_selected =
                     (chat.activity_selected + 10).min(chat.activity.len().saturating_sub(1));
-            } else if chat.focus != ChatFocus::Composer {
+            } else if chat.focus == ChatFocus::Transcript {
                 chat.scroll = chat.scroll.saturating_sub(5);
             }
         }
@@ -278,12 +304,20 @@ pub(super) fn handle_chat_key(
                 return ChatNav::Stay;
             }
 
-            if chat.focus == ChatFocus::Composer && key.modifiers.contains(KeyModifiers::ALT) {
+            if chat.focus == ChatFocus::Composer && alt {
                 composer_insert_str(chat, "\n");
                 return ChatNav::Stay;
             }
 
             if chat.focus == ChatFocus::Transcript {
+                // If there's a search active, navigate; otherwise show error detail if any
+                let has_search = chat.find.as_ref().is_some_and(|f| !f.query.is_empty());
+                if !has_search {
+                    if let Some(msg) = state.status.clone() {
+                        state.modal = Some(Modal::ErrorDetail { message: msg });
+                        return ChatNav::Stay;
+                    }
+                }
                 find_next(state, chat, transcript_area_height(state));
                 return ChatNav::Stay;
             }
@@ -293,6 +327,10 @@ pub(super) fn handle_chat_key(
             }
             let prompt = chat.composer.trim().to_string();
             if prompt.is_empty() {
+                // Empty Enter with an error status → show full error detail
+                if let Some(msg) = state.status.clone() {
+                    state.modal = Some(Modal::ErrorDetail { message: msg });
+                }
                 return ChatNav::Stay;
             }
             if prompt.starts_with('/') {
@@ -301,14 +339,6 @@ pub(super) fn handle_chat_key(
             }
             composer_clear(chat);
             submit_prompt(state, chat, prompt);
-        }
-        KeyCode::Char(ch) => {
-            if !key.modifiers.contains(KeyModifiers::CONTROL)
-                && !key.modifiers.contains(KeyModifiers::ALT)
-                && chat.focus == ChatFocus::Composer
-            {
-                composer_insert_str(chat, &ch.to_string());
-            }
         }
         _ => {}
     }

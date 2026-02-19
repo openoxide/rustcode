@@ -30,7 +30,9 @@ use crate::{
 
 mod commands;
 mod composer;
+mod file_search;
 mod input;
+mod markdown;
 mod palette;
 mod render_activity;
 mod render_main;
@@ -46,6 +48,7 @@ use composer::{
     composer_insert_str, composer_move_down, composer_move_end, composer_move_home,
     composer_move_left, composer_move_right, composer_move_up, history_next, history_prev,
 };
+use file_search::{filter_files, scan_workspace_files};
 use input::handle_key;
 use palette::{compute_palette_view, maybe_execute_palette_query, open_command_palette};
 use render_activity::{render_activity, render_activity_details_modal, render_approval_modal};

@@ -84,18 +84,22 @@
 - [x] Update `AGENT.md` — rules 13 (fix before building) and 14 (manual testing)
 
 ## Milestone 6: TUI Architecture Overhaul
-- [ ] Design Rust-native TUI architecture (reference: codex `tui/src/`, opencode OpenTUI)
-- [ ] Chat view with streaming markdown rendering
-- [ ] Session list/management view
-- [ ] Approval overlay system
-- [ ] Command palette / slash commands
-- [ ] File search popup
+- [x] Design Rust-native TUI architecture (reference: codex `tui/src/`, opencode OpenTUI)
+- [x] Chat view with streaming markdown rendering
+- [x] Session list/management view
+- [x] Approval overlay system
+- [x] Command palette / slash commands
+- [x] File search popup (Ctrl+T, inserts @path into composer)
 - [ ] Skill toggle view
 - [ ] Feedback view
-- [ ] Input composer with history
-- [ ] Footer with keybinds/status
-- [ ] Scroll state management
-- [ ] Proper UI state separation from engine state
+- [x] Input composer with history (Alt+Up/Down)
+- [x] Footer with keybinds/status (Ctrl+key combos, model label, error display)
+- [x] Scroll state management
+- [x] Proper UI state separation from engine state
+- [x] Key binding fix: Ctrl+key combos, no single-key conflicts with composer typing
+- [x] Status/error display in footer (red bold)
+- [x] Default startup opens new session (not session list)
+- [x] Markdown rendering in transcript (headings, code fences, bold/italic/inline code)
 
 ## Milestone 7: Advanced Features
 - [ ] Skill system (reference: opencode `skill/`, codex `skills/`)

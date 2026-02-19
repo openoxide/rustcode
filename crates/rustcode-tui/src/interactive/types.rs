@@ -53,6 +53,12 @@ pub(super) enum Modal {
         current: usize,
         matches: Vec<usize>,
     },
+    FileSearch {
+        query: String,
+        entries: Vec<String>,
+        view: Vec<usize>,
+        selected: usize,
+    },
     Rename {
         session_id: String,
         input: String,
@@ -61,6 +67,10 @@ pub(super) enum Modal {
     DeleteConfirm {
         session_id: String,
         title: String,
+    },
+    /// Full error detail popup (opened from footer error via Enter)
+    ErrorDetail {
+        message: String,
     },
 }
 
@@ -75,6 +85,7 @@ pub(super) enum CommandId {
     Refresh,
     ToggleTools,
     Search,
+    FileSearch,
     FocusComposer,
     FocusTranscript,
     FocusActivity,
@@ -242,6 +253,8 @@ pub(super) struct ChatState {
     pub(super) tool_details: bool,
     pub(super) find: Option<FindState>,
     pub(super) running: Option<RunningCommand>,
+    /// The prompt most recently submitted but not yet confirmed by backend reload.
+    pub(super) pending_prompt: Option<String>,
 }
 
 pub(super) struct AppState {

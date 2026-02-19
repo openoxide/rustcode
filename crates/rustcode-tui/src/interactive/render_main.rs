@@ -40,22 +40,30 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
             .iter()
             .filter_map(|idx| state.sessions.get(*idx))
             .map(|session| {
-                let title = session.title.as_deref().unwrap_or("-");
                 let age = format_age(session.updated_at_unix_ms);
-                let fork = if session.parent_id.is_some() {
-                    "*"
+                let fork_marker = if session.parent_id.is_some() {
+                    "⑂ "
                 } else {
-                    " "
+                    "  "
                 };
+                // Show title if set; otherwise show "(new session)" for untitled ones
+                let title = session.title.as_deref().unwrap_or("(new session)");
+                let id_short = &session.id;
                 ListItem::new(Line::from(vec![
+                    Span::styled(fork_marker, Style::default().fg(Color::Cyan)),
                     Span::styled(
-                        format!("{fork}{}", session.id),
-                        Style::default().fg(Color::Cyan),
+                        title.to_string(),
+                        Style::default().add_modifier(Modifier::BOLD),
                     ),
                     Span::raw("  "),
-                    Span::raw(title.to_string()),
+                    Span::styled(
+                        id_short.clone(),
+                        Style::default()
+                            .fg(Color::DarkGray)
+                            .add_modifier(Modifier::DIM),
+                    ),
                     Span::raw("  "),
-                    Span::styled(age.clone(), Style::default().add_modifier(Modifier::DIM)),
+                    Span::styled(age, Style::default().add_modifier(Modifier::DIM)),
                 ]))
             })
             .collect::<Vec<_>>()
@@ -78,44 +86,47 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
     }
     frame.render_stateful_widget(list, chunks[0], &mut list_state);
 
-    let toast = state
-        .toasts
-        .last()
-        .map(|toast| (toast.variant, toast.message.as_str()));
-    let toast_style = match toast.map(|(variant, _)| variant) {
-        Some(ToastVariant::Info) => Style::default().fg(Color::Cyan),
-        Some(ToastVariant::Success) => Style::default().fg(Color::Green),
-        Some(ToastVariant::Warning) => Style::default().fg(Color::Magenta),
-        Some(ToastVariant::Error) => Style::default().fg(Color::Red),
-        None => Style::default(),
+    let (status_text, status_style) = if let Some(toast) = state.toasts.last() {
+        let style = match toast.variant {
+            ToastVariant::Info => Style::default().fg(Color::Cyan),
+            ToastVariant::Success => Style::default().fg(Color::Green),
+            ToastVariant::Warning => Style::default().fg(Color::Magenta),
+            ToastVariant::Error => Style::default().fg(Color::Red),
+        };
+        (toast.message.as_str(), style)
+    } else {
+        ("", Style::default())
+    };
+    let model_label = state.defaults.model.as_str();
+    let filter_display = if state.sessions_filter.is_empty() {
+        String::new()
+    } else {
+        format!("  filter:{}", state.sessions_filter)
     };
     let help = Paragraph::new(Line::from(vec![
-        Span::raw("?: help  Ctrl+P: commands  "),
-        Span::raw("Up/Down: select  "),
-        Span::raw("Enter: open  "),
-        Span::raw("/: filter  "),
-        Span::raw("n: new  "),
-        Span::raw("f: fork  "),
-        Span::raw("e: rename  "),
-        Span::raw("d: delete  "),
-        Span::raw("r: refresh  "),
-        Span::raw("q: quit"),
-        Span::raw("  "),
-        Span::styled(toast.map_or("", |(_, msg)| msg), toast_style),
-        Span::raw("  "),
         Span::styled(
-            format!(
-                "filter={}",
-                if state.sessions_filter.is_empty() {
-                    "-"
-                } else {
-                    &state.sessions_filter
-                }
-            ),
-            Style::default().add_modifier(Modifier::DIM),
+            " ?: help  Ctrl+P: cmds  ↑↓: select  Enter: open  /: filter  ",
+            Style::default().fg(Color::DarkGray),
         ),
+        Span::styled(
+            "Ctrl+N: new  Ctrl+E: rename  Ctrl+D: delete  Ctrl+R: refresh  Esc: quit",
+            Style::default().fg(Color::DarkGray),
+        ),
+        Span::styled(filter_display, Style::default().fg(Color::Cyan)),
+        Span::styled(
+            format!("  [{model_label}]"),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ),
+        Span::raw("  "),
+        Span::styled(status_text, status_style),
     ]))
-    .block(Block::default().borders(Borders::TOP));
+    .block(
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    );
     frame.render_widget(help, chunks[1]);
 }
 
@@ -130,27 +141,25 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         .constraints([
             Constraint::Min(1),
             Constraint::Length(5),
-            Constraint::Length(2),
+            Constraint::Length(3),
         ])
         .split(root[0]);
 
+    // Show title if renamed, otherwise just show "(new session)"
     let session_title = chat
         .session
         .title
         .as_deref()
-        .unwrap_or(chat.session.id.as_str())
+        .unwrap_or("(new session)")
         .to_string();
     let mut transcript_title_spans = vec![
         Span::styled(session_title, Style::default().add_modifier(Modifier::BOLD)),
         Span::raw("  "),
         Span::styled(
             chat.session.id.clone(),
-            Style::default().add_modifier(Modifier::DIM),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            chat.session.model.clone(),
-            Style::default().add_modifier(Modifier::DIM),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
         ),
     ];
     if let Some(find) = &chat.find {
@@ -258,48 +267,73 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     }
 
     let focus_label = match chat.focus {
-        ChatFocus::Composer => "focus: composer",
-        ChatFocus::Transcript => "focus: transcript",
-        ChatFocus::Activity => "focus: activity",
+        ChatFocus::Composer => "composer",
+        ChatFocus::Transcript => "transcript",
+        ChatFocus::Activity => "activity",
     };
-    let tools_label = if chat.tool_details {
-        "tools: details"
+    let model_label = app.defaults.model.as_str();
+    let running_indicator = if chat.running.is_some() { " ⟳" } else { "" };
+
+    // Line 1: status/error — truncated to fit, always visible
+    let err_max = 55_usize;
+    let (status_text, status_style, has_error) = if let Some(ref s) = app.status {
+        let truncated = if s.chars().count() > err_max {
+            format!("{}…", s.chars().take(err_max).collect::<String>())
+        } else {
+            s.clone()
+        };
+        (
+            truncated,
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+            true,
+        )
+    } else if let Some(toast) = app.toasts.last() {
+        let style = match toast.variant {
+            ToastVariant::Info => Style::default().fg(Color::Cyan),
+            ToastVariant::Success => Style::default().fg(Color::Green),
+            ToastVariant::Warning => Style::default().fg(Color::Magenta),
+            ToastVariant::Error => Style::default().fg(Color::Red),
+        };
+        (toast.message.clone(), style, false)
     } else {
-        "tools: summary"
+        (String::new(), Style::default(), false)
     };
-    let toast = app
-        .toasts
-        .last()
-        .map(|toast| (toast.variant, toast.message.as_str()));
-    let toast_style = match toast.map(|(variant, _)| variant) {
-        Some(ToastVariant::Info) => Style::default().fg(Color::Cyan),
-        Some(ToastVariant::Success) => Style::default().fg(Color::Green),
-        Some(ToastVariant::Warning) => Style::default().fg(Color::Magenta),
-        Some(ToastVariant::Error) => Style::default().fg(Color::Red),
-        None => Style::default(),
+    // Bright yellow hint when error is set — draws attention
+    let error_hint = if has_error {
+        Span::styled(
+            "  ^E:details",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else {
+        Span::raw("")
     };
-    let help = Paragraph::new(Line::from(vec![
-        Span::raw("?: help  Ctrl+P: commands  "),
-        Span::raw("Tab: focus  "),
-        Span::raw(focus_label),
-        Span::raw("  "),
-        Span::raw("Enter: submit/open  "),
-        Span::raw("Alt+Enter: newline  "),
-        Span::raw("Alt+Up/Down: history  "),
-        Span::raw("Arrows: edit/scroll/select  "),
-        Span::raw("t: tools  "),
-        Span::raw(tools_label),
-        Span::raw("  "),
-        Span::raw("Ctrl+C: cancel  "),
-        Span::raw("Ctrl+N: new  "),
-        Span::raw("Ctrl+F: fork  "),
-        Span::raw("r: refresh  "),
-        Span::raw("Esc: clear/back  "),
-        Span::raw("q: sessions"),
-        Span::raw("  "),
-        Span::styled(toast.map_or("", |(_, msg)| msg), toast_style),
-    ]))
-    .block(Block::default().borders(Borders::TOP));
+    let status_line = Line::from(vec![
+        Span::styled(
+            format!(" {focus_label}{running_indicator}  [{model_label}]  "),
+            Style::default().fg(Color::Cyan),
+        ),
+        Span::styled(status_text, status_style),
+        error_hint,
+    ]);
+
+    // Line 2: condensed key hints; swap ?:help for ^E:error when error is present
+    let hints_text = if has_error {
+        " ^P:cmds  ^N:new  ^Q:sessions  ^C:cancel  Tab:focus  Enter:send  /:cmd  ^E:error"
+    } else {
+        " ^P:cmds  ^N:new  ^Q:sessions  ^C:cancel  Tab:focus  Enter:send  /:cmd  ?:help"
+    };
+    let hints_line = Line::from(vec![Span::styled(
+        hints_text,
+        Style::default().fg(Color::DarkGray),
+    )]);
+
+    let help = Paragraph::new(vec![status_line, hints_line]).block(
+        Block::default()
+            .borders(Borders::TOP)
+            .border_style(Style::default().fg(Color::DarkGray)),
+    );
     frame.render_widget(help, left[2]);
 
     render_activity(frame, root[1], chat);

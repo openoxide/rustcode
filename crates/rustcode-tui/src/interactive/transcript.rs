@@ -1,6 +1,6 @@
 use super::{
-    push_toast, AppState, ChatState, Color, Duration, FindState, Line, MessageRole, Modifier, Span,
-    StoredMessage, Style, ToastVariant,
+    markdown::render_markdown, push_toast, AppState, ChatState, Color, Duration, FindState, Line,
+    MessageRole, Modifier, Span, StoredMessage, Style, ToastVariant,
 };
 
 fn append_message_lines(lines: &mut Vec<Line<'static>>, msg: &StoredMessage, tool_details: bool) {
@@ -27,7 +27,23 @@ fn append_message_lines(lines: &mut Vec<Line<'static>>, msg: &StoredMessage, too
     if msg.role == MessageRole::Tool {
         append_tool_message_lines(lines, msg, tool_details);
     } else {
-        append_value_lines(lines, &msg.content, "", 200);
+        // Use markdown rendering for user/assistant/system messages
+        match msg.content.as_str() {
+            Some(text) if !text.is_empty() => {
+                let rendered = render_markdown(text);
+                let truncated = if rendered.len() > 400 {
+                    let mut t = rendered[..400].to_vec();
+                    t.push(Line::raw("...[truncated]..."));
+                    t
+                } else {
+                    rendered
+                };
+                lines.extend(truncated);
+            }
+            _ => {
+                append_value_lines(lines, &msg.content, "", 200);
+            }
+        }
         if !msg.tool_calls.is_empty() {
             lines.push(Line::raw(""));
             for call in &msg.tool_calls {
@@ -192,16 +208,42 @@ pub(super) fn compute_find_matches(lines: &[Line<'static>], query: &str) -> Vec<
 pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     for msg in &chat.messages {
+        // Skip system messages — internal instructions are never shown to users
+        if msg.role == MessageRole::System {
+            continue;
+        }
         append_message_lines(&mut lines, msg, chat.tool_details);
+    }
+    // Show the in-flight user prompt immediately (before backend confirms it)
+    if let Some(pending) = &chat.pending_prompt {
+        if !pending.trim().is_empty() {
+            lines.push(Line::from(vec![Span::styled(
+                "You",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            )]));
+            let rendered = render_markdown(pending.as_str());
+            lines.extend(rendered);
+            lines.push(Line::raw(""));
+        }
     }
     if !chat.live_assistant.trim().is_empty() {
         lines.push(Line::from(vec![Span::styled(
             "Assistant (streaming)",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::Magenta)
                 .add_modifier(Modifier::BOLD),
         )]));
-        append_text_lines(&mut lines, chat.live_assistant.as_str(), "", 200);
+        let rendered = render_markdown(chat.live_assistant.as_str());
+        let truncated = if rendered.len() > 400 {
+            let mut t = rendered[..400].to_vec();
+            t.push(Line::raw("...[streaming truncated]..."));
+            t
+        } else {
+            rendered
+        };
+        lines.extend(truncated);
         lines.push(Line::raw(""));
     }
     lines

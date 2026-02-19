@@ -1,12 +1,12 @@
 use super::{
-    build_prompt_history, build_transcript_lines, composer_backspace, composer_clear,
-    composer_delete, composer_insert_str, composer_move_down, composer_move_end,
-    composer_move_home, composer_move_left, composer_move_right, composer_move_up,
-    compute_find_matches, compute_palette_view, compute_sessions_view, execute_command, find_next,
-    find_prev, handle_slash_command, history_next, history_prev, maybe_execute_palette_query,
-    open_command_palette, push_toast, refresh_chat_messages, set_find, sort_sessions,
-    submit_prompt, transcript_area_height, ActivityItem, AppState, ChatFocus, ChatNav, ChatState,
-    CreateSessionOptions, Duration, KeyCode, KeyEvent, KeyModifiers, Modal, Screen, ToastVariant,
+    build_prompt_history, composer_backspace, composer_clear, composer_delete, composer_insert_str,
+    composer_move_down, composer_move_end, composer_move_home, composer_move_left,
+    composer_move_right, composer_move_up, compute_palette_view, compute_sessions_view,
+    execute_command, filter_files, find_next, find_prev, handle_slash_command, history_next,
+    history_prev, maybe_execute_palette_query, open_command_palette, push_toast,
+    refresh_chat_messages, set_find, sort_sessions, submit_prompt, transcript_area_height,
+    ActivityItem, AppState, ChatFocus, ChatNav, ChatState, CommandId, CreateSessionOptions,
+    Duration, KeyCode, KeyEvent, KeyModifiers, Modal, Screen, ToastVariant,
 };
 
 mod input_chat;
@@ -52,6 +52,15 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
     if state.modal.is_some() {
         handle_modal_key(state, key);
         return false;
+    }
+
+    // Global: Ctrl+E shows full error details from any screen/focus
+    if key.modifiers.contains(KeyModifiers::CONTROL) && matches!(key.code, KeyCode::Char('e' | 'E'))
+    {
+        if let Some(msg) = state.status.clone() {
+            state.modal = Some(Modal::ErrorDetail { message: msg });
+            return false;
+        }
     }
 
     match &state.screen {
@@ -213,6 +222,72 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
                 matches,
             });
         }
+        Modal::FileSearch {
+            mut query,
+            entries,
+            mut view,
+            mut selected,
+        } => {
+            match key.code {
+                KeyCode::Esc => return,
+                KeyCode::Up => {
+                    selected = selected.saturating_sub(1);
+                }
+                KeyCode::Down => {
+                    if !view.is_empty() {
+                        selected = (selected + 1).min(view.len().saturating_sub(1));
+                    }
+                }
+                KeyCode::PageUp => {
+                    selected = selected.saturating_sub(10);
+                }
+                KeyCode::PageDown => {
+                    if !view.is_empty() {
+                        selected = (selected + 10).min(view.len().saturating_sub(1));
+                    }
+                }
+                KeyCode::Enter => {
+                    if let Some(path) = view.get(selected).and_then(|idx| entries.get(*idx)) {
+                        let insert = format!("@{path}");
+                        let Screen::Chat(mut chat) =
+                            std::mem::replace(&mut state.screen, Screen::Sessions)
+                        else {
+                            return;
+                        };
+                        composer_insert_str(&mut chat, &insert);
+                        state.screen = Screen::Chat(chat);
+                        push_toast(
+                            state,
+                            ToastVariant::Info,
+                            format!("inserted: {path}"),
+                            Duration::from_secs(2),
+                        );
+                    }
+                    return;
+                }
+                KeyCode::Backspace => {
+                    query.pop();
+                    view = filter_files(&entries, &query);
+                    selected = 0;
+                }
+                KeyCode::Char(ch) => {
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT)
+                    {
+                        query.push(ch);
+                        view = filter_files(&entries, &query);
+                        selected = 0;
+                    }
+                }
+                _ => {}
+            }
+            state.modal = Some(Modal::FileSearch {
+                query,
+                entries,
+                view,
+                selected,
+            });
+        }
         Modal::Rename {
             session_id,
             mut input,
@@ -318,6 +393,9 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
                 });
             }
         },
+        Modal::ErrorDetail { .. } => {
+            // Any key dismisses the error detail popup
+        }
         Modal::DeleteConfirm { session_id, title } => match key.code {
             KeyCode::Esc | KeyCode::Char('n') => {}
             KeyCode::Char('y') => match state.backend.delete_session(&session_id) {

@@ -206,7 +206,27 @@ pub async fn handle_tui_default(
         initial_status = Some("--fork requires --continue or --session <SESSION_ID>".to_string());
     }
 
-    let mut start = rustcode_tui::InteractiveStart::Sessions;
+    // Default: create a new session and open directly (matches codex/opencode behavior).
+    // The session picker is accessible via Ctrl+Q from inside the chat.
+    let mut start = if !continue_session && session.is_none() && prompt.is_none() && !fork {
+        // Default startup: open a new empty session
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        if let Some(cfg) = config.as_deref() {
+            match store.create_session(title.clone(), None, &cwd, &cfg.workspace_root, &cfg.model) {
+                Ok(new_session) => rustcode_tui::InteractiveStart::Chat {
+                    session: new_session,
+                    prompt: None,
+                    auto_submit: false,
+                },
+                Err(_) => rustcode_tui::InteractiveStart::Sessions,
+            }
+        } else {
+            rustcode_tui::InteractiveStart::Sessions
+        }
+    } else {
+        rustcode_tui::InteractiveStart::Sessions
+    };
+
     if !(fork && !continue_session && session.is_none())
         && (continue_session || session.is_some() || prompt.is_some())
     {
