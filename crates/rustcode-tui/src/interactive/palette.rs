@@ -303,6 +303,8 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
                         find: None,
                         running: None,
                         pending_prompt: None,
+                        composer_cleared_by_ctrl_c: false,
+                        last_typing_time: None,
                     });
                     push_toast(
                         state,

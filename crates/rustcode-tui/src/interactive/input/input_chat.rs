@@ -3,9 +3,8 @@ use super::{
     composer_move_down, composer_move_end, composer_move_home, composer_move_left,
     composer_move_right, composer_move_up, execute_command, find_next, handle_slash_command,
     history_next, history_prev, open_command_palette, push_toast, refresh_chat_messages,
-    submit_prompt, transcript_area_height, ActivityItem, AppState, ChatFocus, ChatNav, ChatState,
-    CommandId, CreateSessionOptions, Duration, KeyCode, KeyEvent, KeyModifiers, Modal,
-    ToastVariant,
+    submit_prompt, transcript_area_height, AppState, ChatFocus, ChatNav, ChatState, CommandId,
+    CreateSessionOptions, Duration, KeyCode, KeyEvent, KeyModifiers, Modal, ToastVariant,
 };
 
 pub(super) fn handle_chat_key(
@@ -25,13 +24,25 @@ pub(super) fn handle_chat_key(
     if ctrl {
         match key.code {
             KeyCode::Char('c' | 'C') => {
-                if let Some(running) = &chat.running {
-                    running.cancellation.cancel();
-                    chat.activity.push(ActivityItem::Warning {
-                        message: "cancel requested".to_string(),
-                    });
+                // Context-aware Ctrl+C:
+                // First press clears input (if any) and shows "press again to exit"
+                // Second press exits the application
+                if !chat.composer_cleared_by_ctrl_c {
+                    // First Ctrl+C - clear input (if any) and show hint
+                    if !chat.composer.is_empty() {
+                        composer_clear(chat);
+                    }
+                    chat.composer_cleared_by_ctrl_c = true;
+                    push_toast(
+                        state,
+                        ToastVariant::Info,
+                        "press Ctrl+C again to exit",
+                        Duration::from_secs(3),
+                    );
+                    return ChatNav::Stay;
                 }
-                return ChatNav::Stay;
+                // Second Ctrl+C - exit the application
+                return ChatNav::Exit;
             }
             KeyCode::Char('p' | 'P') => {
                 open_command_palette(state);
@@ -210,10 +221,17 @@ pub(super) fn handle_chat_key(
                 chat.focus = ChatFocus::Composer;
                 return ChatNav::Stay;
             }
-            if chat.composer.is_empty() {
-                return ChatNav::ToSessions;
+            // Escape focuses composer; if already focused, clear composer or show hint.
+            // Does NOT navigate to sessions - use Ctrl+Q for that.
+            if !chat.composer.is_empty() {
+                composer_clear(chat);
+                push_toast(
+                    state,
+                    ToastVariant::Info,
+                    "composer cleared",
+                    Duration::from_secs(2),
+                );
             }
-            composer_clear(chat);
         }
         // "/" from non-composer focus: move to composer and insert "/" so user can type /commands
         KeyCode::Char('/') => {

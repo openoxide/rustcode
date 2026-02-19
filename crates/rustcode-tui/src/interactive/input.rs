@@ -5,8 +5,8 @@ use super::{
     execute_command, filter_files, find_next, find_prev, handle_slash_command, history_next,
     history_prev, maybe_execute_palette_query, open_command_palette, push_toast,
     refresh_chat_messages, set_find, sort_sessions, submit_prompt, transcript_area_height,
-    ActivityItem, AppState, ApprovalResponse, ChatFocus, ChatNav, ChatState, CommandId,
-    CreateSessionOptions, Duration, KeyCode, KeyEvent, KeyModifiers, Modal, Screen, ToastVariant,
+    AppState, ApprovalResponse, ChatFocus, ChatNav, ChatState, CommandId, CreateSessionOptions,
+    Duration, KeyCode, KeyEvent, KeyModifiers, Modal, Screen, ToastVariant,
 };
 
 mod input_chat;
@@ -88,10 +88,16 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
 
             let nav = handle_chat_key(state, &mut chat, key);
             match nav {
-                ChatNav::Stay => state.screen = Screen::Chat(chat),
-                ChatNav::ToSessions => state.screen = Screen::Sessions,
+                ChatNav::Stay => {
+                    state.screen = Screen::Chat(chat);
+                    false
+                }
+                ChatNav::ToSessions => {
+                    state.screen = Screen::Sessions;
+                    false
+                }
+                ChatNav::Exit => true,
             }
-            false
         }
     }
 }

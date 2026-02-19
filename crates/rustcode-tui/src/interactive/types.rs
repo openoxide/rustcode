@@ -3,6 +3,7 @@ use super::{
     InteractiveSubmitMode, Line, MessageRole, Modifier, ResolvedConfig, SessionInfo, Size, Span,
     StoredMessage, Style, SystemTime, ToolApprovalRequest,
 };
+use std::time::Instant;
 
 pub(super) enum Screen {
     Sessions,
@@ -255,6 +256,10 @@ pub(super) struct ChatState {
     pub(super) running: Option<RunningCommand>,
     /// The prompt most recently submitted but not yet confirmed by backend reload.
     pub(super) pending_prompt: Option<String>,
+    /// Whether composer was just cleared by Ctrl+C (for "press again to exit" flow).
+    pub(super) composer_cleared_by_ctrl_c: bool,
+    /// Timestamp of last typing activity in composer.
+    pub(super) last_typing_time: Option<Instant>,
 }
 
 pub(super) struct AppState {
@@ -312,4 +317,6 @@ pub(super) fn build_prompt_history(messages: &[StoredMessage]) -> Vec<String> {
 pub(super) enum ChatNav {
     Stay,
     ToSessions,
+    /// Exit the application entirely.
+    Exit,
 }

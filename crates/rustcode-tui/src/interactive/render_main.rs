@@ -1,9 +1,13 @@
 use super::{
     apply_find_highlight, build_transcript_lines, composer_cursor_visual, format_age,
     render_activity, render_activity_details_modal, render_approval_modal, render_help_modal,
-    render_modal, AppState, Block, Borders, ChatFocus, ChatState, Color, Constraint, Direction,
-    Layout, Line, List, ListItem, Modifier, Paragraph, Screen, Span, Style, ToastVariant, Wrap,
+    render_modal, render_settings, AppState, Block, Borders, ChatFocus, ChatState, Color,
+    Constraint, Direction, Layout, Line, List, ListItem, Modifier, Paragraph, Screen, Span, Style,
+    ToastVariant, Wrap,
 };
+
+/// Timeout for typing indicator (milliseconds).
+const TYPING_TIMEOUT_MS: u128 = 2000;
 
 pub(super) fn render(frame: &mut ratatui::Frame<'_>, state: &AppState) {
     match &state.screen {
@@ -215,8 +219,14 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     } else {
         chat.session.model.as_str()
     };
+
+    let is_typing = chat
+        .last_typing_time
+        .is_some_and(|t| t.elapsed().as_millis() < TYPING_TIMEOUT_MS);
     let prompt_label = if chat.running.is_some() {
         "Prompt (running)"
+    } else if is_typing {
+        "Prompt (typing...)"
     } else {
         "Prompt"
     };
@@ -331,7 +341,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     // Bright yellow hint when error is set — draws attention
     let error_hint = if has_error {
         Span::styled(
-            "  ^E:details",
+            "  Ctrl+E:details",
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
@@ -352,16 +362,92 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     status_spans.push(error_hint);
     let status_line = Line::from(status_spans);
 
-    // Line 2: condensed key hints; swap ?:help for ^E:error when error is present
-    let hints_text = if has_error {
-        " ^P:cmds  ^N:new  ^Q:sessions  ^C:cancel  Alt+Tab/click:focus  Enter:send  /:cmd  ^E:error"
+    // When the composer starts with '?' show expanded bindings; otherwise a compact hint.
+    let composer_starts_with_query = chat.composer.starts_with('?');
+    let hints_line = if composer_starts_with_query {
+        // Expanded bindings visible when user types '?' first
+        Line::from(vec![
+            Span::styled(" ", Style::default()),
+            Span::styled(
+                "Ctrl+P",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(":cmds  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "Ctrl+N",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(":new  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "Ctrl+Q",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(":sessions  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "Ctrl+C",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(":cancel  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "Alt+Tab",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(":focus  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "Enter",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(":send  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "/",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            if has_error {
+                Span::styled(":cmd  Ctrl+E:error", Style::default().fg(Color::DarkGray))
+            } else {
+                Span::styled(":cmd", Style::default().fg(Color::DarkGray))
+            },
+        ])
     } else {
-        " ^P:cmds  ^N:new  ^Q:sessions  ^C:cancel  Alt+Tab/click:focus  Enter:send  /:cmd  ?:help"
+        // Compact hint — just enough to orient a new user
+        let error_part = if has_error {
+            Span::styled(
+                "  Ctrl+E:error",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            )
+        } else {
+            Span::raw("")
+        };
+        Line::from(vec![
+            Span::styled(" Ctrl+P", Style::default().fg(Color::DarkGray)),
+            Span::styled(" cmds", Style::default().fg(Color::DarkGray)),
+            Span::styled("   /", Style::default().fg(Color::DarkGray)),
+            Span::styled(" cmd", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "   ? bindings",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            ),
+            error_part,
+        ])
     };
-    let hints_line = Line::from(vec![Span::styled(
-        hints_text,
-        Style::default().fg(Color::DarkGray),
-    )]);
 
     let help = Paragraph::new(vec![status_line, hints_line]).block(
         Block::default()
@@ -370,7 +456,17 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     );
     frame.render_widget(help, left[2]);
 
-    render_activity(frame, root[1], chat);
+    // Right panel: split to match left panel structure
+    let right = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),    // Activity panel (matches transcript + composer)
+            Constraint::Length(3), // Settings panel (matches footer)
+        ])
+        .split(root[1]);
+
+    render_activity(frame, right[0], chat);
+    render_settings(frame, right[1], app);
     if chat.details_open {
         render_activity_details_modal(frame, chat);
     }

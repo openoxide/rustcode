@@ -60,6 +60,8 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         find: None,
                         running: None,
                         pending_prompt: None,
+                        composer_cleared_by_ctrl_c: false,
+                        last_typing_time: None,
                     });
                 }
                 state.sessions_filter_active = false;
@@ -166,6 +168,8 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 find: None,
                 running: None,
                 pending_prompt: None,
+                composer_cleared_by_ctrl_c: false,
+                last_typing_time: None,
             });
         }
         _ => {}

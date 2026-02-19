@@ -95,6 +95,8 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                 find: None,
                 running: None,
                 pending_prompt: None,
+                composer_cleared_by_ctrl_c: false,
+                last_typing_time: None,
             });
             if should_submit {
                 auto_submit = prompt;

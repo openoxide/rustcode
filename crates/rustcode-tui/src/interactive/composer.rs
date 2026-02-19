@@ -1,8 +1,12 @@
 use super::ChatState;
+use std::time::Instant;
 
 fn composer_set(chat: &mut ChatState, text: String) {
     chat.composer = text;
     chat.composer_cursor = chat.composer.len();
+    chat.last_typing_time = Some(Instant::now());
+    // Reset the Ctrl+C cleared flag since user is typing new content
+    chat.composer_cleared_by_ctrl_c = false;
 }
 
 pub(super) fn composer_clear(chat: &mut ChatState) {
@@ -14,6 +18,10 @@ pub(super) fn composer_insert_str(chat: &mut ChatState, s: &str) {
     let idx = chat.composer_cursor.min(chat.composer.len());
     chat.composer.insert_str(idx, s);
     chat.composer_cursor = (idx + s.len()).min(chat.composer.len());
+    // Track typing activity for the indicator
+    chat.last_typing_time = Some(Instant::now());
+    // Reset the Ctrl+C cleared flag since user is typing new content
+    chat.composer_cleared_by_ctrl_c = false;
 }
 
 pub(super) fn composer_move_left(chat: &mut ChatState) {
@@ -57,6 +65,8 @@ pub(super) fn composer_backspace(chat: &mut ChatState) {
     }
     chat.composer.replace_range(prev..idx, "");
     chat.composer_cursor = prev;
+    // Track typing activity
+    chat.last_typing_time = Some(Instant::now());
 }
 
 pub(super) fn composer_delete(chat: &mut ChatState) {
@@ -70,6 +80,8 @@ pub(super) fn composer_delete(chat: &mut ChatState) {
             chat.composer.replace_range(idx..next, "");
         }
     }
+    // Track typing activity
+    chat.last_typing_time = Some(Instant::now());
 }
 
 fn composer_line_col(text: &str, cursor: usize) -> (usize, usize) {

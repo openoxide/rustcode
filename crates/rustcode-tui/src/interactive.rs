@@ -54,7 +54,9 @@ use composer::{
 use file_search::{filter_files, scan_workspace_files};
 use input::handle_key;
 use palette::{compute_palette_view, maybe_execute_palette_query, open_command_palette};
-use render_activity::{render_activity, render_activity_details_modal, render_approval_modal};
+use render_activity::{
+    render_activity, render_activity_details_modal, render_approval_modal, render_settings,
+};
 use render_main::render;
 use render_modals::{centered_rect, render_help_modal, render_modal};
 use runtime::submit_prompt;
