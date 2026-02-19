@@ -81,7 +81,7 @@ impl Default for ResolvedConfig {
             profile: "default".to_string(),
             workspace_root: PathBuf::from("."),
             allow_network: true,
-            model: "default".to_string(),
+            model: "anthropic/claude-sonnet-4-5-20250929".to_string(),
             llm_provider: "null".to_string(),
             llm_base_url: None,
             llm_api_key_env: None,

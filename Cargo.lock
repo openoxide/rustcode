@@ -1356,9 +1356,14 @@ name = "rustcode-plugins"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64",
+ "rand",
  "rustcode-core",
+ "serde",
+ "sha2",
  "thiserror",
  "tokio",
+ "urlencoding",
 ]
 
 [[package]]

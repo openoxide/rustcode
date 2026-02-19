@@ -11,53 +11,9 @@ use rustcode_llm::TokenUsage;
 const DEFAULT_OVERFLOW_BUFFER: u64 = 20_000;
 
 /// Known context window sizes for common models.
-/// Returns the context limit in tokens, or a default if unknown.
+/// Delegates to the centralized model registry in `rustcode_llm`.
 fn model_context_limit(model: &str) -> u64 {
-    let model_lower = model.to_ascii_lowercase();
-
-    // Anthropic Claude models
-    if model_lower.contains("claude-3-5-sonnet") || model_lower.contains("claude-3.5-sonnet") {
-        return 200_000;
-    }
-    if model_lower.contains("claude-3-5-haiku") || model_lower.contains("claude-3.5-haiku") {
-        return 200_000;
-    }
-    if model_lower.contains("claude-3-opus") || model_lower.contains("claude-3.0-opus") {
-        return 200_000;
-    }
-    if model_lower.contains("claude-4") {
-        return 200_000;
-    }
-
-    // OpenAI GPT models
-    if model_lower.contains("gpt-4o") {
-        return 128_000;
-    }
-    if model_lower.contains("gpt-4-turbo") || model_lower.contains("gpt-4-1106") {
-        return 128_000;
-    }
-    if model_lower.contains("gpt-4") {
-        return 8_192;
-    }
-    if model_lower.contains("o1") || model_lower.contains("o3") || model_lower.contains("o4") {
-        return 200_000;
-    }
-
-    // Google Gemini models
-    if model_lower.contains("gemini-2") || model_lower.contains("gemini-1.5") {
-        return 1_000_000;
-    }
-    if model_lower.contains("gemini") {
-        return 128_000;
-    }
-
-    // DeepSeek
-    if model_lower.contains("deepseek") {
-        return 64_000;
-    }
-
-    // Default fallback for unknown models
-    128_000
+    rustcode_llm::model_registry::context_limit(model)
 }
 
 /// Simple token estimator based on character count.

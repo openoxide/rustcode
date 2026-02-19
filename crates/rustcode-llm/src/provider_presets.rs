@@ -233,11 +233,11 @@ fn load_models_provider_index() -> Option<BTreeMap<String, ModelsProviderMetadat
         candidates.push(PathBuf::from(path));
     }
     if let Ok(home) = std::env::var("HOME") {
-        candidates.push(PathBuf::from(&home).join(".cache/opencode/models.json"));
-        candidates.push(PathBuf::from(home).join(".opencode/models.json"));
+        candidates.push(PathBuf::from(&home).join(".cache/rustcode/models.json"));
+        candidates.push(PathBuf::from(home).join(".rustcode/models.json"));
     }
     if let Ok(cache_home) = std::env::var("XDG_CACHE_HOME") {
-        candidates.push(PathBuf::from(cache_home).join("opencode/models.json"));
+        candidates.push(PathBuf::from(cache_home).join("rustcode/models.json"));
     }
 
     for candidate in candidates {

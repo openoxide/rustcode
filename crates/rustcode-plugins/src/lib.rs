@@ -6,6 +6,9 @@ use rustcode_core::context::CommandContext;
 use rustcode_core::event::Event;
 use thiserror::Error;
 
+pub mod codex;
+pub mod copilot;
+
 #[derive(Debug, Error)]
 pub enum PluginError {
     #[error("plugin already registered: {0}")]

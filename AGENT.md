@@ -18,7 +18,7 @@
 ## Development Discipline
 
 - Every milestone must leave the system buildable
-- **Commit work after every milestone completion** (`git add -A && git commit`)
+- **Commit work after every milestone completion** (`git add -A && git commit`) even if you are doing in phases so commit each phase of milestone.
 - No incomplete feature merges
 - Tests written before or alongside implementation
 - Update docs after each milestone

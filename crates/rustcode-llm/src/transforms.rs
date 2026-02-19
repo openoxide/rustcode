@@ -562,3 +562,101 @@ pub(crate) fn extract_google_usage(value: &Value) -> Option<TokenUsage> {
     Some(TokenUsage { input, output, total, cache_read, cache_write: 0 })
 }
 
+// ── Error extraction ───────────────────────────────────────────────
+
+/// Extract the human-readable error message from any provider's error response.
+///
+/// Handles the different error shapes used by OpenAI, Anthropic, Google, and
+/// Vercel Gateway.
+#[allow(dead_code)]
+pub(crate) fn extract_error_message(value: &Value) -> Option<String> {
+    // OpenAI / OpenRouter: { "error": { "message": "...", "type": "..." } }
+    if let Some(error) = value.get("error") {
+        if let Some(msg) = error.get("message").and_then(Value::as_str) {
+            return Some(msg.to_string());
+        }
+        if let Some(msg) = error.as_str() {
+            return Some(msg.to_string());
+        }
+    }
+
+    // Anthropic: { "error": { "message": "..." }, "type": "error" }
+    if value.get("type").and_then(Value::as_str) == Some("error") {
+        if let Some(error) = value.get("error") {
+            if let Some(msg) = error.get("message").and_then(Value::as_str) {
+                return Some(msg.to_string());
+            }
+        }
+    }
+
+    // Google: { "error": { "message": "...", "status": "..." } }
+    // (same shape as OpenAI — already handled above)
+
+    // Fallback: top-level "message" field
+    if let Some(msg) = value.get("message").and_then(Value::as_str) {
+        return Some(msg.to_string());
+    }
+
+    None
+}
+
+/// Check if the error response indicates a content policy / safety filter violation.
+#[allow(dead_code)]
+pub(crate) fn is_content_filter_error(value: &Value) -> bool {
+    // OpenAI: error.code == "content_filter" or error.code == "content_policy_violation"
+    if let Some(code) = value
+        .get("error")
+        .and_then(|e| e.get("code"))
+        .and_then(Value::as_str)
+    {
+        if code.contains("content_filter") || code.contains("content_policy") {
+            return true;
+        }
+    }
+
+    // Anthropic: error.type == "content_filter" or stop_reason == "end_turn" with
+    // type == "error"
+    if let Some(err_type) = value
+        .get("error")
+        .and_then(|e| e.get("type"))
+        .and_then(Value::as_str)
+    {
+        if err_type.contains("content") {
+            return true;
+        }
+    }
+
+    // Google: candidates[].finishReason == "SAFETY"
+    if let Some(candidates) = value.get("candidates").and_then(Value::as_array) {
+        for candidate in candidates {
+            if candidate.get("finishReason").and_then(Value::as_str) == Some("SAFETY") {
+                return true;
+            }
+        }
+    }
+
+    // Generic: check message text
+    if let Some(msg) = extract_error_message(value) {
+        let lower = msg.to_lowercase();
+        if lower.contains("content policy")
+            || lower.contains("content_filter")
+            || lower.contains("safety")
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Extract the HTTP status code from a provider error response, if present.
+#[allow(dead_code)]
+pub(crate) fn error_http_status(value: &Value) -> Option<u16> {
+    // { "error": { "status": 429 } } or { "status": 429 }
+    value
+        .get("error")
+        .and_then(|e| e.get("status"))
+        .and_then(Value::as_u64)
+        .or_else(|| value.get("status").and_then(Value::as_u64))
+        .and_then(|s| u16::try_from(s).ok())
+}

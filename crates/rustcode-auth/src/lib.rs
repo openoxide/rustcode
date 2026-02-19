@@ -248,6 +248,70 @@ impl AuthStore {
     }
 }
 
+impl StoredCredential {
+    /// Check if this credential has expired.
+    ///
+    /// Only meaningful for OAuth credentials with an `expires_at_unix` field.
+    /// API key credentials never expire. Uses a 60-second safety margin to
+    /// avoid using tokens that are about to expire.
+    #[must_use]
+    pub fn is_expired(&self) -> bool {
+        match self {
+            Self::ApiKey { .. } => false,
+            Self::OAuth {
+                expires_at_unix: Some(expires_at),
+                ..
+            } => {
+                let now = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0);
+                // 60-second safety margin
+                *expires_at <= now + 60
+            }
+            Self::OAuth {
+                expires_at_unix: None,
+                ..
+            } => false, // No expiry set — assume valid
+        }
+    }
+
+    /// Extract the usable access token from this credential.
+    #[must_use]
+    pub fn access_token(&self) -> Option<&str> {
+        match self {
+            Self::ApiKey { key, .. } => Some(key),
+            Self::OAuth { access_token, .. } => Some(access_token),
+        }
+    }
+
+    /// Extract the refresh token, if present.
+    #[must_use]
+    pub fn refresh_token(&self) -> Option<&str> {
+        match self {
+            Self::ApiKey { .. } => None,
+            Self::OAuth { refresh_token, .. } => refresh_token.as_deref(),
+        }
+    }
+}
+
+impl AuthStore {
+    /// Get the access token for a provider, returning `None` if the token
+    /// has expired (caller should trigger a refresh flow).
+    ///
+    /// # Errors
+    /// Returns `AuthError` if the auth store cannot be read.
+    pub fn get_active_token(&self, provider: &str) -> Result<Option<String>, AuthError> {
+        let Some(cred) = self.get(provider)? else {
+            return Ok(None);
+        };
+        if cred.is_expired() {
+            return Ok(None);
+        }
+        Ok(cred.access_token().map(ToOwned::to_owned))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AuthMethod {
     ApiKey,
