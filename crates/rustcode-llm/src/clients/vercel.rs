@@ -96,11 +96,15 @@ impl LlmClient for VercelAiGatewayClient {
                     LlmError::Transport("timed out reading provider error body".to_string())
                 })?
                 .map_err(|err| LlmError::Transport(err.to_string()))?;
-            return Err(LlmError::Transport(format!(
-                "provider returned {}: {}",
-                status,
-                truncate_for_error(&body)
-            )));
+            let kind = crate::types::classify_http_error(status.as_u16(), &body);
+            return Err(LlmError::Classified {
+                kind,
+                message: format!(
+                    "provider returned {}: {}",
+                    status,
+                    truncate_for_error(&body)
+                ),
+            });
         }
 
         match read_sse_or_body(response, HTTP_STREAM_IDLE_TIMEOUT).await? {

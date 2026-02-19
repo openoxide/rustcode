@@ -313,6 +313,22 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
             "press q to quit",
             Duration::from_secs(2),
         ),
+        CommandId::ToggleSkills => {
+            let skills = state
+                .defaults
+                .skills
+                .iter()
+                .map(|s| (s.name().to_string(), s.description().to_string(), s.metadata.enabled))
+                .collect();
+            state.modal = Some(Modal::SkillToggle { skills, selected: 0 });
+        }
+        CommandId::Feedback => {
+            state.modal = Some(Modal::Feedback {
+                rating: None,
+                comment: String::new(),
+                comment_active: false,
+            });
+        }
     }
 }
 

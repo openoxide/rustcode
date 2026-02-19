@@ -14,6 +14,8 @@ impl Engine {
         options: &AgentOptions,
         state: &mut AgentState,
     ) -> Result<String, ExecutionError> {
+        // Auto-snapshot before the first mutation this session
+        self.auto_snapshot_before_mutation(state, context).await;
         if edits.is_empty() {
             return Err(ExecutionError::Dispatch(
                 "multiedit requires at least one edit operation".to_string(),

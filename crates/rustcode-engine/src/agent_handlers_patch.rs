@@ -21,6 +21,8 @@ impl Engine {
         options: &AgentOptions,
         state: &mut AgentState,
     ) -> Result<String, ExecutionError> {
+        // Auto-snapshot before the first mutation this session
+        self.auto_snapshot_before_mutation(state, context).await;
         let patches = parse_unified_diff(patch_text)?;
         if patches.is_empty() {
             return Err(ExecutionError::Dispatch(

@@ -1653,10 +1653,12 @@ dependencies = [
  "rustcode-memories",
  "rustcode-plugins",
  "rustcode-skills",
+ "rustcode-snapshot",
  "rustcode-state",
  "rustcode-watcher",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
  "tokio-util",
  "tracing",
@@ -1767,6 +1769,16 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.18",
  "toml",
+ "tracing",
+]
+
+[[package]]
+name = "rustcode-snapshot"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
  "tracing",
 ]
 

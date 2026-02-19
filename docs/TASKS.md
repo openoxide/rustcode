@@ -234,7 +234,36 @@ Run `cargo build --release` first. Binary: `target/release/rustcode`.
 - [ ] Regression tests
 - [ ] TUI snapshot tests (reference: codex `tui/tests/`)
 
-## Milestone 10: Polish & Release
+## Milestone 10: Deferred Feature Completion
+
+All features deferred from earlier milestones are now unblocked and collected here.
+
+### M10 Phase 1: Unblocked Agent Tools (deferred from M2) ✅
+- [x] `skill` tool — invoke a named skill by name from the agent loop (returns skill content)
+- [x] `task` tool — sub-agent delegation: spawn a child agent loop with a given prompt, return its output
+- [x] `codesearch` tool — Exa MCP web-based code search (`https://mcp.exa.ai/mcp`)
+
+### M10 Phase 2: Snapshot & Revert System (deferred from M4) ✅
+- [x] `rustcode-snapshot` crate — separate-git-dir snapshot per session
+  - [x] `track(workspace)` — git add + write-tree, returns hash
+  - [x] `restore(hash, workspace)` — read-tree + checkout-index
+  - [x] `list()` — enumerate saved hashes
+  - [x] `changed_files(hash)` — diff files between snapshot and working tree
+- [x] Auto-snapshot in engine before first file mutation per session
+- [x] `snapshot_list` agent tool — list recent snapshots
+- [x] `snapshot_restore` agent tool — restore workspace to a snapshot hash
+
+### M10 Phase 3: Provider Error Classification (deferred M5 phases 3–5) ✅
+- [x] Structured `LlmErrorKind` in `rustcode-llm`: `ContextOverflow`, `RateLimit{retry_after_secs}`, `AuthFailed`, `InvalidRequest`, `ServiceUnavailable`, `Unknown`
+- [x] `classify_http_error(status, body)` — parse classification from provider HTTP errors
+- [x] `LlmError::Classified { kind, message }` — structured error variant used by all provider clients
+- [x] `is_retryable()` in retry logic recognizes typed `LlmErrorKind` patterns from Display format
+
+### M10 Phase 4: TUI Completion (deferred from M6) ✅
+- [x] Skill toggle overlay — `Ctrl+S` opens overlay listing all skills, `Enter`/`Space` toggles enabled/disabled
+- [x] Feedback view — `Ctrl+B` overlay: thumbs-up (`u`/`+`) / thumbs-down (`d`/`-`) rating + optional comment; writes to `~/.local/share/rustcode/feedback.jsonl`
+
+## Milestone 11: Polish & Release
 - [ ] CLI UX polish (help text, error messages, colors)
 - [ ] Documentation (README, config docs, architecture docs)
 - [ ] Release build validation

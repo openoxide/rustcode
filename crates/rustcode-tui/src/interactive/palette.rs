@@ -159,6 +159,22 @@ pub(super) fn build_command_items(state: &AppState) -> Vec<CommandItem> {
     });
 
     items.push(CommandItem {
+        id: CommandId::ToggleSkills,
+        title: "Skills".to_string(),
+        detail: "Toggle enabled/disabled skills (Ctrl+S)".to_string(),
+        enabled: true,
+        disabled_reason: None,
+    });
+
+    items.push(CommandItem {
+        id: CommandId::Feedback,
+        title: "Feedback".to_string(),
+        detail: "Rate this session with thumbs up/down (Ctrl+B)".to_string(),
+        enabled: true,
+        disabled_reason: None,
+    });
+
+    items.push(CommandItem {
         id: CommandId::Quit,
         title: "Quit".to_string(),
         detail: "Exit the app".to_string(),

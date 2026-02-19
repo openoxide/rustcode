@@ -1,6 +1,47 @@
 use super::{Engine, ExecutionError};
 
 impl Engine {
+    /// Invoke a named skill and return its content to the agent.
+    ///
+    /// The agent can call this tool to activate a skill's instructions
+    /// explicitly, receiving the skill's full markdown content as output.
+    ///
+    /// # Errors
+    /// Returns `ExecutionError::Dispatch` if the skill name is empty, not found,
+    /// or disabled.
+    pub(crate) async fn agent_tool_skill(&self, name: &str) -> Result<String, ExecutionError> {
+        let name = name.trim();
+        if name.is_empty() {
+            return Err(ExecutionError::Dispatch(
+                "skill tool requires a non-empty name".to_string(),
+            ));
+        }
+
+        let skill = self.skills.get(name).ok_or_else(|| {
+            let available: Vec<&str> = self.skills.all().iter().map(|s| s.name()).collect();
+            if available.is_empty() {
+                ExecutionError::Dispatch(format!("skill '{name}' not found; no skills are loaded"))
+            } else {
+                ExecutionError::Dispatch(format!(
+                    "skill '{name}' not found; available: {}",
+                    available.join(", ")
+                ))
+            }
+        })?;
+
+        if !skill.metadata.enabled {
+            return Err(ExecutionError::Dispatch(format!(
+                "skill '{name}' is disabled"
+            )));
+        }
+
+        let mut output = String::new();
+        output.push_str(&format!("# Skill: {}\n", skill.name()));
+        output.push_str(&format!("Description: {}\n\n", skill.description()));
+        output.push_str(&skill.content);
+        Ok(output)
+    }
+
     /// Ask the user one or more questions during an agent loop.
     ///
     /// In interactive mode (TUI or stdio), the questions are printed and

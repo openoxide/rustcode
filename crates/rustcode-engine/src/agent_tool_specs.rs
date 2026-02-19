@@ -287,6 +287,81 @@ pub fn tool_specs(options: &AgentOptions, allow_network: bool, has_lsp: bool) ->
         }),
     });
 
+    // snapshot tools — workspace state management
+    specs.push(ToolSpec {
+        name: "snapshot_list".to_string(),
+        description: "List available workspace snapshots for this session. Snapshots are taken automatically before the first file write or edit. Use the returned hashes with snapshot_restore.".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+    });
+    specs.push(ToolSpec {
+        name: "snapshot_restore".to_string(),
+        description: "Restore the workspace to a previously recorded snapshot. Files present in the snapshot are restored to their snapshotted state. Use snapshot_list first to get available hashes.".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "hash": { "type": "string", "description": "40-character SHA-1 snapshot hash from snapshot_list" }
+            },
+            "required": ["hash"],
+            "additionalProperties": false
+        }),
+    });
+
+    // skill tool — invoke a named skill from the agent loop
+    specs.push(ToolSpec {
+        name: "skill".to_string(),
+        description: "Retrieve the instructions for a named skill. Use when the user references a skill by name or when a task matches a known skill's domain.".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "name": { "type": "string", "description": "Exact skill name (case-sensitive)" }
+            },
+            "required": ["name"],
+            "additionalProperties": false
+        }),
+    });
+
+    // task tool — sub-agent delegation
+    specs.push(ToolSpec {
+        name: "task".to_string(),
+        description: "Delegate a sub-task to a child agent. The child agent runs its own tool loop and returns its final text output. Use for parallelisable or independent sub-tasks. Inherits the current permission flags.".to_string(),
+        parameters: serde_json::json!({
+            "type": "object",
+            "properties": {
+                "prompt": { "type": "string", "description": "The full prompt for the sub-agent" },
+                "max_steps": { "type": "integer", "description": "Maximum tool loop steps for the sub-agent (default: 20, max: 50)" }
+            },
+            "required": ["prompt"],
+            "additionalProperties": false
+        }),
+    });
+
+    if allow_network {
+        // codesearch tool — Exa-powered code/SDK search
+        specs.push(ToolSpec {
+            name: "codesearch".to_string(),
+            description: "Search for code examples, SDK documentation, and API usage patterns. Powered by Exa. Use for questions about external libraries, frameworks, or APIs (e.g. 'React useState hook', 'Python pandas groupby', 'Express middleware').".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query for libraries, SDKs, or coding concepts"
+                    },
+                    "tokens_num": {
+                        "type": "integer",
+                        "description": "Approximate token budget for results (1000–50000, default: 5000)"
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": false
+            }),
+        });
+    }
+
     if allow_network {
         // websearch tool — search the web
         specs.push(ToolSpec {

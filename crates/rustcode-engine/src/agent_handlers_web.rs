@@ -5,6 +5,10 @@ const WEBFETCH_DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 const WEBFETCH_MAX_TIMEOUT: Duration = Duration::from_secs(120);
 const WEBFETCH_MAX_BODY_BYTES: usize = 1_000_000;
 
+const CODESEARCH_ENDPOINT: &str = "https://mcp.exa.ai/mcp";
+const CODESEARCH_TIMEOUT: Duration = Duration::from_secs(30);
+const CODESEARCH_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+
 impl Engine {
     pub(crate) async fn agent_tool_webfetch(
         &self,
@@ -120,6 +124,117 @@ impl Engine {
         } else {
             Err(ExecutionError::Executor(rendered))
         }
+    }
+}
+
+impl Engine {
+    /// Search for code context, SDK documentation, and library examples using
+    /// the Exa MCP code search API.
+    ///
+    /// Sends a JSON-RPC `tools/call` request to the Exa MCP endpoint and parses
+    /// the SSE response, returning the first matching code context block.
+    ///
+    /// # Errors
+    /// Returns `ExecutionError::Dispatch` if network access is disabled or the
+    /// query is empty.  Returns `ExecutionError::Executor` on HTTP or parse
+    /// failures.
+    pub(crate) async fn agent_tool_codesearch(
+        &self,
+        query: &str,
+        tokens_num: Option<u32>,
+        context: &CommandContext,
+    ) -> Result<String, ExecutionError> {
+        if !context.config.allow_network {
+            return Err(ExecutionError::Dispatch(
+                "codesearch requires network access; set allow_network=true".to_string(),
+            ));
+        }
+
+        let query = query.trim();
+        if query.is_empty() {
+            return Err(ExecutionError::Dispatch(
+                "codesearch requires a non-empty query".to_string(),
+            ));
+        }
+
+        let tokens = tokens_num.unwrap_or(5000).clamp(1000, 50_000);
+
+        let body = serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "get_code_context_exa",
+                "arguments": {
+                    "query": query,
+                    "tokensNum": tokens
+                }
+            }
+        });
+
+        let client = reqwest::Client::builder()
+            .connect_timeout(CODESEARCH_CONNECT_TIMEOUT)
+            .timeout(CODESEARCH_TIMEOUT)
+            .build()
+            .map_err(|e| {
+                ExecutionError::Executor(format!("failed to build codesearch client: {e}"))
+            })?;
+
+        let response = tokio::select! {
+            () = context.cancellation.cancelled() => {
+                return Err(ExecutionError::Cancelled);
+            }
+            result = client
+                .post(CODESEARCH_ENDPOINT)
+                .header("accept", "application/json, text/event-stream")
+                .header("content-type", "application/json")
+                .json(&body)
+                .send() => {
+                result.map_err(|e| {
+                    ExecutionError::Executor(format!("codesearch request failed: {e}"))
+                })?
+            }
+        };
+
+        let status = response.status();
+        if !status.is_success() {
+            let text = response.text().await.unwrap_or_default();
+            return Err(ExecutionError::Executor(format!(
+                "codesearch error ({status}): {text}"
+            )));
+        }
+
+        let body_text = tokio::select! {
+            () = context.cancellation.cancelled() => {
+                return Err(ExecutionError::Cancelled);
+            }
+            result = response.text() => {
+                result.map_err(|e| {
+                    ExecutionError::Executor(format!("codesearch response read failed: {e}"))
+                })?
+            }
+        };
+
+        // The Exa endpoint returns SSE: each line may be `data: <json>`.
+        // Parse the first result block containing code context.
+        for line in body_text.lines() {
+            if let Some(json_str) = line.strip_prefix("data: ") {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    if let Some(text) = val
+                        .pointer("/result/content/0/text")
+                        .and_then(serde_json::Value::as_str)
+                    {
+                        return Ok(format!("Code search results for: {query}\n\n{text}"));
+                    }
+                }
+            }
+        }
+
+        Ok(
+            "No code context found for the given query. Try rephrasing, being more \
+             specific about the library name, or adjusting the token count."
+                .to_string(),
+        )
     }
 }
 

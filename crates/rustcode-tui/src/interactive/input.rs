@@ -417,6 +417,107 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
         Modal::ErrorDetail { .. } => {
             // Any key dismisses the error detail popup
         }
+        Modal::SkillToggle {
+            mut skills,
+            mut selected,
+        } => {
+            match key.code {
+                KeyCode::Esc => return,
+                KeyCode::Up => {
+                    selected = selected.saturating_sub(1);
+                }
+                KeyCode::Down => {
+                    if !skills.is_empty() {
+                        selected = (selected + 1).min(skills.len().saturating_sub(1));
+                    }
+                }
+                KeyCode::Enter | KeyCode::Char(' ') => {
+                    if let Some(entry) = skills.get_mut(selected) {
+                        entry.2 = !entry.2;
+                        let new_enabled = entry.2;
+                        let name = entry.0.clone();
+                        if let Some(skill) =
+                            state.defaults.skills.iter_mut().find(|s| s.name() == name)
+                        {
+                            skill.metadata.enabled = new_enabled;
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if !skills.is_empty() {
+                state.modal = Some(Modal::SkillToggle { skills, selected });
+            }
+        }
+        Modal::Feedback {
+            mut rating,
+            mut comment,
+            mut comment_active,
+        } => {
+            match key.code {
+                KeyCode::Esc => {
+                    if comment_active {
+                        comment_active = false;
+                        state.modal = Some(Modal::Feedback { rating, comment, comment_active });
+                    }
+                    // Esc from rating focus → close
+                    return;
+                }
+                KeyCode::Tab => {
+                    comment_active = !comment_active;
+                    state.modal = Some(Modal::Feedback { rating, comment, comment_active });
+                    return;
+                }
+                KeyCode::Enter => {
+                    let Some(is_positive) = rating else {
+                        push_toast(
+                            state,
+                            ToastVariant::Warning,
+                            "select a rating first (u = up, d = down)",
+                            Duration::from_secs(3),
+                        );
+                        state.modal = Some(Modal::Feedback { rating, comment, comment_active });
+                        return;
+                    };
+                    write_feedback(is_positive, &comment);
+                    push_toast(
+                        state,
+                        ToastVariant::Success,
+                        "feedback recorded — thank you!",
+                        Duration::from_secs(3),
+                    );
+                    return; // close modal
+                }
+                KeyCode::Char(ch) if comment_active => {
+                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                        && !key.modifiers.contains(KeyModifiers::ALT)
+                    {
+                        comment.push(ch);
+                    }
+                    state.modal = Some(Modal::Feedback { rating, comment, comment_active });
+                    return;
+                }
+                KeyCode::Backspace if comment_active => {
+                    comment.pop();
+                    state.modal = Some(Modal::Feedback { rating, comment, comment_active });
+                    return;
+                }
+                KeyCode::Char('u' | '+' | 'U') => {
+                    rating = Some(true);
+                    state.modal = Some(Modal::Feedback { rating, comment, comment_active });
+                    return;
+                }
+                KeyCode::Char('d' | '-' | 'D') => {
+                    rating = Some(false);
+                    state.modal = Some(Modal::Feedback { rating, comment, comment_active });
+                    return;
+                }
+                _ => {
+                    state.modal = Some(Modal::Feedback { rating, comment, comment_active });
+                    return;
+                }
+            }
+        }
         Modal::DeleteConfirm { session_id, title } => match key.code {
             KeyCode::Esc | KeyCode::Char('n') => {}
             KeyCode::Char('y') => match state.backend.delete_session(&session_id) {
@@ -449,5 +550,38 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
                 state.modal = Some(Modal::DeleteConfirm { session_id, title });
             }
         },
+    }
+}
+
+/// Append a feedback entry to `~/.local/share/rustcode/feedback.jsonl`.
+///
+/// Failures are silently ignored so bad writes don't disrupt the TUI.
+fn write_feedback(is_positive: bool, comment: &str) {
+    let Some(home) = std::env::var_os("HOME") else {
+        return;
+    };
+    let path = std::path::PathBuf::from(home)
+        .join(".local")
+        .join("share")
+        .join("rustcode")
+        .join("feedback.jsonl");
+
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+
+    let rating = if is_positive { "up" } else { "down" };
+    // Escape double-quotes in comment for safe inline JSON
+    let safe_comment = comment.trim().replace('\\', "\\\\").replace('"', "\\\"");
+    let entry = format!(r#"{{"ts":{ts},"rating":"{rating}","comment":"{safe_comment}"}}"#);
+
+    use std::io::Write as _;
+    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        let _ = writeln!(file, "{entry}");
     }
 }

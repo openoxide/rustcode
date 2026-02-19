@@ -53,6 +53,8 @@ mod agent_handlers_multiedit;
 mod agent_handlers_patch;
 mod agent_handlers_pty;
 mod agent_handlers_search;
+mod agent_handlers_snapshot;
+mod agent_handlers_task;
 mod agent_handlers_web;
 mod agent_handlers_worktree;
 mod agent_runtime;
@@ -143,6 +145,10 @@ pub struct Engine {
 #[derive(Debug, Default)]
 pub(crate) struct AgentState {
     read_paths: HashSet<PathBuf>,
+    /// Hash of the automatic pre-mutation snapshot for this session.
+    ///
+    /// Set on the first mutating tool call; `None` means no snapshot yet.
+    pub(crate) auto_snapshot_hash: Option<String>,
 }
 
 impl Engine {

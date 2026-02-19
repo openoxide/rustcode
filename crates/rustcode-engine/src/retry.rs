@@ -60,12 +60,18 @@ impl RetryPolicy {
 
 /// Determines if an LLM error is retryable.
 ///
+/// Checks both the [`LlmErrorKind`] typed classification (via the Debug
+/// format produced by `LlmError::Classified`) and raw string patterns for
+/// unclassified transport errors.
+///
 /// Retryable errors include:
+/// - Classified: `LlmErrorKind::RateLimit`, `LlmErrorKind::ServiceUnavailable`
 /// - Rate limiting (429, "`rate_limit`", "`too_many_requests`")
 /// - Server overload ("overloaded", "unavailable")
 /// - Transient server errors (500, 502, 503, 529)
 ///
 /// Non-retryable errors include:
+/// - Classified: `LlmErrorKind::ContextOverflow`, `AuthFailed`, `InvalidRequest`
 /// - Context overflow (compaction handles this)
 /// - Authentication errors (401, 403)
 /// - Invalid request errors (400)
@@ -73,6 +79,21 @@ impl RetryPolicy {
 #[must_use]
 pub fn is_retryable(error_msg: &str) -> bool {
     let lower = error_msg.to_lowercase();
+
+    // ── Typed classification (LlmError::Classified display format) ────────
+    // Display: "provider error (RateLimit { ... }): ..."
+    // Debug identifiers appear lowercased in the display string.
+    if lower.contains("ratelimit") {
+        return true;
+    }
+    if lower.contains("serviceunavailable") {
+        return true;
+    }
+    if lower.contains("contextoverflow") || lower.contains("authfailed") || lower.contains("invalidrequest") {
+        return false;
+    }
+
+    // ── String-pattern fallback (unclassified Transport errors) ──────────
 
     // Not retryable: context overflow — handled by compaction
     if lower.contains("context") && (lower.contains("overflow") || lower.contains("too long")) {
@@ -253,6 +274,44 @@ mod tests {
     fn unknown_errors_not_retryable() {
         assert!(!is_retryable("something completely different"));
         assert!(!is_retryable("parsing error: invalid json"));
+    }
+
+    // Tests for LlmErrorKind typed classification (via Display/Debug format)
+    #[test]
+    fn classified_ratelimit_is_retryable() {
+        // LlmError::Classified { kind: LlmErrorKind::RateLimit, ... } displays as:
+        // "provider error (RateLimit { retry_after_secs: 0 }): provider returned 429: ..."
+        assert!(is_retryable(
+            "provider error (RateLimit { retry_after_secs: 0 }): provider returned 429: too many"
+        ));
+    }
+
+    #[test]
+    fn classified_service_unavailable_is_retryable() {
+        assert!(is_retryable(
+            "provider error (ServiceUnavailable): provider returned 503: overloaded"
+        ));
+    }
+
+    #[test]
+    fn classified_context_overflow_not_retryable() {
+        assert!(!is_retryable(
+            "provider error (ContextOverflow): provider returned 400: context too long"
+        ));
+    }
+
+    #[test]
+    fn classified_auth_failed_not_retryable() {
+        assert!(!is_retryable(
+            "provider error (AuthFailed): provider returned 401: unauthorized"
+        ));
+    }
+
+    #[test]
+    fn classified_invalid_request_not_retryable() {
+        assert!(!is_retryable(
+            "provider error (InvalidRequest): provider returned 400: bad request"
+        ));
     }
 
     #[tokio::test]

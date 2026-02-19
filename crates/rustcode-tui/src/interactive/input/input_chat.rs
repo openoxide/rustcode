@@ -163,6 +163,14 @@ pub(super) fn handle_chat_key(
                 execute_command(state, CommandId::FileSearch);
                 return ChatNav::Stay;
             }
+            KeyCode::Char('s' | 'S') => {
+                execute_command(state, CommandId::ToggleSkills);
+                return ChatNav::Stay;
+            }
+            KeyCode::Char('b' | 'B') => {
+                execute_command(state, CommandId::Feedback);
+                return ChatNav::Stay;
+            }
             KeyCode::Char('r' | 'R') => {
                 refresh_chat_messages(state, chat);
                 push_toast(

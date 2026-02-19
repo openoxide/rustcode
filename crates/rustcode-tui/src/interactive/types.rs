@@ -73,6 +73,22 @@ pub(super) enum Modal {
     ErrorDetail {
         message: String,
     },
+    /// Skill toggle overlay — lists all loaded skills with toggle controls.
+    SkillToggle {
+        /// Snapshot of (name, description, enabled) for rendering and toggling.
+        skills: Vec<(String, String, bool)>,
+        /// Currently highlighted skill index.
+        selected: usize,
+    },
+    /// Feedback overlay — thumbs-up/down rating + optional comment.
+    Feedback {
+        /// `true` = thumbs up, `false` = thumbs down, `None` = not yet selected.
+        rating: Option<bool>,
+        /// Optional comment text.
+        comment: String,
+        /// Whether keyboard focus is in the comment field.
+        comment_active: bool,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,6 +108,10 @@ pub(super) enum CommandId {
     FocusActivity,
     CancelRun,
     Quit,
+    /// Open skill toggle overlay.
+    ToggleSkills,
+    /// Open feedback overlay.
+    Feedback,
 }
 
 #[derive(Debug, Clone)]

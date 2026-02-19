@@ -17,6 +17,7 @@ members = [
   "crates/rustcode-tui",
   "crates/rustcode-lsp",
   "crates/rustcode-watcher",
+  "crates/rustcode-snapshot",
 ]
 resolver = "2"
 
@@ -59,6 +60,7 @@ rustcode-skills = { path = "crates/rustcode-skills" }
 rustcode-memories = { path = "crates/rustcode-memories" }
 rustcode-lsp = { path = "crates/rustcode-lsp" }
 rustcode-watcher = { path = "crates/rustcode-watcher" }
+rustcode-snapshot = { path = "crates/rustcode-snapshot" }
 notify = "6.1"
 
 [workspace.lints.clippy]

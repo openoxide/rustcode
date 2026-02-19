@@ -102,6 +102,8 @@ impl Engine {
         options: &AgentOptions,
         state: &mut AgentState,
     ) -> Result<String, ExecutionError> {
+        // Auto-snapshot before the first mutation this session
+        self.auto_snapshot_before_mutation(state, context).await;
         let resolved = self.resolve_workspace_path(context, path, PathOperation::Write)?;
         if !state.read_paths.contains(&resolved)
             && self
@@ -142,6 +144,8 @@ impl Engine {
         options: &AgentOptions,
         state: &mut AgentState,
     ) -> Result<String, ExecutionError> {
+        // Auto-snapshot before the first mutation this session
+        self.auto_snapshot_before_mutation(state, context).await;
         let resolved = self.resolve_workspace_path(context, path, PathOperation::Edit)?;
         if !state.read_paths.contains(&resolved) {
             return Err(ExecutionError::Dispatch(

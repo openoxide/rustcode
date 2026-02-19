@@ -372,6 +372,51 @@ impl AgentToolRegistry {
                     }
                     Ok(output)
                 }
+                "snapshot_list" => {
+                    ensure_allowed_keys(&args, &[])?;
+                    engine.agent_tool_snapshot_list(context, state).await
+                }
+                "snapshot_restore" => {
+                    ensure_allowed_keys(&args, &["hash"])?;
+                    let hash = opt_str(&args, "hash")?.ok_or_else(|| {
+                        ExecutionError::Dispatch(
+                            "snapshot_restore requires hash".to_string(),
+                        )
+                    })?;
+                    engine.agent_tool_snapshot_restore(hash, context).await
+                }
+                "skill" => {
+                    ensure_allowed_keys(&args, &["name"])?;
+                    let name = opt_str(&args, "name")?.ok_or_else(|| {
+                        ExecutionError::Dispatch("skill tool requires name".to_string())
+                    })?;
+                    engine.agent_tool_skill(name).await
+                }
+                "task" => {
+                    ensure_allowed_keys(&args, &["prompt", "max_steps"])?;
+                    let prompt = opt_str(&args, "prompt")?.ok_or_else(|| {
+                        ExecutionError::Dispatch("task tool requires prompt".to_string())
+                    })?;
+                    let max_steps = opt_u64(&args, "max_steps")?.map(|n| n as usize);
+                    engine
+                        .agent_tool_task(prompt, max_steps, context, options)
+                        .await
+                }
+                "codesearch" => {
+                    ensure_allowed_keys(&args, &["query", "tokens_num"])?;
+                    if !context.config.allow_network {
+                        return Err(ExecutionError::Dispatch(
+                            "codesearch requires network access".to_string(),
+                        ));
+                    }
+                    let query = opt_str(&args, "query")?.ok_or_else(|| {
+                        ExecutionError::Dispatch("codesearch requires query".to_string())
+                    })?;
+                    let tokens_num = opt_u32(&args, "tokens_num")?;
+                    engine
+                        .agent_tool_codesearch(query, tokens_num, context)
+                        .await
+                }
                 "question" => {
                     ensure_allowed_keys(&args, &["questions"])?;
                     let questions_arr = args
