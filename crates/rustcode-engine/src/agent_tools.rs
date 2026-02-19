@@ -379,9 +379,7 @@ impl AgentToolRegistry {
                 "snapshot_restore" => {
                     ensure_allowed_keys(&args, &["hash"])?;
                     let hash = opt_str(&args, "hash")?.ok_or_else(|| {
-                        ExecutionError::Dispatch(
-                            "snapshot_restore requires hash".to_string(),
-                        )
+                        ExecutionError::Dispatch("snapshot_restore requires hash".to_string())
                     })?;
                     engine.agent_tool_snapshot_restore(hash, context).await
                 }

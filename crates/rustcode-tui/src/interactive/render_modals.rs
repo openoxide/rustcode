@@ -368,20 +368,26 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
 
             // Rating buttons
             let up_style = match rating {
-                Some(true) => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
-                _ => if !comment_active {
-                    Style::default().fg(Color::DarkGray)
-                } else {
-                    Style::default().add_modifier(Modifier::DIM)
-                },
+                Some(true) => Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+                _ => {
+                    if *comment_active {
+                        Style::default().add_modifier(Modifier::DIM)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    }
+                }
             };
             let down_style = match rating {
                 Some(false) => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-                _ => if !comment_active {
-                    Style::default().fg(Color::DarkGray)
-                } else {
-                    Style::default().add_modifier(Modifier::DIM)
-                },
+                _ => {
+                    if *comment_active {
+                        Style::default().add_modifier(Modifier::DIM)
+                    } else {
+                        Style::default().fg(Color::DarkGray)
+                    }
+                }
             };
             let rating_body = Paragraph::new(vec![
                 Line::raw("How useful was this session?"),
@@ -390,7 +396,9 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                     Span::styled(
                         " [+] thumbs up ",
                         if matches!(rating, Some(true)) {
-                            Style::default().fg(Color::Green).add_modifier(Modifier::REVERSED)
+                            Style::default()
+                                .fg(Color::Green)
+                                .add_modifier(Modifier::REVERSED)
                         } else {
                             up_style
                         },
@@ -399,7 +407,9 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                     Span::styled(
                         " [-] thumbs down ",
                         if matches!(rating, Some(false)) {
-                            Style::default().fg(Color::Red).add_modifier(Modifier::REVERSED)
+                            Style::default()
+                                .fg(Color::Red)
+                                .add_modifier(Modifier::REVERSED)
                         } else {
                             down_style
                         },
@@ -415,10 +425,10 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                 Block::default()
                     .title("Rating")
                     .borders(Borders::ALL)
-                    .border_style(if !comment_active {
-                        Style::default().fg(Color::Cyan)
-                    } else {
+                    .border_style(if *comment_active {
                         Style::default()
+                    } else {
+                        Style::default().fg(Color::Cyan)
                     }),
             );
             frame.render_widget(rating_body, rows[0]);
@@ -433,13 +443,14 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                     Style::default()
                 });
             let comment_inner = comment_block.inner(rows[1]);
-            let comment_para = Paragraph::new(comment.as_str())
-                .wrap(Wrap { trim: false });
+            let comment_para = Paragraph::new(comment.as_str()).wrap(Wrap { trim: false });
             frame.render_widget(comment_block, rows[1]);
             frame.render_widget(comment_para, comment_inner);
 
             if *comment_active {
-                let cx = comment_inner.x.saturating_add(comment.chars().count() as u16);
+                let cx = comment_inner
+                    .x
+                    .saturating_add(comment.chars().count() as u16);
                 let cy = comment_inner.y;
                 if cx < area.x + area.width && cy < area.y + area.height {
                     frame.set_cursor_position((cx, cy));

@@ -161,7 +161,9 @@ pub fn classify_http_error(status: u16, body: &str) -> LlmErrorKind {
         529 => LlmErrorKind::ServiceUnavailable,
         500 | 502 | 503 | 504 => {
             if body_lower.contains("overloaded") || body_lower.contains("rate_limit") {
-                LlmErrorKind::RateLimit { retry_after_secs: 0 }
+                LlmErrorKind::RateLimit {
+                    retry_after_secs: 0,
+                }
             } else {
                 LlmErrorKind::ServiceUnavailable
             }
@@ -231,7 +233,10 @@ mod tests {
 
     #[test]
     fn classify_400_context_length_exceeded() {
-        let kind = classify_http_error(400, "This model's maximum context length is 4096 tokens. context_length_exceeded");
+        let kind = classify_http_error(
+            400,
+            "This model's maximum context length is 4096 tokens. context_length_exceeded",
+        );
         assert_eq!(kind, LlmErrorKind::ContextOverflow);
     }
 
@@ -259,13 +264,20 @@ mod tests {
     #[test]
     fn extract_retry_after_from_body() {
         let kind = classify_http_error(429, "rate limited, retry after 30s");
-        assert!(matches!(kind, LlmErrorKind::RateLimit { retry_after_secs: 30 }));
+        assert!(matches!(
+            kind,
+            LlmErrorKind::RateLimit {
+                retry_after_secs: 30
+            }
+        ));
     }
 
     #[test]
     fn classified_error_display_contains_kind() {
         let err = LlmError::Classified {
-            kind: LlmErrorKind::RateLimit { retry_after_secs: 60 },
+            kind: LlmErrorKind::RateLimit {
+                retry_after_secs: 60,
+            },
             message: "provider returned 429: too many requests".to_string(),
         };
         let display = err.to_string();

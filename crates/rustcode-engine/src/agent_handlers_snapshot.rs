@@ -56,15 +56,10 @@ impl Engine {
         context: &CommandContext,
         state: &AgentState,
     ) -> Result<String, ExecutionError> {
-        let store = match open_snapshot_store(context) {
-            Some(s) => s,
-            None => {
-                return Ok(
-                    "Snapshot storage directory unavailable (HOME not set). \
-                     Snapshots cannot be used in this environment."
-                        .to_string(),
-                )
-            }
+        let Some(store) = open_snapshot_store(context) else {
+            return Ok("Snapshot storage directory unavailable (HOME not set). \
+                 Snapshots cannot be used in this environment."
+                .to_string());
         };
 
         if let Err(e) = store.ensure_init().await {
@@ -128,13 +123,10 @@ impl Engine {
             ));
         }
 
-        let store = match open_snapshot_store(context) {
-            Some(s) => s,
-            None => {
-                return Err(ExecutionError::Dispatch(
-                    "snapshot storage directory unavailable (HOME not set)".to_string(),
-                ))
-            }
+        let Some(store) = open_snapshot_store(context) else {
+            return Err(ExecutionError::Dispatch(
+                "snapshot storage directory unavailable (HOME not set)".to_string(),
+            ));
         };
 
         if let Err(e) = store.ensure_init().await {
@@ -159,11 +151,7 @@ impl Engine {
 /// Returns `None` when the snapshot storage directory cannot be determined
 /// (e.g. `HOME` is not set in the environment).
 fn open_snapshot_store(context: &CommandContext) -> Option<SnapshotStore> {
-    SnapshotStore::new(
-        &context.session.session_id,
-        &context.config.workspace_root,
-    )
-    .ok()
+    SnapshotStore::new(&context.session.session_id, &context.config.workspace_root).ok()
 }
 
 #[cfg(test)]

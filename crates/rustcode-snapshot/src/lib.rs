@@ -107,13 +107,11 @@ impl SnapshotStore {
     /// Returns [`SnapshotError::Git`] if staging or tree creation fails.
     pub async fn track(&self) -> Result<String, SnapshotError> {
         // Stage everything
-        self.git_work_tree(&["add", "--all", "--force", "."]).await?;
+        self.git_work_tree(&["add", "--all", "--force", "."])
+            .await?;
 
         // Write the tree object and capture its hash
-        let out = self
-            .git_work_tree_raw(&["write-tree"])
-            .output()
-            .await?;
+        let out = self.git_work_tree_raw(&["write-tree"]).output().await?;
 
         if !out.status.success() {
             return Err(SnapshotError::Git(git_stderr(&out.stderr)));
@@ -151,7 +149,8 @@ impl SnapshotStore {
     /// # Errors
     /// Returns [`SnapshotError::Git`] if the diff operation fails.
     pub async fn changed_files(&self, snapshot_hash: &str) -> Result<Vec<String>, SnapshotError> {
-        self.git_work_tree(&["add", "--all", "--force", "."]).await?;
+        self.git_work_tree(&["add", "--all", "--force", "."])
+            .await?;
 
         let out = self
             .git_work_tree_raw(&[
@@ -352,14 +351,18 @@ mod tests {
     async fn restore_reverts_changes() {
         let workspace = tempfile::tempdir().unwrap();
         let file_path = workspace.path().join("data.txt");
-        tokio::fs::write(&file_path, "original content").await.unwrap();
+        tokio::fs::write(&file_path, "original content")
+            .await
+            .unwrap();
 
         let store = SnapshotStore::new("restore-test", workspace.path()).unwrap();
         store.ensure_init().await.unwrap();
         let hash = store.track().await.unwrap();
 
         // Overwrite the file
-        tokio::fs::write(&file_path, "modified content").await.unwrap();
+        tokio::fs::write(&file_path, "modified content")
+            .await
+            .unwrap();
         assert_eq!(
             tokio::fs::read_to_string(&file_path).await.unwrap(),
             "modified content"

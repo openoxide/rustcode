@@ -458,15 +458,21 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
                 KeyCode::Esc => {
                     if comment_active {
                         comment_active = false;
-                        state.modal = Some(Modal::Feedback { rating, comment, comment_active });
+                        state.modal = Some(Modal::Feedback {
+                            rating,
+                            comment,
+                            comment_active,
+                        });
                     }
-                    // Esc from rating focus → close
-                    return;
+                    // Esc from rating focus → close modal (no re-open)
                 }
                 KeyCode::Tab => {
                     comment_active = !comment_active;
-                    state.modal = Some(Modal::Feedback { rating, comment, comment_active });
-                    return;
+                    state.modal = Some(Modal::Feedback {
+                        rating,
+                        comment,
+                        comment_active,
+                    });
                 }
                 KeyCode::Enter => {
                     let Some(is_positive) = rating else {
@@ -476,7 +482,11 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
                             "select a rating first (u = up, d = down)",
                             Duration::from_secs(3),
                         );
-                        state.modal = Some(Modal::Feedback { rating, comment, comment_active });
+                        state.modal = Some(Modal::Feedback {
+                            rating,
+                            comment,
+                            comment_active,
+                        });
                         return;
                     };
                     write_feedback(is_positive, &comment);
@@ -486,7 +496,7 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
                         "feedback recorded — thank you!",
                         Duration::from_secs(3),
                     );
-                    return; // close modal
+                    // close modal — do not re-open
                 }
                 KeyCode::Char(ch) if comment_active => {
                     if !key.modifiers.contains(KeyModifiers::CONTROL)
@@ -494,27 +504,42 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
                     {
                         comment.push(ch);
                     }
-                    state.modal = Some(Modal::Feedback { rating, comment, comment_active });
-                    return;
+                    state.modal = Some(Modal::Feedback {
+                        rating,
+                        comment,
+                        comment_active,
+                    });
                 }
                 KeyCode::Backspace if comment_active => {
                     comment.pop();
-                    state.modal = Some(Modal::Feedback { rating, comment, comment_active });
-                    return;
+                    state.modal = Some(Modal::Feedback {
+                        rating,
+                        comment,
+                        comment_active,
+                    });
                 }
                 KeyCode::Char('u' | '+' | 'U') => {
                     rating = Some(true);
-                    state.modal = Some(Modal::Feedback { rating, comment, comment_active });
-                    return;
+                    state.modal = Some(Modal::Feedback {
+                        rating,
+                        comment,
+                        comment_active,
+                    });
                 }
                 KeyCode::Char('d' | '-' | 'D') => {
                     rating = Some(false);
-                    state.modal = Some(Modal::Feedback { rating, comment, comment_active });
-                    return;
+                    state.modal = Some(Modal::Feedback {
+                        rating,
+                        comment,
+                        comment_active,
+                    });
                 }
                 _ => {
-                    state.modal = Some(Modal::Feedback { rating, comment, comment_active });
-                    return;
+                    state.modal = Some(Modal::Feedback {
+                        rating,
+                        comment,
+                        comment_active,
+                    });
                 }
             }
         }
@@ -557,6 +582,7 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
 ///
 /// Failures are silently ignored so bad writes don't disrupt the TUI.
 fn write_feedback(is_positive: bool, comment: &str) {
+    use std::io::Write as _;
     let Some(home) = std::env::var_os("HOME") else {
         return;
     };
@@ -580,8 +606,11 @@ fn write_feedback(is_positive: bool, comment: &str) {
     let safe_comment = comment.trim().replace('\\', "\\\\").replace('"', "\\\"");
     let entry = format!(r#"{{"ts":{ts},"rating":"{rating}","comment":"{safe_comment}"}}"#);
 
-    use std::io::Write as _;
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
         let _ = writeln!(file, "{entry}");
     }
 }

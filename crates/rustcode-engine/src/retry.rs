@@ -89,7 +89,10 @@ pub fn is_retryable(error_msg: &str) -> bool {
     if lower.contains("serviceunavailable") {
         return true;
     }
-    if lower.contains("contextoverflow") || lower.contains("authfailed") || lower.contains("invalidrequest") {
+    if lower.contains("contextoverflow")
+        || lower.contains("authfailed")
+        || lower.contains("invalidrequest")
+    {
         return false;
     }
 

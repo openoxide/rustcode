@@ -318,9 +318,18 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                 .defaults
                 .skills
                 .iter()
-                .map(|s| (s.name().to_string(), s.description().to_string(), s.metadata.enabled))
+                .map(|s| {
+                    (
+                        s.name().to_string(),
+                        s.description().to_string(),
+                        s.metadata.enabled,
+                    )
+                })
                 .collect();
-            state.modal = Some(Modal::SkillToggle { skills, selected: 0 });
+            state.modal = Some(Modal::SkillToggle {
+                skills,
+                selected: 0,
+            });
         }
         CommandId::Feedback => {
             state.modal = Some(Modal::Feedback {
