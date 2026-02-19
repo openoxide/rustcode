@@ -454,93 +454,68 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
             mut comment,
             mut comment_active,
         } => {
+            let mut close = false;
+            let no_mod = !key.modifiers.contains(KeyModifiers::CONTROL)
+                && !key.modifiers.contains(KeyModifiers::ALT);
+
+            // Shared keys regardless of focus
             match key.code {
-                KeyCode::Esc => {
-                    if comment_active {
-                        comment_active = false;
-                        state.modal = Some(Modal::Feedback {
-                            rating,
-                            comment,
-                            comment_active,
-                        });
-                    }
-                    // Esc from rating focus → close modal (no re-open)
-                }
-                KeyCode::Tab => {
-                    comment_active = !comment_active;
-                    state.modal = Some(Modal::Feedback {
-                        rating,
-                        comment,
-                        comment_active,
-                    });
-                }
+                KeyCode::Tab => comment_active = !comment_active,
                 KeyCode::Enter => {
-                    let Some(is_positive) = rating else {
-                        push_toast(
+                    match rating {
+                        None => push_toast(
                             state,
                             ToastVariant::Warning,
-                            "select a rating first (u = up, d = down)",
+                            "select a rating first: u = thumbs up, d = thumbs down",
                             Duration::from_secs(3),
-                        );
-                        state.modal = Some(Modal::Feedback {
-                            rating,
-                            comment,
-                            comment_active,
-                        });
-                        return;
-                    };
-                    write_feedback(is_positive, &comment);
-                    push_toast(
-                        state,
-                        ToastVariant::Success,
-                        "feedback recorded — thank you!",
-                        Duration::from_secs(3),
-                    );
-                    // close modal — do not re-open
-                }
-                KeyCode::Char(ch) if comment_active => {
-                    if !key.modifiers.contains(KeyModifiers::CONTROL)
-                        && !key.modifiers.contains(KeyModifiers::ALT)
-                    {
-                        comment.push(ch);
+                        ),
+                        Some(is_positive) => {
+                            write_feedback(is_positive, &comment);
+                            push_toast(
+                                state,
+                                ToastVariant::Success,
+                                "feedback recorded — thank you!",
+                                Duration::from_secs(3),
+                            );
+                            close = true;
+                        }
                     }
-                    state.modal = Some(Modal::Feedback {
-                        rating,
-                        comment,
-                        comment_active,
-                    });
                 }
-                KeyCode::Backspace if comment_active => {
-                    comment.pop();
-                    state.modal = Some(Modal::Feedback {
-                        rating,
-                        comment,
-                        comment_active,
-                    });
+                _ => {}
+            }
+
+            if !close {
+                if comment_active {
+                    // Comment field focus
+                    match key.code {
+                        KeyCode::Esc => comment_active = false,
+                        KeyCode::Backspace => {
+                            comment.pop();
+                        }
+                        KeyCode::Char(ch) if no_mod => comment.push(ch),
+                        _ => {}
+                    }
+                } else {
+                    // Rating button focus
+                    match key.code {
+                        KeyCode::Esc => close = true,
+                        KeyCode::Char('u' | 'U' | '+') | KeyCode::Left => {
+                            rating = Some(true);
+                        }
+                        KeyCode::Char('d' | 'D' | '-') | KeyCode::Right => {
+                            rating = Some(false);
+                        }
+                        _ => {}
+                    }
                 }
-                KeyCode::Char('u' | '+' | 'U') => {
-                    rating = Some(true);
-                    state.modal = Some(Modal::Feedback {
-                        rating,
-                        comment,
-                        comment_active,
-                    });
-                }
-                KeyCode::Char('d' | '-' | 'D') => {
-                    rating = Some(false);
-                    state.modal = Some(Modal::Feedback {
-                        rating,
-                        comment,
-                        comment_active,
-                    });
-                }
-                _ => {
-                    state.modal = Some(Modal::Feedback {
-                        rating,
-                        comment,
-                        comment_active,
-                    });
-                }
+            }
+
+            if !close {
+                state.modal = Some(Modal::Feedback {
+                    rating,
+                    comment,
+                    comment_active,
+                });
             }
         }
         Modal::DeleteConfirm { session_id, title } => match key.code {

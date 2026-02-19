@@ -1,13 +1,13 @@
 use super::{
-    build_prompt_history, composer_insert_str, compute_sessions_view, disable_raw_mode,
-    drain_toasts, enable_raw_mode, event, execute, handle_key, io, push_toast, render,
-    sort_sessions, ActivityItem, AgentOptions, AppState, Arc, CEvent, CancellationToken, ChatFocus,
-    ChatState, Command, CommandContext, Constraint, CrosstermBackend, Direction,
+    build_prompt_history, centered_rect, composer_insert_str, compute_sessions_view,
+    disable_raw_mode, drain_toasts, enable_raw_mode, event, execute, handle_key, io, push_toast,
+    render, sort_sessions, ActivityItem, AgentOptions, AppState, Arc, CEvent, CancellationToken,
+    ChatFocus, ChatState, Command, CommandContext, Constraint, CrosstermBackend, Direction,
     DisableMouseCapture, Duration, EnableMouseCapture, EnterAlternateScreen, EventPayload,
     EventPublisher, ExecutableCommand, InteractiveMsg, InteractiveServices, InteractiveStart,
-    InteractiveSubmitMode, KeyEventKind, Layout, LeaveAlternateScreen, MouseButton, MouseEvent,
-    MouseEventKind, PendingApproval, Rect, RunningCommand, Screen, SessionMeta, SystemTime,
-    Terminal, ToastVariant, TuiError, TuiPublisher,
+    InteractiveSubmitMode, KeyEventKind, Layout, LeaveAlternateScreen, Modal, MouseButton,
+    MouseEvent, MouseEventKind, PendingApproval, Rect, RunningCommand, Screen, SessionMeta,
+    SystemTime, Terminal, ToastVariant, TuiError, TuiPublisher,
 };
 use rustcode_core::event::EventScope;
 
@@ -167,6 +167,13 @@ pub(super) fn handle_mouse(state: &mut AppState, mouse: MouseEvent) {
     if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
         return;
     }
+
+    // Allow clicks inside the Feedback modal to select rating buttons
+    if matches!(&state.modal, Some(Modal::Feedback { .. })) {
+        handle_feedback_mouse(state, mouse);
+        return;
+    }
+
     if state.pending_approval.is_some() || state.modal.is_some() || state.help_open {
         return;
     }
@@ -210,6 +217,49 @@ fn contains(area: Rect, col: u16, row: u16) -> bool {
     let max_x = area.x.saturating_add(area.width);
     let max_y = area.y.saturating_add(area.height);
     col >= area.x && col < max_x && row >= area.y && row < max_y
+}
+
+/// Handle a left-click inside the Feedback modal.
+///
+/// The rating block layout (after the outer modal border and rating block border):
+/// - Line 0: "How useful was this session?"
+/// - Line 1: (empty)
+/// - Line 2: " [+] thumbs up " (16 chars)  "   " (3)  " [-] thumbs down " (18 chars)
+///
+/// Button row y = modal.y + 1 (outer border) + 1 (rating block top border) + 2 (line index)
+///             = modal.y + 4
+/// Up button   x = modal.x + 1 (outer) + 1 (rating border) = modal.x + 2, width 16
+/// Down button x = modal.x + 2 + 16 + 3 = modal.x + 21, width 18
+fn handle_feedback_mouse(state: &mut AppState, mouse: MouseEvent) {
+    let screen_rect = Rect::new(0, 0, state.last_area.width, state.last_area.height);
+    let modal_rect = centered_rect(68, 52, screen_rect);
+
+    let button_row = modal_rect.y.saturating_add(4);
+    let up_x_start = modal_rect.x.saturating_add(2);
+    let up_x_end = up_x_start.saturating_add(16);
+    let down_x_start = up_x_end.saturating_add(3);
+    let down_x_end = down_x_start.saturating_add(18);
+
+    let col = mouse.column;
+    let row = mouse.row;
+
+    if row != button_row {
+        return;
+    }
+
+    let clicked_up = col >= up_x_start && col < up_x_end;
+    let clicked_down = col >= down_x_start && col < down_x_end;
+
+    if !clicked_up && !clicked_down {
+        return;
+    }
+
+    if let Some(Modal::Feedback {
+        ref mut rating, ..
+    }) = state.modal
+    {
+        *rating = Some(clicked_up);
+    }
 }
 
 pub(super) fn handle_paste(state: &mut AppState, text: &str) {

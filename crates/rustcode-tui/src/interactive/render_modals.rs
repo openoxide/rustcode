@@ -360,7 +360,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
             let rows = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([
-                    Constraint::Length(4),
+                    Constraint::Length(5), // rating block: border(1) + 3 content lines + border(1)
                     Constraint::Length(4),
                     Constraint::Length(2),
                 ])
