@@ -100,7 +100,10 @@ async fn serve_v1_run_streams_events_over_sse() {
         "response={response}"
     );
     assert!(response.contains("data:"), "response={response}");
-    assert!(response.contains("null-llm response"), "response={response}");
+    assert!(
+        response.contains("null-llm response"),
+        "response={response}"
+    );
 
     cancellation.cancel();
     let _ = task.await.expect("server task join");

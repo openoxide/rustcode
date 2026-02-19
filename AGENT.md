@@ -14,6 +14,8 @@
 10. **No regressions allowed** — test count must never decrease
 11. **Cross-platform compatibility enforced** — macOS + Linux
 12. **No file may exceed 600 lines of code** — split into modules if approaching limit
+13. **Fix before building** — all existing failing tests and clippy warnings must be resolved before starting any new milestone
+14. **Manual testing required** — run `/manual-testing` workflow after every milestone or feature completion
 
 ## Development Discipline
 

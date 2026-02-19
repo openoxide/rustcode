@@ -1,4 +1,8 @@
-use super::{McpStdioSession, BTreeMap, McpError, Command, Stdio, Mutex, BufReader, DEFAULT_PROTOCOL_VERSION, AtomicU64, McpTool, Value, McpResource, Ordering, STDIO_RESPONSE_TIMEOUT, is_matching_id, AsyncWriteExt, read_jsonrpc_frame};
+use super::{
+    is_matching_id, read_jsonrpc_frame, AsyncWriteExt, AtomicU64, BTreeMap, BufReader, Command,
+    McpError, McpResource, McpStdioSession, McpTool, Mutex, Ordering, Stdio, Value,
+    DEFAULT_PROTOCOL_VERSION, STDIO_RESPONSE_TIMEOUT,
+};
 
 impl McpStdioSession {
     pub async fn connect(
@@ -238,7 +242,9 @@ impl McpStdioSession {
             Err(err) => {
                 let mut child = self.child.lock().await;
                 if let Ok(Some(status)) = child.try_wait() {
-                    return Err(McpError::Process(format!("stdio mcp server exited: {status}")));
+                    return Err(McpError::Process(format!(
+                        "stdio mcp server exited: {status}"
+                    )));
                 }
                 Err(err)
             }

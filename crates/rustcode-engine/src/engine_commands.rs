@@ -1,4 +1,8 @@
-use super::{async_trait, debug, env, Engine, CommandContext, Arc, EventPublisher, ExecutionError, IoError, ProcessOutput, EventScope, EventPayload, StoredMessage, MessageRole, SystemTime, UNIX_EPOCH, Value, LlmRequest, PathOperation, path_utils, PathBuf, CommandExecutor, Command};
+use super::{
+    async_trait, debug, env, path_utils, Arc, Command, CommandContext, CommandExecutor, Engine,
+    EventPayload, EventPublisher, EventScope, ExecutionError, IoError, LlmRequest, MessageRole,
+    PathBuf, PathOperation, ProcessOutput, StoredMessage, SystemTime, Value, UNIX_EPOCH,
+};
 
 impl Engine {
     async fn run_exec(
@@ -253,12 +257,13 @@ impl Engine {
         requested: &str,
         operation: PathOperation,
     ) -> Result<PathBuf, ExecutionError> {
-        let root = path_utils::absolute_normalized(&context.config.workspace_root).map_err(|err| {
-            ExecutionError::Dispatch(format!(
-                "failed to resolve workspace root {}: {err}",
-                context.config.workspace_root.display()
-            ))
-        })?;
+        let root =
+            path_utils::absolute_normalized(&context.config.workspace_root).map_err(|err| {
+                ExecutionError::Dispatch(format!(
+                    "failed to resolve workspace root {}: {err}",
+                    context.config.workspace_root.display()
+                ))
+            })?;
 
         let candidate = PathBuf::from(requested);
         let joined = if candidate.is_absolute() {
@@ -301,12 +306,14 @@ impl CommandExecutor for Engine {
                 options,
                 history,
             } => {
-                let result = self.run_agent(prompt, options, history, &context, publisher.clone())
+                let result = self
+                    .run_agent(prompt, options, history, &context, publisher.clone())
                     .await;
-                
+
                 // Compute and emit session summary after agent completes
                 if result.is_ok() {
-                    let summary = crate::session_summary::compute_diff_stats(&context.config.workspace_root);
+                    let summary =
+                        crate::session_summary::compute_diff_stats(&context.config.workspace_root);
                     if summary.has_changes() {
                         self.emit(
                             publisher.clone(),
@@ -319,7 +326,7 @@ impl CommandExecutor for Engine {
                         .await?;
                     }
                 }
-                
+
                 result
             }
             Command::Exec { command, args } => {
@@ -363,8 +370,13 @@ impl CommandExecutor for Engine {
 
         match command_result {
             Ok(()) => {
-                self.emit(publisher, EventScope::System, EventPayload::Completed, &context)
-                    .await
+                self.emit(
+                    publisher,
+                    EventScope::System,
+                    EventPayload::Completed,
+                    &context,
+                )
+                .await
             }
             Err(ExecutionError::Cancelled) => {
                 self.emit(

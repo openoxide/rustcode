@@ -1,4 +1,8 @@
-use super::{AppState, KeyEvent, KeyCode, compute_sessions_view, push_toast, ToastVariant, Duration, build_prompt_history, Screen, ChatState, ChatFocus, KeyModifiers, open_command_palette, Modal, sort_sessions, CreateSessionOptions};
+use super::{
+    build_prompt_history, compute_sessions_view, open_command_palette, push_toast, sort_sessions,
+    AppState, ChatFocus, ChatState, CreateSessionOptions, Duration, KeyCode, KeyEvent,
+    KeyModifiers, Modal, Screen, ToastVariant,
+};
 
 pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
     if state.sessions_filter_active {

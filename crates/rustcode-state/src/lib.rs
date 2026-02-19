@@ -1,3 +1,4 @@
+use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
@@ -113,12 +114,8 @@ impl SessionStore {
             if !meta_path.exists() {
                 continue;
             }
-            match read_json_file::<SessionInfo>(&meta_path) {
-                Ok(info) => sessions.push(info),
-                Err(_) => {
-                    // Skip unreadable sessions; caller can inspect on disk.
-                    continue;
-                }
+            if let Ok(info) = read_json_file::<SessionInfo>(&meta_path) {
+                sessions.push(info);
             }
         }
 
@@ -255,7 +252,7 @@ impl SessionStore {
         Ok(())
     }
 
-    #[must_use] 
+    #[must_use]
     pub fn new_message_id(&self) -> MessageId {
         new_message_id()
     }
@@ -323,6 +320,7 @@ fn touch_file(path: &Path) -> Result<(), StateError> {
     }
     OpenOptions::new()
         .create(true)
+        .truncate(true)
         .write(true)
         .open(path)
         .map_err(|err| StateError::Io(format!("{}: {err}", path.display())))?;
@@ -365,7 +363,10 @@ fn new_session_id() -> SessionId {
         .unwrap_or(0);
     let mut bytes = [0u8; 8];
     rand::rng().fill_bytes(&mut bytes);
-    let rand_hex = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let mut rand_hex = String::with_capacity(16);
+    for b in &bytes {
+        let _ = write!(rand_hex, "{b:02x}");
+    }
     format!("s-{now}-{rand_hex}")
 }
 
@@ -376,7 +377,10 @@ fn new_message_id() -> MessageId {
         .unwrap_or(0);
     let mut bytes = [0u8; 8];
     rand::rng().fill_bytes(&mut bytes);
-    let rand_hex = bytes.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let mut rand_hex = String::with_capacity(16);
+    for b in &bytes {
+        let _ = write!(rand_hex, "{b:02x}");
+    }
     format!("m-{now}-{rand_hex}")
 }
 
@@ -546,7 +550,9 @@ mod tests {
         let sessions = store.list_sessions().expect("list");
         assert!(sessions.is_empty());
 
-        let err = store.load_messages(&session.id).expect_err("load must fail");
+        let err = store
+            .load_messages(&session.id)
+            .expect_err("load must fail");
         assert!(matches!(err, StateError::NotFound(_)));
     }
 }

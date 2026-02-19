@@ -1,4 +1,7 @@
-use super::{Line, StoredMessage, MessageRole, Style, Modifier, Color, Span, ChatState, FindState, AppState, push_toast, ToastVariant, Duration};
+use super::{
+    push_toast, AppState, ChatState, Color, Duration, FindState, Line, MessageRole, Modifier, Span,
+    StoredMessage, Style, ToastVariant,
+};
 
 fn append_message_lines(lines: &mut Vec<Line<'static>>, msg: &StoredMessage, tool_details: bool) {
     let role = match msg.role {
@@ -21,7 +24,9 @@ fn append_message_lines(lines: &mut Vec<Line<'static>>, msg: &StoredMessage, too
 
     lines.push(Line::from(vec![Span::styled(role, role_style)]));
 
-    if msg.role == MessageRole::Tool { append_tool_message_lines(lines, msg, tool_details) } else {
+    if msg.role == MessageRole::Tool {
+        append_tool_message_lines(lines, msg, tool_details)
+    } else {
         append_value_lines(lines, &msg.content, "", 200);
         if !msg.tool_calls.is_empty() {
             lines.push(Line::raw(""));

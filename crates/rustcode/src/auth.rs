@@ -3,8 +3,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result};
 use rustcode_auth::{
     complete_browser_oauth_flow, methods_for_provider, poll_device_code_flow_for_credential,
-    start_browser_oauth_flow, start_device_code_flow, AuthMethod, AuthStore, DeviceCodeFlowCredential,
-    StoredCredential,
+    start_browser_oauth_flow, start_device_code_flow, AuthMethod, AuthStore,
+    DeviceCodeFlowCredential, StoredCredential,
 };
 
 use crate::cli::AuthCommand;
@@ -12,7 +12,7 @@ use crate::utils::{is_interactive_terminal, write_stdout_line, write_stdout_raw}
 
 mod catalog;
 
-pub use catalog::{AuthMethodRow, ModelsProvider, load_models_index};
+pub use catalog::{load_models_index, AuthMethodRow, ModelsProvider};
 
 use catalog::{
     list_auth_login_providers, list_auth_methods, methods_as_csv, resolve_auth_method_rows,
@@ -130,24 +130,25 @@ pub async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Res
                 .find(|item| item.id == provider)
                 .context(format!(
                     "unknown provider {provider}{}",
-                    warning.map(|value| format!(" ({value})")).unwrap_or_default()
+                    warning
+                        .map(|value| format!(" ({value})"))
+                        .unwrap_or_default()
                 ))?;
 
-            let method = resolve_login_method_with_context(method.as_deref(), from_env.as_deref(), &row)?;
+            let method =
+                resolve_login_method_with_context(method.as_deref(), from_env.as_deref(), &row)?;
 
             match method {
                 AuthMethod::ApiKey => {
                     let (key, source) = if let Some(env_var) = from_env {
-                        let key =
-                            std::env::var(&env_var).context(format!("env var {env_var} not set"))?;
+                        let key = std::env::var(&env_var)
+                            .context(format!("env var {env_var} not set"))?;
                         (key, "env")
                     } else if is_interactive_terminal() {
                         print_provider_api_key_hint(&provider)?;
                         (prompt_for_api_key(&provider)?, "prompt")
                     } else {
-                        anyhow::bail!(
-                            "api_key login requires --from-env in non-interactive mode"
-                        );
+                        anyhow::bail!("api_key login requires --from-env in non-interactive mode");
                     };
 
                     store.set_api_key(&provider, &key)?;
@@ -207,10 +208,12 @@ pub async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Res
                         write_stdout_line(&serde_json::to_string(&payload)?)?;
                     }
 
-                    let credential =
-                        poll_device_code_flow_for_credential(&flow, Duration::from_secs(timeout_secs))
-                            .await
-                            .context("failed to poll for token")?;
+                    let credential = poll_device_code_flow_for_credential(
+                        &flow,
+                        Duration::from_secs(timeout_secs),
+                    )
+                    .await
+                    .context("failed to poll for token")?;
                     persist_oauth_credential(&store, &provider, &credential)?;
 
                     if json_output {
@@ -229,7 +232,8 @@ pub async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Res
                     }
                 }
                 AuthMethod::OAuthBrowser => {
-                    let browser_client_id = browser_client_id_for_provider(&provider, domain.as_deref());
+                    let browser_client_id =
+                        browser_client_id_for_provider(&provider, domain.as_deref());
                     let flow = start_browser_oauth_flow(
                         &provider,
                         domain.as_deref(),
@@ -271,13 +275,10 @@ pub async fn handle_auth_command(command: AuthCommand, json_output: bool) -> Res
                         return Ok(());
                     }
 
-                    let credential = complete_browser_oauth_flow(
-                        &flow,
-                        Duration::from_secs(timeout_secs),
-                        None,
-                    )
-                    .await
-                    .context("failed to complete browser oauth flow")?;
+                    let credential =
+                        complete_browser_oauth_flow(&flow, Duration::from_secs(timeout_secs), None)
+                            .await
+                            .context("failed to complete browser oauth flow")?;
                     persist_oauth_credential(&store, &provider, &credential)?;
 
                     if json_output {
@@ -310,7 +311,8 @@ fn handle_auth_list(store: &AuthStore, json_output: bool) -> Result<()> {
         let rows = providers
             .iter()
             .map(|provider| {
-                let credential = render_stored_credential(store.get(provider).ok().flatten().as_ref());
+                let credential =
+                    render_stored_credential(store.get(provider).ok().flatten().as_ref());
                 serde_json::json!({
                     "id": provider,
                     "credential": credential,
@@ -339,7 +341,8 @@ fn handle_auth_status(store: &AuthStore, provider: &str, json_output: bool) -> R
     let (rows, _) = resolve_auth_method_rows();
     let methods = rows
         .into_iter()
-        .find(|row| row.id == provider).map_or_else(|| methods_for_provider(provider), |row| row.methods);
+        .find(|row| row.id == provider)
+        .map_or_else(|| methods_for_provider(provider), |row| row.methods);
 
     if json_output {
         let payload = serde_json::json!({
@@ -368,7 +371,8 @@ fn handle_auth_methods_provider(provider: &str, json_output: bool) -> Result<()>
     let (rows, _) = resolve_auth_method_rows();
     let methods = rows
         .into_iter()
-        .find(|row| row.id == provider).map_or_else(|| methods_for_provider(provider), |row| row.methods);
+        .find(|row| row.id == provider)
+        .map_or_else(|| methods_for_provider(provider), |row| row.methods);
 
     if json_output {
         let payload = serde_json::json!({
@@ -379,7 +383,10 @@ fn handle_auth_methods_provider(provider: &str, json_output: bool) -> Result<()>
         });
         write_stdout_line(&serde_json::to_string(&payload)?)?;
     } else {
-        write_stdout_line(&format!("provider={provider}\tmethods={}", methods_as_csv(&methods)))?;
+        write_stdout_line(&format!(
+            "provider={provider}\tmethods={}",
+            methods_as_csv(&methods)
+        ))?;
     }
 
     Ok(())
@@ -398,7 +405,8 @@ pub fn classify_auth_error(err: &anyhow::Error) -> &'static str {
     if message.contains("validation") || message.contains("requires") || message.contains("not set")
     {
         "validation"
-    } else if message.contains("network") || message.contains("dns") || message.contains("connect") {
+    } else if message.contains("network") || message.contains("dns") || message.contains("connect")
+    {
         "network"
     } else {
         "provider"

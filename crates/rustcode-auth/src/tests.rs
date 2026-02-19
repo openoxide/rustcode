@@ -545,9 +545,7 @@ fn read_http_request(stream: &mut TcpStream) -> String {
             Ok(read) => {
                 request.extend_from_slice(&buffer[..read]);
                 if header_end_index.is_none() {
-                    if let Some(index) =
-                        request.windows(4).position(|chunk| chunk == b"\r\n\r\n")
-                    {
+                    if let Some(index) = request.windows(4).position(|chunk| chunk == b"\r\n\r\n") {
                         let end = index + 4;
                         header_end_index = Some(end);
                         let headers = String::from_utf8_lossy(&request[..end]);

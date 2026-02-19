@@ -19,6 +19,7 @@ pub struct SessionSummary {
 
 impl SessionSummary {
     /// Format the summary as a human-readable string.
+    #[must_use]
     pub fn to_display(&self) -> String {
         if self.files_changed == 0 {
             return "No files changed".to_string();
@@ -35,6 +36,7 @@ impl SessionSummary {
     }
 
     /// Return true if any files were changed.
+    #[must_use]
     pub fn has_changes(&self) -> bool {
         self.files_changed > 0
     }
@@ -44,6 +46,7 @@ impl SessionSummary {
 ///
 /// Returns a `SessionSummary` with counts of files changed, insertions, and deletions.
 /// If the workspace is not a git repo or git is unavailable, returns an empty summary.
+#[must_use]
 pub fn compute_diff_stats(workspace_root: &Path) -> SessionSummary {
     let output = Command::new("git")
         .args(["diff", "--stat", "--numstat", "HEAD"])
@@ -62,6 +65,7 @@ pub fn compute_diff_stats(workspace_root: &Path) -> SessionSummary {
 /// Compute diff statistics against a specific git reference (commit, branch, etc.).
 ///
 /// Useful for comparing against a snapshot taken at the start of an agent run.
+#[must_use]
 pub fn compute_diff_since(workspace_root: &Path, since_ref: &str) -> SessionSummary {
     let output = Command::new("git")
         .args(["diff", "--numstat", since_ref])
@@ -80,6 +84,7 @@ pub fn compute_diff_since(workspace_root: &Path, since_ref: &str) -> SessionSumm
 /// Get the current git HEAD reference for later diffing.
 ///
 /// Returns `None` if git is unavailable or the directory is not a repo.
+#[must_use]
 pub fn current_git_ref(workspace_root: &Path) -> Option<String> {
     let output = Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -165,7 +170,10 @@ mod tests {
             additions: 1,
             deletions: 0,
         };
-        assert_eq!(summary.to_display(), "1 file changed, 1 insertion, 0 deletions");
+        assert_eq!(
+            summary.to_display(),
+            "1 file changed, 1 insertion, 0 deletions"
+        );
         assert!(summary.has_changes());
     }
 
@@ -176,7 +184,10 @@ mod tests {
             additions: 42,
             deletions: 7,
         };
-        assert_eq!(summary.to_display(), "3 files changed, 42 insertions, 7 deletions");
+        assert_eq!(
+            summary.to_display(),
+            "3 files changed, 42 insertions, 7 deletions"
+        );
     }
 
     #[test]

@@ -127,10 +127,7 @@ async fn agent_can_exec_when_allowed() {
             })
         }
 
-        async fn chat(
-            &self,
-            request: ChatRequest,
-        ) -> Result<ChatResponse, rustcode_llm::LlmError> {
+        async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, rustcode_llm::LlmError> {
             let mut step = self.step.lock().await;
             match *step {
                 0 => {
@@ -449,10 +446,7 @@ async fn agent_compaction_triggers_on_high_token_usage() {
             })
         }
 
-        async fn chat(
-            &self,
-            request: ChatRequest,
-        ) -> Result<ChatResponse, rustcode_llm::LlmError> {
+        async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, rustcode_llm::LlmError> {
             let mut step = self.step.lock().await;
             match *step {
                 0 => {

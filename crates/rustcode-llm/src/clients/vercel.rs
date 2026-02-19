@@ -22,7 +22,11 @@ pub(crate) struct VercelAiGatewayClient {
 }
 
 impl VercelAiGatewayClient {
-    pub(crate) fn new(provider_id: String, base_url: String, api_key: String) -> Result<Self, LlmError> {
+    pub(crate) fn new(
+        provider_id: String,
+        base_url: String,
+        api_key: String,
+    ) -> Result<Self, LlmError> {
         Ok(Self {
             provider_id,
             endpoint: normalize_vercel_gateway_endpoint(&base_url),

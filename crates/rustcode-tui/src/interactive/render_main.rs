@@ -1,4 +1,9 @@
-use super::{AppState, Screen, render_approval_modal, render_modal, render_help_modal, Layout, Direction, Constraint, ListItem, format_age, Line, Span, Style, Color, Modifier, List, Block, Borders, ToastVariant, Paragraph, ChatState, build_transcript_lines, apply_find_highlight, ChatFocus, Wrap, composer_cursor_visual, render_activity, render_activity_details_modal};
+use super::{
+    apply_find_highlight, build_transcript_lines, composer_cursor_visual, format_age,
+    render_activity, render_activity_details_modal, render_approval_modal, render_help_modal,
+    render_modal, AppState, Block, Borders, ChatFocus, ChatState, Color, Constraint, Direction,
+    Layout, Line, List, ListItem, Modifier, Paragraph, Screen, Span, Style, ToastVariant, Wrap,
+};
 
 pub(super) fn render(frame: &mut ratatui::Frame<'_>, state: &AppState) {
     match &state.screen {
@@ -50,10 +55,7 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
                     Span::raw("  "),
                     Span::raw(title.to_string()),
                     Span::raw("  "),
-                    Span::styled(
-                        age.clone(),
-                        Style::default().add_modifier(Modifier::DIM),
-                    ),
+                    Span::styled(age.clone(), Style::default().add_modifier(Modifier::DIM)),
                 ]))
             })
             .collect::<Vec<_>>()

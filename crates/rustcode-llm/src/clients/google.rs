@@ -23,7 +23,11 @@ pub(crate) struct GoogleGenerativeAiClient {
 }
 
 impl GoogleGenerativeAiClient {
-    pub(crate) fn new(provider_id: String, base_url: String, api_key: String) -> Result<Self, LlmError> {
+    pub(crate) fn new(
+        provider_id: String,
+        base_url: String,
+        api_key: String,
+    ) -> Result<Self, LlmError> {
         Ok(Self {
             provider_id,
             base_url,
@@ -205,6 +209,10 @@ impl LlmClient for GoogleGenerativeAiClient {
             ));
         }
         let usage = extract_google_usage(&parsed);
-        Ok(ChatResponse { text, tool_calls, usage })
+        Ok(ChatResponse {
+            text,
+            tool_calls,
+            usage,
+        })
     }
 }

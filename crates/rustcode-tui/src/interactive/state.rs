@@ -1,4 +1,4 @@
-use super::{AppState, ToastVariant, Duration, Toast, SystemTime, SessionInfo};
+use super::{AppState, Duration, SessionInfo, SystemTime, Toast, ToastVariant};
 
 pub(super) fn push_toast(
     state: &mut AppState,
@@ -46,7 +46,7 @@ pub(super) fn transcript_area_height(state: &AppState) -> u16 {
     state.last_area.height.saturating_sub(7).max(1)
 }
 
-pub(super) fn sort_sessions(sessions: &mut Vec<SessionInfo>) {
+pub(super) fn sort_sessions(sessions: &mut [SessionInfo]) {
     sessions.sort_by(|a, b| b.updated_at_unix_ms.cmp(&a.updated_at_unix_ms));
 }
 

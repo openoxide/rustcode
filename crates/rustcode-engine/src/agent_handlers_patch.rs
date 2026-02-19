@@ -112,7 +112,7 @@ fn parse_unified_diff(text: &str) -> Result<Vec<FilePatch>, ExecutionError> {
         i += 2;
 
         let is_new_file = old_path == "/dev/null" || old_path == "a//dev/null";
-        let path = normalize_diff_path(if is_new_file { new_path } else { new_path });
+        let path = normalize_diff_path(new_path);
 
         let mut hunks = Vec::new();
         while i < lines.len() && lines[i].starts_with("@@ ") {
@@ -133,7 +133,7 @@ fn parse_unified_diff(text: &str) -> Result<Vec<FilePatch>, ExecutionError> {
     Ok(patches)
 }
 
-/// Parse a single hunk starting with @@ -old_start,old_count +new_start,new_count @@
+/// Parse a single hunk starting with @@ -`old_start,old_count` +`new_start,new_count` @@
 fn parse_hunk(lines: &[&str]) -> Result<(Hunk, usize), ExecutionError> {
     let header = lines[0];
     let old_start = parse_hunk_header_old_start(header)?;
@@ -147,7 +147,7 @@ fn parse_hunk(lines: &[&str]) -> Result<(Hunk, usize), ExecutionError> {
         }
         consumed += 1;
 
-        if let Some(_) = line.strip_prefix('-') {
+        if line.strip_prefix('-').is_some() {
             hunk_lines.push(HunkLine::Remove(()));
         } else if let Some(rest) = line.strip_prefix('+') {
             hunk_lines.push(HunkLine::Add(rest.to_string()));
@@ -175,10 +175,7 @@ fn parse_hunk_header_old_start(header: &str) -> Result<usize, ExecutionError> {
     let after_at = header
         .strip_prefix("@@ -")
         .ok_or_else(|| ExecutionError::Dispatch("invalid hunk header".to_string()))?;
-    let num_str = after_at
-        .split(|c: char| c == ',' || c == ' ')
-        .next()
-        .unwrap_or("1");
+    let num_str = after_at.split([',', ' ']).next().unwrap_or("1");
     num_str
         .parse::<usize>()
         .map_err(|_| ExecutionError::Dispatch(format!("invalid hunk start line: {num_str}")))
@@ -200,7 +197,11 @@ fn apply_hunks(original: &str, hunks: &[Hunk]) -> Result<String, ExecutionError>
     let mut pos = 0; // current position in original_lines (0-indexed)
 
     for hunk in hunks {
-        let hunk_start = if hunk.old_start == 0 { 0 } else { hunk.old_start - 1 };
+        let hunk_start = if hunk.old_start == 0 {
+            0
+        } else {
+            hunk.old_start - 1
+        };
 
         // Copy lines before this hunk
         while pos < hunk_start && pos < original_lines.len() {
@@ -220,7 +221,7 @@ fn apply_hunks(original: &str, hunks: &[Hunk]) -> Result<String, ExecutionError>
                         result.push(line.clone());
                     }
                 }
-                HunkLine::Remove(_) => {
+                HunkLine::Remove(()) => {
                     // Skip this line from original
                     pos += 1;
                 }

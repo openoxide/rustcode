@@ -1,4 +1,13 @@
-use super::{execute, InteractiveServices, TuiError, io, enable_raw_mode, EnterAlternateScreen, CrosstermBackend, Terminal, sort_sessions, compute_sessions_view, Screen, InteractiveStart, build_prompt_history, ChatState, ChatFocus, AppState, drain_toasts, render, event, Duration, CEvent, KeyEventKind, handle_key, composer_insert_str, InteractiveMsg, EventPayload, ActivityItem, push_toast, ToastVariant, PendingApproval, InteractiveSubmitMode, CancellationToken, RunningCommand, Arc, EventPublisher, TuiPublisher, CommandContext, SessionMeta, SystemTime, AgentOptions, Command, ExecutableCommand, disable_raw_mode, LeaveAlternateScreen};
+use super::{
+    build_prompt_history, composer_insert_str, compute_sessions_view, disable_raw_mode,
+    drain_toasts, enable_raw_mode, event, execute, handle_key, io, push_toast, render,
+    sort_sessions, ActivityItem, AgentOptions, AppState, Arc, CEvent, CancellationToken, ChatFocus,
+    ChatState, Command, CommandContext, CrosstermBackend, Duration, EnterAlternateScreen,
+    EventPayload, EventPublisher, ExecutableCommand, InteractiveMsg, InteractiveServices,
+    InteractiveStart, InteractiveSubmitMode, KeyEventKind, LeaveAlternateScreen, PendingApproval,
+    RunningCommand, Screen, SessionMeta, SystemTime, Terminal, ToastVariant, TuiError,
+    TuiPublisher,
+};
 
 pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
     let InteractiveServices {
@@ -20,7 +29,9 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
 
     let term_backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(term_backend).map_err(|err| TuiError::Io(err.to_string()))?;
-    terminal.clear().map_err(|err| TuiError::Io(err.to_string()))?;
+    terminal
+        .clear()
+        .map_err(|err| TuiError::Io(err.to_string()))?;
 
     let mut sessions = session_backend.list_sessions().map_err(TuiError::State)?;
     sort_sessions(&mut sessions);
@@ -36,10 +47,15 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
             prompt,
             auto_submit: should_submit,
         } => {
-            if let Some(idx) = sessions.iter().position(|candidate| candidate.id == session.id) {
+            if let Some(idx) = sessions
+                .iter()
+                .position(|candidate| candidate.id == session.id)
+            {
                 selected = idx;
             }
-            let messages = session_backend.load_messages(&session.id).map_err(TuiError::State)?;
+            let messages = session_backend
+                .load_messages(&session.id)
+                .map_err(TuiError::State)?;
             let prompt_history = build_prompt_history(&messages);
             let initial_composer = if should_submit {
                 String::new()
@@ -91,7 +107,9 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
         tx: handles.tx,
         rx: handles.rx,
         request_seq: 0,
-        last_area: terminal.size().map_err(|err| TuiError::Io(err.to_string()))?,
+        last_area: terminal
+            .size()
+            .map_err(|err| TuiError::Io(err.to_string()))?,
     };
 
     if let Some(prompt) = auto_submit {
@@ -252,7 +270,9 @@ pub(super) fn drain_messages(state: &mut AppState) {
                     if refresh {
                         match state.backend.load_messages(&chat.session.id) {
                             Ok(messages) => chat.messages = messages,
-                            Err(err) => state.status = Some(format!("failed to load transcript: {err}")),
+                            Err(err) => {
+                                state.status = Some(format!("failed to load transcript: {err}"))
+                            }
                         }
                     }
                 }
@@ -343,7 +363,8 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
     if !trimmed.is_empty()
         && chat
             .prompt_history
-            .last().is_none_or(|last| last.as_str() != trimmed)
+            .last()
+            .is_none_or(|last| last.as_str() != trimmed)
     {
         chat.prompt_history.push(trimmed.to_string());
         while chat.prompt_history.len() > 200 {

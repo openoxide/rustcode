@@ -8,15 +8,15 @@ use std::path::Path;
 fn instructions_load_from_workspace() {
     let temp_dir = std::env::temp_dir().join("rustcode_test_instructions");
     std::fs::create_dir_all(&temp_dir).ok();
-    
+
     // Create RUSTCODE.md
     let rustcode_path = temp_dir.join("RUSTCODE.md");
     std::fs::write(&rustcode_path, "# Test Instructions\n\nThis is a test.").unwrap();
-    
+
     let loaded = instructions::load_instructions(&temp_dir);
     assert_eq!(loaded.len(), 1);
     assert!(loaded[0].content.contains("Test Instructions"));
-    
+
     // Cleanup
     std::fs::remove_dir_all(&temp_dir).ok();
 }
@@ -25,16 +25,16 @@ fn instructions_load_from_workspace() {
 fn instructions_prefer_rustcode_over_agents() {
     let temp_dir = std::env::temp_dir().join("rustcode_test_precedence");
     std::fs::create_dir_all(&temp_dir).ok();
-    
+
     // Create both files
     std::fs::write(temp_dir.join("RUSTCODE.md"), "# RUSTCODE").unwrap();
     std::fs::write(temp_dir.join("AGENTS.md"), "# AGENTS").unwrap();
-    
+
     let loaded = instructions::load_instructions(&temp_dir);
     assert_eq!(loaded.len(), 1);
     assert!(loaded[0].content.contains("RUSTCODE"));
     assert!(!loaded[0].content.contains("AGENTS"));
-    
+
     // Cleanup
     std::fs::remove_dir_all(&temp_dir).ok();
 }
@@ -43,22 +43,18 @@ fn instructions_prefer_rustcode_over_agents() {
 fn system_prompt_includes_all_components() {
     let temp_dir = std::env::temp_dir().join("rustcode_test_sysprompt");
     std::fs::create_dir_all(&temp_dir).ok();
-    
+
     // Create instruction file
     std::fs::write(temp_dir.join("RUSTCODE.md"), "# Custom Instructions").unwrap();
-    
-    let prompt = system_prompt::build_system_prompt(
-        "claude-3.5-sonnet",
-        &temp_dir,
-        true,
-    );
-    
+
+    let prompt = system_prompt::build_system_prompt("claude-3.5-sonnet", &temp_dir, true);
+
     // Check all components are present
     assert!(prompt.contains("You are rustcode"));
     assert!(prompt.contains("Claude model"));
     assert!(prompt.contains("<environment>"));
     assert!(prompt.contains("Custom Instructions"));
-    
+
     // Cleanup
     std::fs::remove_dir_all(&temp_dir).ok();
 }
@@ -66,13 +62,13 @@ fn system_prompt_includes_all_components() {
 #[test]
 fn system_prompt_model_hints() {
     let temp = std::env::temp_dir();
-    
+
     let claude_prompt = system_prompt::build_system_prompt("claude-3.5-sonnet", &temp, false);
     assert!(claude_prompt.contains("Claude model"));
-    
+
     let gpt_prompt = system_prompt::build_system_prompt("gpt-4o", &temp, false);
     assert!(gpt_prompt.contains("OpenAI model"));
-    
+
     let gemini_prompt = system_prompt::build_system_prompt("gemini-2.0-flash", &temp, false);
     assert!(gemini_prompt.contains("Gemini model"));
 }
@@ -80,12 +76,12 @@ fn system_prompt_model_hints() {
 #[test]
 fn retry_policy_delays() {
     let policy = retry::RetryPolicy::default();
-    
+
     // Check exponential backoff
     let delay1 = policy.delay(1);
     let delay2 = policy.delay(2);
     let delay3 = policy.delay(3);
-    
+
     assert_eq!(delay1.as_millis(), 2000); // 2s
     assert_eq!(delay2.as_millis(), 4000); // 4s
     assert_eq!(delay3.as_millis(), 8000); // 8s
@@ -98,7 +94,7 @@ fn retry_identifies_retryable_errors() {
     assert!(retry::is_retryable("server overloaded"));
     assert!(retry::is_retryable("503 Service Unavailable"));
     assert!(retry::is_retryable("connection timeout"));
-    
+
     assert!(!retry::is_retryable("401 Unauthorized"));
     assert!(!retry::is_retryable("invalid api key"));
     assert!(!retry::is_retryable("context overflow"));
@@ -113,10 +109,10 @@ async fn retry_stops_after_max_attempts() {
         backoff_factor: 2,
         max_delay_ms: 100,
     };
-    
+
     let call_count = Arc::new(Mutex::new(0));
     let call_count_clone = call_count.clone();
-    
+
     let result = retry::retry_llm_call(&policy, || {
         let count = call_count_clone.clone();
         async move {
@@ -126,7 +122,7 @@ async fn retry_stops_after_max_attempts() {
         }
     })
     .await;
-    
+
     assert!(result.is_err());
     assert_eq!(*call_count.lock().await, 3); // Initial + 2 retries
 }
@@ -134,10 +130,10 @@ async fn retry_stops_after_max_attempts() {
 #[tokio::test]
 async fn retry_succeeds_on_eventual_success() {
     let policy = retry::RetryPolicy::default();
-    
+
     let call_count = Arc::new(Mutex::new(0));
     let call_count_clone = call_count.clone();
-    
+
     let result = retry::retry_llm_call(&policy, || {
         let count = call_count_clone.clone();
         async move {
@@ -145,7 +141,7 @@ async fn retry_succeeds_on_eventual_success() {
             *c += 1;
             let current = *c;
             drop(c);
-            
+
             if current < 3 {
                 Err::<i32, String>("503 Service Unavailable".to_string())
             } else {
@@ -154,7 +150,7 @@ async fn retry_succeeds_on_eventual_success() {
         }
     })
     .await;
-    
+
     assert_eq!(result.unwrap(), 42);
     assert_eq!(*call_count.lock().await, 3);
 }
@@ -166,7 +162,7 @@ fn session_summary_formats_correctly() {
         additions: 42,
         deletions: 17,
     };
-    
+
     let display = summary.to_display();
     assert!(display.contains("3 files"));
     assert!(display.contains("42 insertions"));
@@ -180,7 +176,7 @@ fn session_summary_handles_singular() {
         additions: 1,
         deletions: 1,
     };
-    
+
     let display = summary.to_display();
     assert!(display.contains("1 file changed"));
     assert!(!display.contains("files"));

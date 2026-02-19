@@ -247,9 +247,7 @@ impl McpHttpSession {
 
         let (response, _headers) = self.post_jsonrpc(&request, true).await?;
         match response.get("error") {
-            Some(err) => Err(McpError::Protocol(format!(
-                "jsonrpc error: {err}"
-            ))),
+            Some(err) => Err(McpError::Protocol(format!("jsonrpc error: {err}"))),
             None => response
                 .get("result")
                 .cloned()

@@ -9,8 +9,7 @@ pub fn tool_specs(options: &AgentOptions, allow_network: bool) -> Vec<ToolSpec> 
     let mut specs = vec![
         ToolSpec {
             name: "list".to_string(),
-            description: "List files and directories under a workspace-relative path."
-                .to_string(),
+            description: "List files and directories under a workspace-relative path.".to_string(),
             parameters: serde_json::json!({
                 "type": "object",
                 "properties": {

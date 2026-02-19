@@ -1,20 +1,17 @@
-use std::sync::Arc;
-use anyhow::{Context, Result};
 use crate::cli::{Cli, TuiCommand};
-use crate::utils::{is_interactive_terminal, load_effective_config};
-use rustcode_core::config::{ResolvedConfig};
-use rustcode_state::{SessionStore, FileTranscriptRecorder};
-use rustcode_engine::{Engine, WorkspacePermissionPolicy};
-use rustcode_io::LocalIo;
-use rustcode_llm::{build_client};
-use rustcode_plugins::PluginRegistry;
 use crate::mcp::build_mcp_registry;
 use crate::run_cmds::RemoteRunExecutor;
+use crate::utils::{is_interactive_terminal, load_effective_config};
+use anyhow::{Context, Result};
+use rustcode_core::config::ResolvedConfig;
+use rustcode_engine::{Engine, WorkspacePermissionPolicy};
+use rustcode_io::LocalIo;
+use rustcode_llm::build_client;
+use rustcode_plugins::PluginRegistry;
+use rustcode_state::{FileTranscriptRecorder, SessionStore};
+use std::sync::Arc;
 
-pub async fn handle_tui_command(
-    tui: TuiCommand,
-    cli: &Cli,
-) -> Result<()> {
+pub async fn handle_tui_command(tui: TuiCommand, cli: &Cli) -> Result<()> {
     if !is_interactive_terminal() {
         return Ok(());
     }
@@ -48,7 +45,8 @@ pub async fn handle_tui_command(
 
             if !resolved_config.allow_network {
                 initial_status = Some(
-                    "network access is disabled; LLM calls will not work (use --allow-network)".to_string()
+                    "network access is disabled; LLM calls will not work (use --allow-network)"
+                        .to_string(),
                 );
             }
 
@@ -59,9 +57,8 @@ pub async fn handle_tui_command(
             let config = Some(Arc::new(resolved_config));
             let backend: Arc<dyn rustcode_tui::SessionBackend> =
                 Arc::new(rustcode_tui::RemoteSessionBackend::new(&url));
-            let executor: Option<Arc<dyn rustcode_core::CommandExecutor>> = Some(Arc::new(
-                RemoteRunExecutor::new(&url),
-            ));
+            let executor: Option<Arc<dyn rustcode_core::CommandExecutor>> =
+                Some(Arc::new(RemoteRunExecutor::new(&url)));
 
             let mut start = rustcode_tui::InteractiveStart::Sessions;
             if continue_session || session.is_some() || prompt.is_some() {
@@ -76,9 +73,9 @@ pub async fn handle_tui_command(
                         })
                         .map_err(|err| anyhow::anyhow!("failed to resolve --continue: {err}"))
                 } else if let Some(session_id) = session.as_deref() {
-                    backend
-                        .get_session(session_id)
-                        .map_err(|err| anyhow::anyhow!("failed to load session {session_id}: {err}"))
+                    backend.get_session(session_id).map_err(|err| {
+                        anyhow::anyhow!("failed to load session {session_id}: {err}")
+                    })
                 } else if let Some(prompt_text) = prompt.as_deref() {
                     if prompt_text.trim().is_empty() {
                         Err(anyhow::anyhow!("--prompt must not be empty"))
@@ -256,7 +253,8 @@ pub async fn handle_tui_default(
                     match store.fork_session(&base.id, title.clone()) {
                         Ok(forked) => forked,
                         Err(err) => {
-                            initial_status = Some(format!("failed to fork session {}: {err}", base.id));
+                            initial_status =
+                                Some(format!("failed to fork session {}: {err}", base.id));
                             base
                         }
                     }

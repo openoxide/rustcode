@@ -1,12 +1,12 @@
-use std::sync::Arc;
-use anyhow::{Context, Result};
-use futures_util::StreamExt;
-use reqwest::header::ACCEPT;
 use crate::render::{render_event, OutputFormat};
 use crate::utils::{write_stdout_line, write_stdout_raw};
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use futures_util::StreamExt;
+use reqwest::header::ACCEPT;
 use rustcode_core::event::{Event, EventPayload, EventScope};
 use rustcode_core::ports::{CommandExecutor, EventPublisher};
-use async_trait::async_trait;
+use std::sync::Arc;
 
 pub async fn run_attached(
     url: &str,
@@ -19,10 +19,16 @@ pub async fn run_attached(
     let target = format!("{url}/v1/run");
     let mut payload = serde_json::Map::new();
     if let Some(p) = prompt {
-        payload.insert("prompt".to_string(), serde_json::Value::String(p.to_string()));
+        payload.insert(
+            "prompt".to_string(),
+            serde_json::Value::String(p.to_string()),
+        );
     }
     if let Some(s) = session {
-        payload.insert("session".to_string(), serde_json::Value::String(s.to_string()));
+        payload.insert(
+            "session".to_string(),
+            serde_json::Value::String(s.to_string()),
+        );
     }
 
     let response = client
@@ -47,7 +53,8 @@ pub async fn run_attached(
 
         while let Some(block) = pop_sse_block(&mut buffer) {
             if let Some(data) = extract_sse_data(&block) {
-                let event: Event = serde_json::from_str(&data).context("failed to parse event json")?;
+                let event: Event =
+                    serde_json::from_str(&data).context("failed to parse event json")?;
                 if matches!(output_format, OutputFormat::Human) && !event_debug {
                     match &event.payload {
                         EventPayload::OutputChunk { text } => {
@@ -131,14 +138,18 @@ impl CommandExecutor for RemoteRunExecutor {
             None,
             OutputFormat::Human,
             false,
-        ).await {
-            let _ = publisher.publish(Event::new(
-                0, // Dummy ID
-                EventScope::Command,
-                EventPayload::Failure {
-                    message: err.to_string(),
-                }
-            )).await;
+        )
+        .await
+        {
+            let _ = publisher
+                .publish(Event::new(
+                    0, // Dummy ID
+                    EventScope::Command,
+                    EventPayload::Failure {
+                        message: err.to_string(),
+                    },
+                ))
+                .await;
         }
 
         Ok(())

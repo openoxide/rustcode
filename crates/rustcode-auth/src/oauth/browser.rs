@@ -329,10 +329,10 @@ fn start_gitlab_browser_oauth_flow(
     let code_verifier = generate_code_verifier();
     let code_challenge = generate_pkce_code_challenge(&code_verifier);
 
-    let mut authorize_url =
-        reqwest::Url::parse(&format!("https://{normalized_domain}/oauth/authorize")).map_err(
-            |err| AuthError::Validation(format!("invalid gitlab oauth authorize url: {err}")),
-        )?;
+    let mut authorize_url = reqwest::Url::parse(&format!(
+        "https://{normalized_domain}/oauth/authorize"
+    ))
+    .map_err(|err| AuthError::Validation(format!("invalid gitlab oauth authorize url: {err}")))?;
 
     {
         let mut query = authorize_url.query_pairs_mut();
@@ -364,8 +364,7 @@ async fn complete_gitlab_browser_oauth_flow(
     let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
     let code = Box::pin(wait_for_oauth_callback(&callback, &flow.state, timeout)).await?;
 
-    let scheme = if flow.domain.starts_with("127.0.0.1:") || flow.domain.starts_with("localhost:")
-    {
+    let scheme = if flow.domain.starts_with("127.0.0.1:") || flow.domain.starts_with("localhost:") {
         "http"
     } else {
         "https"
@@ -429,8 +428,7 @@ async fn complete_openai_browser_oauth_flow(
     let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
     let code = Box::pin(wait_for_oauth_callback(&callback, &flow.state, timeout)).await?;
 
-    let scheme = if flow.domain.starts_with("127.0.0.1:") || flow.domain.starts_with("localhost:")
-    {
+    let scheme = if flow.domain.starts_with("127.0.0.1:") || flow.domain.starts_with("localhost:") {
         "http"
     } else {
         "https"

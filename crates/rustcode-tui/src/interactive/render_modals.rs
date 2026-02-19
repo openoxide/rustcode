@@ -1,4 +1,7 @@
-use super::{Modal, Clear, Block, Borders, Style, Color, Layout, Direction, Constraint, Paragraph, Line, Span, Modifier, Wrap, ListItem, List, AppState, InteractiveSubmitMode, Rect};
+use super::{
+    AppState, Block, Borders, Clear, Color, Constraint, Direction, InteractiveSubmitMode, Layout,
+    Line, List, ListItem, Modal, Modifier, Paragraph, Rect, Span, Style, Wrap,
+};
 
 pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
     match modal {
@@ -212,12 +215,13 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
 pub(super) fn render_help_modal(frame: &mut ratatui::Frame<'_>, state: &AppState) {
     let area = centered_rect(80, 70, frame.area());
     frame.render_widget(Clear, area);
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::from(vec![Span::styled(
-        "Help",
-        Style::default().add_modifier(Modifier::BOLD),
-    )]));
-    lines.push(Line::raw(""));
+    let mut lines: Vec<Line<'static>> = vec![
+        Line::from(vec![Span::styled(
+            "Help",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]),
+        Line::raw(""),
+    ];
 
     lines.push(Line::from(vec![Span::styled(
         "Global",

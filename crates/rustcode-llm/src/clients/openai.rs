@@ -9,9 +9,8 @@ use crate::transforms::{
     extract_openai_usage, openai_message_value, openai_tool_spec_value,
 };
 use crate::types::{
-    ChatRequest, ChatResponse, LlmClient, LlmError, LlmRequest, LlmResponse,
-    RequestInitiator, HTTP_RESPONSE_BODY_TIMEOUT, HTTP_RESPONSE_HEADER_TIMEOUT,
-    HTTP_STREAM_IDLE_TIMEOUT,
+    ChatRequest, ChatResponse, LlmClient, LlmError, LlmRequest, LlmResponse, RequestInitiator,
+    HTTP_RESPONSE_BODY_TIMEOUT, HTTP_RESPONSE_HEADER_TIMEOUT, HTTP_STREAM_IDLE_TIMEOUT,
 };
 use async_trait::async_trait;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
@@ -213,6 +212,10 @@ impl LlmClient for OpenAiCompatibleClient {
 
         let usage = extract_openai_usage(&parsed);
 
-        Ok(ChatResponse { text, tool_calls, usage })
+        Ok(ChatResponse {
+            text,
+            tool_calls,
+            usage,
+        })
     }
 }

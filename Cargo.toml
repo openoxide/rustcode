@@ -47,8 +47,29 @@ ratatui = "0.29"
 crossterm = "0.28"
 
 [workspace.lints.clippy]
-all = "warn"
-pedantic = "warn"
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# ── Targeted pedantic relaxations ──
+# These generate bulk noise without improving code quality in our codebase.
+too_many_lines = "allow"            # Existing large functions; splitting would reduce readability
+missing_errors_doc = "allow"        # Most Result functions have obvious error semantics
+cast_possible_truncation = "allow"  # Deliberate numeric conversions (timestamps, sizes)
+cast_possible_wrap = "allow"        # Deliberate u64→i64 for timestamps
+cast_sign_loss = "allow"            # Deliberate unsigned→signed conversions
+cast_precision_loss = "allow"       # u64→f64 for percentages/ratios
+similar_names = "allow"             # False positives on similar variable names
+module_name_repetitions = "allow"   # Module-prefixed type names are idiomatic
+assigning_clones = "allow"          # clone_into vs clone — minimal real impact
+struct_excessive_bools = "allow"    # Config/options structs legitimately have many bools
+large_enum_variant = "allow"        # Event/Command enums intentionally have large variants
+needless_pass_by_value = "allow"    # String args commonly consumed by format!/push
+match_same_arms = "allow"           # Explicit match arms can improve readability
+unnecessary_wraps = "allow"         # Some Result returns are for API consistency
+redundant_closure_for_method_calls = "allow" # Closures can be clearer than method refs
+format_push_string = "allow"        # format!() push to String is readable
+no_effect_underscore_binding = "allow" # Common in test/placeholder patterns
+unused_async = "allow"              # Async fn signatures for trait/API consistency
+default_trait_access = "allow"      # Type::default() vs Default::default() — style choice
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -1,4 +1,13 @@
-use super::{AppState, ChatState, KeyEvent, ChatNav, KeyModifiers, KeyCode, ActivityItem, open_command_palette, push_toast, ToastVariant, Duration, CreateSessionOptions, composer_clear, build_prompt_history, ChatFocus, history_prev, history_next, build_transcript_lines, compute_find_matches, Modal, refresh_chat_messages, find_next, transcript_area_height, find_prev, composer_move_down, composer_move_up, composer_backspace, composer_delete, composer_move_left, composer_move_right, composer_move_home, composer_move_end, composer_insert_str, handle_slash_command, submit_prompt, compute_sessions_view, Screen, sort_sessions, compute_palette_view, maybe_execute_palette_query, execute_command, set_find};
+use super::{
+    build_prompt_history, build_transcript_lines, composer_backspace, composer_clear,
+    composer_delete, composer_insert_str, composer_move_down, composer_move_end,
+    composer_move_home, composer_move_left, composer_move_right, composer_move_up,
+    compute_find_matches, compute_palette_view, compute_sessions_view, execute_command, find_next,
+    find_prev, handle_slash_command, history_next, history_prev, maybe_execute_palette_query,
+    open_command_palette, push_toast, refresh_chat_messages, set_find, sort_sessions,
+    submit_prompt, transcript_area_height, ActivityItem, AppState, ChatFocus, ChatNav, ChatState,
+    CreateSessionOptions, Duration, KeyCode, KeyEvent, KeyModifiers, Modal, Screen, ToastVariant,
+};
 
 mod input_chat;
 mod input_sessions;

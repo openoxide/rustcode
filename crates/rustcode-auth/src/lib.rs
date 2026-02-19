@@ -487,14 +487,12 @@ pub use oauth::{
     complete_browser_oauth_flow, complete_mcp_browser_oauth_flow, normalize_domain,
     poll_device_code_flow_for_api_key, poll_device_code_flow_for_credential,
     start_browser_oauth_flow, start_device_code_flow, start_mcp_browser_oauth_flow,
-    BrowserOAuthFlowStart, DeviceCodeFlowCredential, DeviceCodeFlowStart,
-    McpBrowserOAuthFlowStart,
+    BrowserOAuthFlowStart, DeviceCodeFlowCredential, DeviceCodeFlowStart, McpBrowserOAuthFlowStart,
 };
 
 #[cfg(test)]
 pub(crate) use oauth::{
-    deserialize_u64_string_or_number, extract_openai_account_id_from_jwt,
-    GITLAB_BUNDLED_CLIENT_ID,
+    deserialize_u64_string_or_number, extract_openai_account_id_from_jwt, GITLAB_BUNDLED_CLIENT_ID,
 };
 
 fn validate_provider(provider: &str) -> Result<(), AuthError> {

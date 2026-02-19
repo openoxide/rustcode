@@ -92,7 +92,7 @@ fn build_compaction_request(messages: &[ChatMessage], model: &str) -> ChatReques
 
 /// Build a new message history from a compaction summary.
 ///
-/// Returns: [system_prompt, summary_as_assistant_msg, recent_user_messages...]
+/// Returns: [`system_prompt`, `summary_as_assistant_msg`, `recent_user_messages`...]
 fn build_compacted_history(
     system_prompt: &str,
     summary_text: &str,
@@ -110,9 +110,8 @@ fn build_compacted_history(
     });
 
     // 2. Summary as an assistant message
-    let summary_header = format!(
-        "[Context compacted — previous conversation summarized below]\n\n{summary_text}"
-    );
+    let summary_header =
+        format!("[Context compacted — previous conversation summarized below]\n\n{summary_text}");
     compacted.push(ChatMessage {
         role: ChatRole::Assistant,
         content: Value::String(summary_header),
@@ -173,10 +172,7 @@ impl Engine {
         messages: &mut Vec<ChatMessage>,
         context: &CommandContext,
     ) -> Result<(), ExecutionError> {
-        tracing::info!(
-            "context compaction triggered (messages={})",
-            messages.len()
-        );
+        tracing::info!("context compaction triggered (messages={})", messages.len());
 
         // Step 1: Prune old tool outputs
         let pruned = prune_tool_outputs(messages, PROTECT_RECENT_TURNS);
@@ -196,8 +192,7 @@ impl Engine {
         // Step 3: Build compacted history
         let system_prompt = extract_system_prompt(messages);
         let recent = extract_recent_messages(messages, PROTECT_RECENT_TURNS);
-        let compacted =
-            build_compacted_history(&system_prompt, &summary_response.text, recent);
+        let compacted = build_compacted_history(&system_prompt, &summary_response.text, recent);
 
         tracing::info!(
             "compacted context: {} messages → {} messages",

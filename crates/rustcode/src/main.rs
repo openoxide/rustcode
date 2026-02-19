@@ -12,36 +12,38 @@ use rustcode_core::event::EventPayload;
 use rustcode_core::ports::{CommandExecutor, ToolApprover, TranscriptRecorder};
 use rustcode_engine::{ChannelPublisher, Engine, WorkspacePermissionPolicy};
 use rustcode_io::LocalIo;
-use rustcode_llm::{build_client};
+use rustcode_llm::build_client;
 use rustcode_plugins::PluginRegistry;
 use rustcode_state::{FileTranscriptRecorder, SessionStore};
 
-mod cli;
-mod render;
+mod agent_cmds;
 mod auth;
+mod cli;
+mod github;
 mod mcp;
 mod models;
-mod session_cmds;
-mod github;
-mod utils;
-mod tui_cmds;
+mod render;
 mod run_cmds;
-mod agent_cmds;
+mod session_cmds;
+mod tui_cmds;
+mod utils;
 
-use cli::{AuthCommand, Cli, McpCommand, TopCommand};
-use render::{render_event, OutputFormat};
-use utils::{
-    init_tracing, load_effective_config, now_unix_ms, wait_for_shutdown_signal, write_stdout_line,
-    write_stdout_raw, is_interactive_terminal,
-};
-use auth::{handle_auth_command, classify_auth_error};
-use mcp::{handle_mcp_command, build_mcp_registry, classify_mcp_error};
-use models::handle_models_command;
-use session_cmds::{handle_session_command, handle_export_command, handle_import_command, resolve_session};
-use github::{handle_github_command, handle_pr_command};
-use tui_cmds::{handle_tui_command, handle_tui_default};
-use run_cmds::{run_attached};
 use agent_cmds::StdioToolApprover;
+use auth::{classify_auth_error, handle_auth_command};
+use cli::{AuthCommand, Cli, McpCommand, TopCommand};
+use github::{handle_github_command, handle_pr_command};
+use mcp::{build_mcp_registry, classify_mcp_error, handle_mcp_command};
+use models::handle_models_command;
+use render::{render_event, OutputFormat};
+use run_cmds::run_attached;
+use session_cmds::{
+    handle_export_command, handle_import_command, handle_session_command, resolve_session,
+};
+use tui_cmds::{handle_tui_command, handle_tui_default};
+use utils::{
+    init_tracing, is_interactive_terminal, load_effective_config, now_unix_ms,
+    wait_for_shutdown_signal, write_stdout_line, write_stdout_raw,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -140,16 +142,17 @@ async fn main() -> Result<()> {
 
     if let TopCommand::Tui(tui_opts) = &cli.command {
         if let Some(tui_cmd) = &tui_opts.command {
-             return handle_tui_command(tui_cmd.clone(), &cli).await;
+            return handle_tui_command(tui_cmd.clone(), &cli).await;
         }
         return handle_tui_default(
-            &cli, 
-            tui_opts.fork, 
-            tui_opts.continue_session, 
-            tui_opts.session.clone(), 
-            tui_opts.prompt.clone(), 
-            tui_opts.title.clone()
-        ).await;
+            &cli,
+            tui_opts.fork,
+            tui_opts.continue_session,
+            tui_opts.session.clone(),
+            tui_opts.prompt.clone(),
+            tui_opts.title.clone(),
+        )
+        .await;
     }
 
     let requires_llm = matches!(
@@ -176,7 +179,14 @@ async fn main() -> Result<()> {
         if *fork || title.is_some() {
             anyhow::bail!("run --attach does not support local session flags like --fork/--title");
         }
-        return run_attached(url, Some(prompt.as_str()), session.as_deref(), output_format, event_debug).await;
+        return run_attached(
+            url,
+            Some(prompt.as_str()),
+            session.as_deref(),
+            output_format,
+            event_debug,
+        )
+        .await;
     }
 
     let session_store = SessionStore::open_default();
@@ -193,11 +203,16 @@ async fn main() -> Result<()> {
                 &session_store,
                 *continue_session,
                 session.clone(),
-                if *fork { session.clone().or_else(|| {
-                    let mut items: Vec<_> = session_store.list_sessions().ok()?.into_iter().collect();
-                    items.sort_by_key(|m| std::cmp::Reverse(m.created_at_unix_ms));
-                    items.into_iter().next().map(|m| m.id)
-                }) } else { None },
+                if *fork {
+                    session.clone().or_else(|| {
+                        let mut items: Vec<_> =
+                            session_store.list_sessions().ok()?.into_iter().collect();
+                        items.sort_by_key(|m| std::cmp::Reverse(m.created_at_unix_ms));
+                        items.into_iter().next().map(|m| m.id)
+                    })
+                } else {
+                    None
+                },
                 title.clone(),
                 &config.model,
             )?;
@@ -217,11 +232,16 @@ async fn main() -> Result<()> {
                 &session_store,
                 *continue_session,
                 session.clone(),
-                if *fork { session.clone().or_else(|| {
-                    let mut items: Vec<_> = session_store.list_sessions().ok()?.into_iter().collect();
-                    items.sort_by_key(|m| std::cmp::Reverse(m.created_at_unix_ms));
-                    items.into_iter().next().map(|m| m.id)
-                }) } else { None },
+                if *fork {
+                    session.clone().or_else(|| {
+                        let mut items: Vec<_> =
+                            session_store.list_sessions().ok()?.into_iter().collect();
+                        items.sort_by_key(|m| std::cmp::Reverse(m.created_at_unix_ms));
+                        items.into_iter().next().map(|m| m.id)
+                    })
+                } else {
+                    None
+                },
                 title.clone(),
                 &config.model,
             )?;
@@ -233,7 +253,8 @@ async fn main() -> Result<()> {
     };
 
     let session_id = session_info
-        .as_ref().map_or_else(|| "session-1".to_string(), |info| info.id.clone());
+        .as_ref()
+        .map_or_else(|| "session-1".to_string(), |info| info.id.clone());
 
     let run_user_prompt = match &cli.command {
         TopCommand::Run {
@@ -286,9 +307,18 @@ async fn main() -> Result<()> {
         None
     };
 
-    let llm_client = if requires_llm {
-        build_client(&config).context("failed to initialize llm provider")?
+    let llm_client = if requires_llm && config.allow_network {
+        match build_client(&config) {
+            Ok(client) => client,
+            Err(err) => {
+                tracing::warn!("LLM provider init failed, using null client: {err}");
+                Arc::new(rustcode_llm::NullLlmClient)
+            }
+        }
     } else {
+        if requires_llm && !config.allow_network {
+            tracing::info!("network access disabled — using null LLM client");
+        }
         Arc::new(rustcode_llm::NullLlmClient)
     };
 
@@ -393,11 +423,17 @@ async fn main() -> Result<()> {
             },
             history: agent_history,
         },
-        TopCommand::Exec { command, args } => rustcode_core::command::Command::Exec { command, args },
+        TopCommand::Exec { command, args } => {
+            rustcode_core::command::Command::Exec { command, args }
+        }
         TopCommand::List { path } => rustcode_core::command::Command::List { path },
         TopCommand::Read { path } => rustcode_core::command::Command::Read { path },
-        TopCommand::Write { path, contents } => rustcode_core::command::Command::Write { path, contents },
-        TopCommand::Edit { path, from, to } => rustcode_core::command::Command::Edit { path, from, to },
+        TopCommand::Write { path, contents } => {
+            rustcode_core::command::Command::Write { path, contents }
+        }
+        TopCommand::Edit { path, from, to } => {
+            rustcode_core::command::Command::Edit { path, from, to }
+        }
         TopCommand::Tui(_) => rustcode_core::command::Command::Tui,
         TopCommand::Serve { listen } => rustcode_core::command::Command::Serve { listen },
         TopCommand::Version => rustcode_core::command::Command::Version,
@@ -426,7 +462,7 @@ async fn main() -> Result<()> {
             anyhow::bail!("internal error: pr command must be handled before engine dispatch");
         }
     };
-    
+
     let execution = engine.execute(command, context, publisher.clone());
     tokio::pin!(execution);
 

@@ -80,62 +80,110 @@ pub fn list_models(provider: &str) -> Vec<&'static str> {
 
 // ── Built-in model presets ─────────────────────────────────────────
 
-/// (context_window, max_output, provider, tools, vision, streaming)
+/// (`context_window`, `max_output`, provider, tools, vision, streaming)
 type Preset = (u64, u64, &'static str, bool, bool, bool);
 
-/// Built-in model presets: (context, max_output, provider, tools, vision, streaming)
+/// Built-in model presets: (context, `max_output`, provider, tools, vision, streaming)
 static BUILTIN_MODELS: &[(&str, Preset)] = &[
     // Anthropic Claude
-    ("claude-3.5-sonnet",   (200_000, 8_192,  "anthropic", true, true, true)),
-    ("claude-3-5-sonnet",   (200_000, 8_192,  "anthropic", true, true, true)),
-    ("claude-3.5-haiku",    (200_000, 8_192,  "anthropic", true, false, true)),
-    ("claude-3-5-haiku",    (200_000, 8_192,  "anthropic", true, false, true)),
-    ("claude-3-opus",       (200_000, 4_096,  "anthropic", true, true, true)),
-    ("claude-3.0-opus",     (200_000, 4_096,  "anthropic", true, true, true)),
-    ("claude-4",            (200_000, 16_384, "anthropic", true, true, true)),
-    ("claude-4-opus",       (200_000, 16_384, "anthropic", true, true, true)),
-    ("claude-4-sonnet",     (200_000, 16_384, "anthropic", true, true, true)),
-
+    (
+        "claude-3.5-sonnet",
+        (200_000, 8_192, "anthropic", true, true, true),
+    ),
+    (
+        "claude-3-5-sonnet",
+        (200_000, 8_192, "anthropic", true, true, true),
+    ),
+    (
+        "claude-3.5-haiku",
+        (200_000, 8_192, "anthropic", true, false, true),
+    ),
+    (
+        "claude-3-5-haiku",
+        (200_000, 8_192, "anthropic", true, false, true),
+    ),
+    (
+        "claude-3-opus",
+        (200_000, 4_096, "anthropic", true, true, true),
+    ),
+    (
+        "claude-3.0-opus",
+        (200_000, 4_096, "anthropic", true, true, true),
+    ),
+    ("claude-4", (200_000, 16_384, "anthropic", true, true, true)),
+    (
+        "claude-4-opus",
+        (200_000, 16_384, "anthropic", true, true, true),
+    ),
+    (
+        "claude-4-sonnet",
+        (200_000, 16_384, "anthropic", true, true, true),
+    ),
     // OpenAI
-    ("gpt-4o",              (128_000, 16_384, "openai", true, true, true)),
-    ("gpt-4o-mini",         (128_000, 16_384, "openai", true, true, true)),
-    ("gpt-4-turbo",         (128_000, 4_096,  "openai", true, true, true)),
-    ("gpt-4-1106",          (128_000, 4_096,  "openai", true, true, true)),
-    ("gpt-4",               (8_192,   4_096,  "openai", true, false, true)),
-    ("o1",                  (200_000, 100_000,"openai", true, true, true)),
-    ("o1-mini",             (128_000, 65_536, "openai", true, false, true)),
-    ("o1-preview",          (128_000, 32_768, "openai", true, false, true)),
-    ("o3",                  (200_000, 100_000,"openai", true, true, true)),
-    ("o3-mini",             (200_000, 65_536, "openai", true, false, true)),
-    ("o4-mini",             (200_000, 100_000,"openai", true, true, true)),
-
+    ("gpt-4o", (128_000, 16_384, "openai", true, true, true)),
+    ("gpt-4o-mini", (128_000, 16_384, "openai", true, true, true)),
+    ("gpt-4-turbo", (128_000, 4_096, "openai", true, true, true)),
+    ("gpt-4-1106", (128_000, 4_096, "openai", true, true, true)),
+    ("gpt-4", (8_192, 4_096, "openai", true, false, true)),
+    ("o1", (200_000, 100_000, "openai", true, true, true)),
+    ("o1-mini", (128_000, 65_536, "openai", true, false, true)),
+    ("o1-preview", (128_000, 32_768, "openai", true, false, true)),
+    ("o3", (200_000, 100_000, "openai", true, true, true)),
+    ("o3-mini", (200_000, 65_536, "openai", true, false, true)),
+    ("o4-mini", (200_000, 100_000, "openai", true, true, true)),
     // Google Gemini
-    ("gemini-2.5-pro",      (1_000_000, 65_536, "google", true, true, true)),
-    ("gemini-2.5-flash",    (1_000_000, 65_536, "google", true, true, true)),
-    ("gemini-2.0-flash",    (1_000_000, 8_192,  "google", true, true, true)),
-    ("gemini-1.5-pro",      (1_000_000, 8_192,  "google", true, true, true)),
-    ("gemini-1.5-flash",    (1_000_000, 8_192,  "google", true, true, true)),
-
+    (
+        "gemini-2.5-pro",
+        (1_000_000, 65_536, "google", true, true, true),
+    ),
+    (
+        "gemini-2.5-flash",
+        (1_000_000, 65_536, "google", true, true, true),
+    ),
+    (
+        "gemini-2.0-flash",
+        (1_000_000, 8_192, "google", true, true, true),
+    ),
+    (
+        "gemini-1.5-pro",
+        (1_000_000, 8_192, "google", true, true, true),
+    ),
+    (
+        "gemini-1.5-flash",
+        (1_000_000, 8_192, "google", true, true, true),
+    ),
     // DeepSeek
-    ("deepseek-chat",       (64_000,  8_192,  "deepseek", true, false, true)),
-    ("deepseek-coder",      (64_000,  8_192,  "deepseek", true, false, true)),
-    ("deepseek-reasoner",   (64_000,  8_192,  "deepseek", true, false, true)),
-
+    (
+        "deepseek-chat",
+        (64_000, 8_192, "deepseek", true, false, true),
+    ),
+    (
+        "deepseek-coder",
+        (64_000, 8_192, "deepseek", true, false, true),
+    ),
+    (
+        "deepseek-reasoner",
+        (64_000, 8_192, "deepseek", true, false, true),
+    ),
     // Groq
-    ("llama-3.3-70b",       (128_000, 8_192,  "groq", true, false, true)),
-    ("llama-3.1-70b",       (128_000, 8_192,  "groq", true, false, true)),
-    ("llama-3.1-8b",        (128_000, 8_192,  "groq", true, false, true)),
-    ("mixtral-8x7b",        (32_768,  4_096,  "groq", true, false, true)),
-
+    ("llama-3.3-70b", (128_000, 8_192, "groq", true, false, true)),
+    ("llama-3.1-70b", (128_000, 8_192, "groq", true, false, true)),
+    ("llama-3.1-8b", (128_000, 8_192, "groq", true, false, true)),
+    ("mixtral-8x7b", (32_768, 4_096, "groq", true, false, true)),
     // Mistral
-    ("mistral-large",       (128_000, 8_192,  "mistral", true, false, true)),
-    ("mistral-medium",      (128_000, 8_192,  "mistral", true, false, true)),
-    ("codestral",           (256_000, 8_192,  "mistral", true, false, true)),
-
+    (
+        "mistral-large",
+        (128_000, 8_192, "mistral", true, false, true),
+    ),
+    (
+        "mistral-medium",
+        (128_000, 8_192, "mistral", true, false, true),
+    ),
+    ("codestral", (256_000, 8_192, "mistral", true, false, true)),
     // xAI
-    ("grok-2",              (128_000, 8_192,  "xai", true, true, true)),
-    ("grok-3",              (128_000, 16_384, "xai", true, true, true)),
-    ("grok-3-mini",         (128_000, 16_384, "xai", true, false, true)),
+    ("grok-2", (128_000, 8_192, "xai", true, true, true)),
+    ("grok-3", (128_000, 16_384, "xai", true, true, true)),
+    ("grok-3-mini", (128_000, 16_384, "xai", true, false, true)),
 ];
 
 fn builtin_model_info(model_lower: &str) -> ModelInfo {
@@ -180,7 +228,11 @@ fn preset_to_info(id: &str, preset: &Preset) -> ModelInfo {
 fn infer_provider(model: &str) -> &'static str {
     if model.contains("claude") {
         "anthropic"
-    } else if model.contains("gpt") || model.starts_with("o1") || model.starts_with("o3") || model.starts_with("o4") {
+    } else if model.contains("gpt")
+        || model.starts_with("o1")
+        || model.starts_with("o3")
+        || model.starts_with("o4")
+    {
         "openai"
     } else if model.contains("gemini") {
         "google"
@@ -199,12 +251,24 @@ fn infer_provider(model: &str) -> &'static str {
 
 /// Infer a reasonable context window for an unknown model variant.
 fn infer_context_window(model: &str) -> u64 {
-    if model.contains("claude") { return 200_000; }
-    if model.contains("gemini") { return 1_000_000; }
-    if model.contains("deepseek") { return 64_000; }
-    if model.contains("gpt-4o") { return 128_000; }
-    if model.contains("gpt-4") { return 8_192; }
-    if model.contains("o1") || model.contains("o3") || model.contains("o4") { return 200_000; }
+    if model.contains("claude") {
+        return 200_000;
+    }
+    if model.contains("gemini") {
+        return 1_000_000;
+    }
+    if model.contains("deepseek") {
+        return 64_000;
+    }
+    if model.contains("gpt-4o") {
+        return 128_000;
+    }
+    if model.contains("gpt-4") {
+        return 8_192;
+    }
+    if model.contains("o1") || model.contains("o3") || model.contains("o4") {
+        return 200_000;
+    }
     128_000 // Safe default
 }
 
@@ -223,23 +287,16 @@ struct ExternalModelEntry {
 static EXTERNAL_INDEX: OnceLock<Option<BTreeMap<String, ExternalModelEntry>>> = OnceLock::new();
 
 fn external_model_info(model_lower: &str) -> Option<ModelInfo> {
-    let index = EXTERNAL_INDEX
-        .get_or_init(load_external_index)
-        .as_ref()?;
+    let index = EXTERNAL_INDEX.get_or_init(load_external_index).as_ref()?;
 
     let entry = index.get(model_lower)?;
     let builtin = builtin_model_info(model_lower);
 
     Some(ModelInfo {
         id: model_lower.to_string(),
-        provider: entry
-            .provider
-            .clone()
-            .unwrap_or(builtin.provider),
+        provider: entry.provider.clone().unwrap_or(builtin.provider),
         context_window: entry.context_window.unwrap_or(builtin.context_window),
-        max_output_tokens: entry
-            .max_output_tokens
-            .unwrap_or(builtin.max_output_tokens),
+        max_output_tokens: entry.max_output_tokens.unwrap_or(builtin.max_output_tokens),
         supports_tools: builtin.supports_tools,
         supports_vision: builtin.supports_vision,
         supports_streaming: builtin.supports_streaming,
@@ -264,9 +321,7 @@ fn load_external_index() -> Option<BTreeMap<String, ExternalModelEntry>> {
         let Ok(raw) = std::fs::read_to_string(&candidate) else {
             continue;
         };
-        let Ok(parsed) =
-            serde_json::from_str::<BTreeMap<String, ExternalModelEntry>>(&raw)
-        else {
+        let Ok(parsed) = serde_json::from_str::<BTreeMap<String, ExternalModelEntry>>(&raw) else {
             continue;
         };
         return Some(parsed);

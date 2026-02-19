@@ -1,4 +1,9 @@
-use super::{Engine, AgentOptions, StoredMessage, CommandContext, Arc, EventPublisher, ExecutionError, agent_tools, AgentState, ChatMessage, ChatRole, Value, EventScope, EventPayload, MessageRole, SystemTime, UNIX_EPOCH, ChatRequest, RequestInitiator, StoredToolCall, ToolCall, join_all, PermissionAction, ToolApprovalRequest};
+use super::{
+    agent_tools, join_all, AgentOptions, AgentState, Arc, ChatMessage, ChatRequest, ChatRole,
+    CommandContext, Engine, EventPayload, EventPublisher, EventScope, ExecutionError, MessageRole,
+    PermissionAction, RequestInitiator, StoredMessage, StoredToolCall, SystemTime,
+    ToolApprovalRequest, ToolCall, Value, UNIX_EPOCH,
+};
 
 use crate::agent_util::{
     approval_fields, approval_match_targets, is_mutating_tool, is_parallel_safe_tool,
@@ -474,11 +479,7 @@ impl Engine {
         }
     }
 
-    async fn execute_mcp_tool(
-        &self,
-        name: &str,
-        args: Value,
-    ) -> Result<String, ExecutionError> {
+    async fn execute_mcp_tool(&self, name: &str, args: Value) -> Result<String, ExecutionError> {
         if let Some(mcp) = self.mcp.as_ref() {
             match mcp.call_tool(name, args).await {
                 Ok(result) => Ok(result),

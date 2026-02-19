@@ -1,4 +1,8 @@
-use super::{AppState, CommandId, Screen, push_toast, ToastVariant, Duration, CreateSessionOptions, sort_sessions, compute_sessions_view, build_prompt_history, ChatState, ChatFocus, composer_clear, Modal, build_transcript_lines, compute_find_matches, ChatNav};
+use super::{
+    build_prompt_history, build_transcript_lines, composer_clear, compute_find_matches,
+    compute_sessions_view, push_toast, sort_sessions, AppState, ChatFocus, ChatNav, ChatState,
+    CommandId, CreateSessionOptions, Duration, Modal, Screen, ToastVariant,
+};
 
 pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
     match id {

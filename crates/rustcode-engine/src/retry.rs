@@ -42,13 +42,17 @@ impl RetryPolicy {
     ///
     /// Uses exponential backoff: `initial_delay * backoff_factor^(attempt - 1)`,
     /// capped at `max_delay_ms`.
+    #[must_use]
     pub fn delay(&self, attempt: u32) -> Duration {
         let delay = self.initial_delay_ms
-            * self.backoff_factor.saturating_pow(attempt.saturating_sub(1));
+            * self
+                .backoff_factor
+                .saturating_pow(attempt.saturating_sub(1));
         Duration::from_millis(delay.min(self.max_delay_ms))
     }
 
     /// Check if more retries are allowed for the given attempt number.
+    #[must_use]
     pub fn should_retry(&self, attempt: u32) -> bool {
         attempt <= self.max_retries
     }
@@ -57,7 +61,7 @@ impl RetryPolicy {
 /// Determines if an LLM error is retryable.
 ///
 /// Retryable errors include:
-/// - Rate limiting (429, "rate_limit", "too_many_requests")
+/// - Rate limiting (429, "`rate_limit`", "`too_many_requests`")
 /// - Server overload ("overloaded", "unavailable")
 /// - Transient server errors (500, 502, 503, 529)
 ///
@@ -66,6 +70,7 @@ impl RetryPolicy {
 /// - Authentication errors (401, 403)
 /// - Invalid request errors (400)
 /// - Content policy violations
+#[must_use]
 pub fn is_retryable(error_msg: &str) -> bool {
     let lower = error_msg.to_lowercase();
 
@@ -98,9 +103,7 @@ pub fn is_retryable(error_msg: &str) -> bool {
     }
 
     // Retryable: overloaded / unavailable
-    if lower.contains("overloaded")
-        || lower.contains("unavailable")
-        || lower.contains("exhausted")
+    if lower.contains("overloaded") || lower.contains("unavailable") || lower.contains("exhausted")
     {
         return true;
     }
@@ -131,10 +134,7 @@ pub fn is_retryable(error_msg: &str) -> bool {
 ///
 /// Retries the closure up to `policy.max_retries` times on retryable errors,
 /// with exponential backoff between attempts.
-pub async fn retry_llm_call<F, Fut, T, E>(
-    policy: &RetryPolicy,
-    mut make_call: F,
-) -> Result<T, E>
+pub async fn retry_llm_call<F, Fut, T, E>(policy: &RetryPolicy, mut make_call: F) -> Result<T, E>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
@@ -312,6 +312,10 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        assert_eq!(counter.load(Ordering::SeqCst), 1, "should not retry auth errors");
+        assert_eq!(
+            counter.load(Ordering::SeqCst),
+            1,
+            "should not retry auth errors"
+        );
     }
 }

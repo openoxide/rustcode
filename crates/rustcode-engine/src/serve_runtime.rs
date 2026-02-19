@@ -1,4 +1,7 @@
-use super::{Engine, CommandContext, Arc, EventPublisher, ExecutionError, TcpListener, EventScope, EventPayload, TcpStream, serve_http};
+use super::{
+    serve_http, Arc, CommandContext, Engine, EventPayload, EventPublisher, EventScope,
+    ExecutionError, TcpListener, TcpStream,
+};
 
 impl Engine {
     pub(crate) async fn run_serve(
@@ -10,9 +13,9 @@ impl Engine {
         let listener = TcpListener::bind(&listen)
             .await
             .map_err(|err| ExecutionError::Executor(format!("failed to bind {listen}: {err}")))?;
-        let bound_addr = listener
-            .local_addr()
-            .map_err(|err| ExecutionError::Executor(format!("failed to inspect bind addr: {err}")))?;
+        let bound_addr = listener.local_addr().map_err(|err| {
+            ExecutionError::Executor(format!("failed to inspect bind addr: {err}"))
+        })?;
 
         self.emit(
             publisher.clone(),
@@ -91,7 +94,8 @@ impl Engine {
                     "message": message,
                 })
                 .to_string();
-                serve_http::write_http_json(&mut stream, 400, "Bad Request", &(payload + "\n")).await?;
+                serve_http::write_http_json(&mut stream, 400, "Bad Request", &(payload + "\n"))
+                    .await?;
                 self.emit(
                     publisher,
                     EventScope::System,
@@ -152,7 +156,9 @@ impl Engine {
         if method == "GET" {
             if let Some(session_id) = path.strip_prefix("/v1/sessions/") {
                 if !session_id.is_empty() && !session_id.contains('/') {
-                    let status = self.handle_serve_show_session(&mut stream, session_id).await?;
+                    let status = self
+                        .handle_serve_show_session(&mut stream, session_id)
+                        .await?;
                     self.emit(
                         publisher,
                         EventScope::System,
@@ -170,7 +176,9 @@ impl Engine {
         }
 
         if method == "POST" && path == "/v1/run" {
-            let status = self.handle_serve_run_request(stream, request.body, context).await?;
+            let status = self
+                .handle_serve_run_request(stream, request.body, context)
+                .await?;
             self.emit(
                 publisher,
                 EventScope::System,

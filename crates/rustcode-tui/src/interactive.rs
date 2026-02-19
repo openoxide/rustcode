@@ -4,16 +4,16 @@ use std::time::{Duration, SystemTime};
 
 use crossterm::event::{self, Event as CEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use crossterm::{ExecutableCommand, execute};
+use crossterm::{execute, ExecutableCommand};
 
-use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::Terminal;
 
 use tokio_util::sync::CancellationToken;
 
@@ -42,9 +42,9 @@ mod types;
 
 use commands::{execute_command, handle_slash_command, refresh_chat_messages};
 use composer::{
-    composer_backspace, composer_clear, composer_cursor_visual, composer_delete, composer_insert_str,
-    composer_move_down, composer_move_end, composer_move_home, composer_move_left,
-    composer_move_right, composer_move_up, history_next, history_prev,
+    composer_backspace, composer_clear, composer_cursor_visual, composer_delete,
+    composer_insert_str, composer_move_down, composer_move_end, composer_move_home,
+    composer_move_left, composer_move_right, composer_move_up, history_next, history_prev,
 };
 use input::handle_key;
 use palette::{compute_palette_view, maybe_execute_palette_query, open_command_palette};
@@ -61,8 +61,8 @@ use transcript::{
     set_find,
 };
 use types::{
-    ActivityItem, AppState, ChatFocus, ChatNav, ChatState, CommandId, CommandItem, FindState,
-    Modal, PendingApproval, RunningCommand, Screen, Toast, ToastVariant, build_prompt_history,
+    build_prompt_history, ActivityItem, AppState, ChatFocus, ChatNav, ChatState, CommandId,
+    CommandItem, FindState, Modal, PendingApproval, RunningCommand, Screen, Toast, ToastVariant,
 };
 
 pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {

@@ -9,7 +9,10 @@ use crate::cli::McpLoginMethod;
 use crate::utils::write_stdout_line;
 
 use super::config::McpConfigEntry;
-use super::{mcp_store_key, resolve_mcp_login_url, resolve_mcp_oauth_client_id, resolve_mcp_oauth_client_secret};
+use super::{
+    mcp_store_key, resolve_mcp_login_url, resolve_mcp_oauth_client_id,
+    resolve_mcp_oauth_client_secret,
+};
 
 pub(super) struct LoginRequest {
     pub name: String,
@@ -86,7 +89,14 @@ async fn handle_api_key_login(
         .await
         .context("failed to discover mcp oauth")?;
 
-    emit_oauth_discovered(&req.name, &url, "token_import", &req.scopes, &discovery, json_output)?;
+    emit_oauth_discovered(
+        &req.name,
+        &url,
+        "token_import",
+        &req.scopes,
+        &discovery,
+        json_output,
+    )?;
 
     if json_output {
         let payload = serde_json::json!({

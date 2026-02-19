@@ -24,7 +24,7 @@ fn model_context_limit(model: &str) -> u64 {
 pub fn token_estimate(text: &str) -> u64 {
     let chars = text.len() as u64;
     // ~4 chars per token on average for English text
-    (chars + 3) / 4
+    chars.div_ceil(4)
 }
 
 /// Tracks cumulative token usage across LLM steps and detects overflow.

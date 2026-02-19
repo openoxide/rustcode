@@ -126,7 +126,10 @@ pub struct NullLlmClient;
 impl LlmClient for NullLlmClient {
     async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, LlmError> {
         Ok(LlmResponse {
-            text: format!("null-llm response (model={}): {}", request.model, request.prompt),
+            text: format!(
+                "null-llm response (model={}): {}",
+                request.model, request.prompt
+            ),
             chunks: Vec::new(),
         })
     }

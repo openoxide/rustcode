@@ -1,4 +1,7 @@
-use super::{async_trait, TcpStream, timeout, Duration, AsyncReadExt, ExecutionError, AsyncWriteExt, EventPublisher, Event, PublishError, Arc, EventPayload};
+use super::{
+    async_trait, timeout, Arc, AsyncReadExt, AsyncWriteExt, Duration, Event, EventPayload,
+    EventPublisher, ExecutionError, PublishError, TcpStream,
+};
 
 pub(crate) struct HttpRequest {
     pub(crate) method: String,
@@ -29,7 +32,9 @@ pub(crate) async fn read_http_request(
         }
         match timeout(Duration::from_secs(2), stream.read(&mut temp)).await {
             Ok(Ok(0)) => {
-                return Err(ReadHttpRequestError::BadRequest("empty request".to_string()));
+                return Err(ReadHttpRequestError::BadRequest(
+                    "empty request".to_string(),
+                ));
             }
             Ok(Ok(n)) => {
                 buffer.extend_from_slice(&temp[..n]);

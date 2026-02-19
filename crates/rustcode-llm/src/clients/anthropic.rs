@@ -23,7 +23,11 @@ pub(crate) struct AnthropicClient {
 }
 
 impl AnthropicClient {
-    pub(crate) fn new(provider_id: String, base_url: String, api_key: String) -> Result<Self, LlmError> {
+    pub(crate) fn new(
+        provider_id: String,
+        base_url: String,
+        api_key: String,
+    ) -> Result<Self, LlmError> {
         Ok(Self {
             provider_id,
             endpoint: normalize_anthropic_messages_endpoint(&base_url),
@@ -209,6 +213,10 @@ impl LlmClient for AnthropicClient {
 
         let usage = extract_anthropic_usage(&parsed);
 
-        Ok(ChatResponse { text, tool_calls, usage })
+        Ok(ChatResponse {
+            text,
+            tool_calls,
+            usage,
+        })
     }
 }

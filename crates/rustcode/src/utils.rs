@@ -1,9 +1,9 @@
-use std::io::{IsTerminal, Write};
-use std::time::{SystemTime, UNIX_EPOCH};
-use anyhow::{Context, Result};
 use crate::cli::Cli;
+use anyhow::{Context, Result};
 use rustcode_config::{ConfigLoader, ConfigSources};
 use rustcode_core::config::ResolvedConfig;
+use std::io::{IsTerminal, Write};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn write_stdout_line(line: &str) -> Result<bool> {
     let mut stdout = std::io::stdout();
@@ -52,7 +52,7 @@ pub fn load_effective_config(cli: &Cli) -> Result<ResolvedConfig> {
     sources.llm_base_url_override = cli.llm_base_url.clone();
     sources.llm_api_key_env_override = cli.llm_api_key_env.clone();
     sources.trust_project = cli.trust_project_config;
-    
+
     if cli.allow_network {
         sources.allow_network_override = Some(true);
     } else if cli.deny_network {

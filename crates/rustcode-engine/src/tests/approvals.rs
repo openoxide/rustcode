@@ -323,7 +323,13 @@ async fn mutating_tools_can_be_denied_by_permissions_without_prompt() {
     };
     let mut state = AgentState::default();
     let result = engine
-        .execute_agent_tool_call("exec", r#"{"command":"echo"}"#, &context, &options, &mut state)
+        .execute_agent_tool_call(
+            "exec",
+            r#"{"command":"echo"}"#,
+            &context,
+            &options,
+            &mut state,
+        )
         .await;
     assert!(matches!(result, Err(ExecutionError::Dispatch(_))));
     assert_eq!(approver.calls.load(Ordering::Relaxed), 0);
@@ -377,7 +383,13 @@ async fn mutating_tools_ask_rule_triggers_approver() {
     };
     let mut state = AgentState::default();
     let output = engine
-        .execute_agent_tool_call("exec", r#"{"command":"echo"}"#, &context, &options, &mut state)
+        .execute_agent_tool_call(
+            "exec",
+            r#"{"command":"echo"}"#,
+            &context,
+            &options,
+            &mut state,
+        )
         .await
         .expect("exec should be approved");
     assert!(output.contains("exit_code=0"), "output={output}");

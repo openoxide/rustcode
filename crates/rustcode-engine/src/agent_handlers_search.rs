@@ -9,13 +9,13 @@ const MAX_RESPONSE_BYTES: usize = 64 * 1024;
 const DEFAULT_TIMEOUT_SECS: u64 = 15;
 
 impl Engine {
-    /// Search the web using DuckDuckGo's Instant Answer API.
+    /// Search the web using `DuckDuckGo`'s Instant Answer API.
     ///
     /// Uses `api.duckduckgo.com` (JSON format, no API key required, no CAPTCHA).
     /// Returns the abstract, answer, and related topics for the query.
     ///
     /// For production use with full-text search results, consider integrating
-    /// a dedicated search API (e.g., Brave Search, Tavily, SearXNG) via the
+    /// a dedicated search API (e.g., Brave Search, Tavily, `SearXNG`) via the
     /// `RUSTCODE_SEARCH_API_URL` environment variable.
     pub(crate) async fn agent_tool_websearch(
         &self,
@@ -117,10 +117,7 @@ struct SearchResult {
 /// - `AbstractURL`: source URL
 /// - `Answer`: direct answer (e.g., calculations)
 /// - `RelatedTopics`: array of related topic objects with `Text` and `FirstURL`
-fn extract_ddg_instant_results(
-    json: &serde_json::Value,
-    max_results: usize,
-) -> Vec<SearchResult> {
+fn extract_ddg_instant_results(json: &serde_json::Value, max_results: usize) -> Vec<SearchResult> {
     let mut results = Vec::new();
 
     // 1. Check for a direct abstract
@@ -178,10 +175,7 @@ fn extract_ddg_instant_results(
                         let (title, snippet) = if let Some(dash) = text.find(" - ") {
                             (text[..dash].to_string(), text[dash + 3..].to_string())
                         } else {
-                            (
-                                text.chars().take(60).collect::<String>(),
-                                text.to_string(),
-                            )
+                            (text.chars().take(60).collect::<String>(), text.to_string())
                         };
                         results.push(SearchResult {
                             title,

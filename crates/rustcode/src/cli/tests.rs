@@ -10,8 +10,8 @@ fn invalid_command_is_rejected() {
 
 #[test]
 fn invalid_run_flag_is_rejected() {
-    let err = Cli::try_parse_from(["rustcode", "run", "--not-a-flag", "prompt"])
-        .expect_err("must fail");
+    let err =
+        Cli::try_parse_from(["rustcode", "run", "--not-a-flag", "prompt"]).expect_err("must fail");
     let message = err.to_string();
     assert!(message.contains("unexpected argument '--not-a-flag'"));
     assert!(message.contains("use '-- --not-a-flag'"));
@@ -44,8 +44,7 @@ fn run_accepts_attach_url() {
 
 #[test]
 fn exec_accepts_args() {
-    let cli =
-        Cli::try_parse_from(["rustcode", "exec", "echo", "hello"]).expect("cli should parse");
+    let cli = Cli::try_parse_from(["rustcode", "exec", "echo", "hello"]).expect("cli should parse");
 
     match cli.command {
         TopCommand::Exec { command, args } => {
@@ -271,8 +270,8 @@ fn auth_list_alias_parses() {
 
 #[test]
 fn auth_methods_parses_with_optional_provider() {
-    let with_provider = Cli::try_parse_from(["rustcode", "auth", "methods", "openai"])
-        .expect("cli should parse");
+    let with_provider =
+        Cli::try_parse_from(["rustcode", "auth", "methods", "openai"]).expect("cli should parse");
     match with_provider.command {
         TopCommand::Auth {
             command: AuthCommand::Methods { provider },
@@ -306,8 +305,7 @@ fn auth_remove_logout_alias_parses() {
 
 #[test]
 fn models_optional_provider_parses() {
-    let cli =
-        Cli::try_parse_from(["rustcode", "models", "openrouter"]).expect("cli should parse");
+    let cli = Cli::try_parse_from(["rustcode", "models", "openrouter"]).expect("cli should parse");
     match cli.command {
         TopCommand::Models { provider } => {
             assert_eq!(provider.as_deref(), Some("openrouter"));

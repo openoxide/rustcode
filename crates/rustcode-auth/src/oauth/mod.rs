@@ -1,5 +1,5 @@
-mod callback;
 mod browser;
+mod callback;
 mod device;
 
 pub use browser::{

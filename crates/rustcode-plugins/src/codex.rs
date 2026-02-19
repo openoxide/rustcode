@@ -9,10 +9,10 @@ use rustcode_core::event::Event;
 
 use crate::{Plugin, PluginError};
 
-/// OpenAI OAuth client ID for Codex CLI.
+/// `OpenAI` OAuth client ID for Codex CLI.
 const CODEX_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 
-/// OpenAI auth issuer.
+/// `OpenAI` auth issuer.
 const ISSUER: &str = "https://auth.openai.com";
 
 /// Codex API endpoint.
@@ -21,7 +21,7 @@ const CODEX_API_ENDPOINT: &str = "https://chatgpt.com/backend-api/codex/response
 /// Local callback port for PKCE OAuth.
 const OAUTH_CALLBACK_PORT: u16 = 1455;
 
-/// OpenAI Codex plugin — handles PKCE OAuth and request signing.
+/// `OpenAI` Codex plugin — handles PKCE OAuth and request signing.
 pub struct CodexPlugin;
 
 impl CodexPlugin {
@@ -109,23 +109,23 @@ pub struct PkceCodes {
 /// SHA-256 challenge.
 #[must_use]
 pub fn generate_pkce() -> PkceCodes {
-    use sha2::{Digest, Sha256};
     use base64::engine::general_purpose::URL_SAFE_NO_PAD;
     use base64::Engine;
     use rand::Rng;
+    use sha2::{Digest, Sha256};
 
     let mut rng = rand::rng();
     let verifier: String = (0..64)
         .map(|_| {
             let idx = rng.random_range(0..62);
-            let c = if idx < 26 {
+
+            if idx < 26 {
                 (b'a' + idx) as char
             } else if idx < 52 {
                 (b'A' + idx - 26) as char
             } else {
                 (b'0' + idx - 52) as char
-            };
-            c
+            }
         })
         .collect();
 
@@ -139,7 +139,7 @@ pub fn generate_pkce() -> PkceCodes {
     }
 }
 
-/// Token response from the OpenAI token endpoint.
+/// Token response from the `OpenAI` token endpoint.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct TokenResponse {
     /// JWT ID token.
@@ -155,9 +155,10 @@ pub struct TokenResponse {
 /// Build Codex-specific HTTP headers for LLM requests.
 #[must_use]
 pub fn codex_request_headers(access_token: &str) -> Vec<(String, String)> {
-    vec![
-        ("Authorization".to_string(), format!("Bearer {access_token}")),
-    ]
+    vec![(
+        "Authorization".to_string(),
+        format!("Bearer {access_token}"),
+    )]
 }
 
 #[async_trait]
@@ -187,7 +188,11 @@ mod tests {
     #[test]
     fn authorize_url_format() {
         let plugin = CodexPlugin::new();
-        let url = plugin.authorize_url("http://localhost:1455/callback", "test-challenge", "test-state");
+        let url = plugin.authorize_url(
+            "http://localhost:1455/callback",
+            "test-challenge",
+            "test-state",
+        );
         assert!(url.starts_with("https://auth.openai.com/authorize?"));
         assert!(url.contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"));
         assert!(url.contains("code_challenge=test-challenge"));
@@ -198,7 +203,10 @@ mod tests {
     #[test]
     fn token_endpoint() {
         let plugin = CodexPlugin::new();
-        assert_eq!(plugin.token_endpoint(), "https://auth.openai.com/oauth/token");
+        assert_eq!(
+            plugin.token_endpoint(),
+            "https://auth.openai.com/oauth/token"
+        );
     }
 
     #[test]

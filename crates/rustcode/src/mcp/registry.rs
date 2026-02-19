@@ -7,7 +7,7 @@ use rustcode_engine::mcp::McpRegistry;
 
 use crate::utils::write_stdout_line;
 
-use super::config::{McpConfigEntry, resolve_configured_mcp_servers};
+use super::config::{resolve_configured_mcp_servers, McpConfigEntry};
 
 /// Build an `McpRegistry` from the resolved configuration, connecting all configured servers.
 pub async fn build_mcp_registry(config: &ResolvedConfig) -> Result<McpRegistry> {
@@ -207,9 +207,7 @@ pub fn classify_mcp_error(err: &anyhow::Error) -> &'static str {
         || message.contains("invalid")
     {
         "validation"
-    } else if message.contains("network")
-        || message.contains("dns")
-        || message.contains("connect")
+    } else if message.contains("network") || message.contains("dns") || message.contains("connect")
     {
         "network"
     } else {

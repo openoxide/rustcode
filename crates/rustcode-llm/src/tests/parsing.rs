@@ -380,4 +380,3 @@ fn google_usage_returns_none_when_missing() {
     let payload = json!({"candidates": [{"content": {"parts": [{"text": "hi"}]}}]});
     assert!(extract_google_usage(&payload).is_none());
 }
-

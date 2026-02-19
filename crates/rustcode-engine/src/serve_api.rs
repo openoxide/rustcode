@@ -1,4 +1,10 @@
-use super::{debug, Engine, TcpStream, CommandContext, ExecutionError, V1RunRequest, V1ErrorResponse, serve_http, SERVER_API_SCHEMA_VERSION, SessionStore, AsyncWriteExt, Arc, EventPublisher, CancellationToken, SystemTime, Command, CommandExecutor, PathBuf, StoredMessage, MessageRole, Value, V1SessionsListResponse, V1SessionCreateRequest, V1SessionCreateResponse, V1SessionShowResponse, UNIX_EPOCH};
+use super::{
+    debug, serve_http, Arc, AsyncWriteExt, CancellationToken, Command, CommandContext,
+    CommandExecutor, Engine, EventPublisher, ExecutionError, MessageRole, PathBuf, SessionStore,
+    StoredMessage, SystemTime, TcpStream, V1ErrorResponse, V1RunRequest, V1SessionCreateRequest,
+    V1SessionCreateResponse, V1SessionShowResponse, V1SessionsListResponse, Value,
+    SERVER_API_SCHEMA_VERSION, UNIX_EPOCH,
+};
 
 impl Engine {
     pub(crate) async fn handle_serve_run_request(
@@ -18,8 +24,7 @@ impl Engine {
                     &mut stream,
                     400,
                     "Bad Request",
-                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
-                        + "\n"),
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
                 )
                 .await?;
                 return Ok(400);
@@ -85,8 +90,7 @@ impl Engine {
                     &mut stream,
                     404,
                     "Not Found",
-                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
-                        + "\n"),
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
                 )
                 .await?;
                 return Ok(404);
@@ -100,8 +104,7 @@ impl Engine {
                     &mut stream,
                     400,
                     "Bad Request",
-                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
-                        + "\n"),
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
                 )
                 .await?;
                 return Ok(400);
@@ -120,8 +123,7 @@ impl Engine {
                     &mut stream,
                     500,
                     "Internal Server Error",
-                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
-                        + "\n"),
+                    &(serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string()) + "\n"),
                 )
                 .await?;
                 return Ok(500);

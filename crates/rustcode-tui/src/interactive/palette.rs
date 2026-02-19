@@ -1,4 +1,8 @@
-use super::{AppState, Modal, CommandItem, Screen, InteractiveSubmitMode, CommandId, execute_command, push_toast, ToastVariant, Duration, ChatFocus, transcript_area_height, set_find, build_transcript_lines, compute_find_matches, build_prompt_history, ChatState};
+use super::{
+    build_prompt_history, build_transcript_lines, compute_find_matches, execute_command,
+    push_toast, set_find, transcript_area_height, AppState, ChatFocus, ChatState, CommandId,
+    CommandItem, Duration, InteractiveSubmitMode, Modal, Screen, ToastVariant,
+};
 
 pub(super) fn open_command_palette(state: &mut AppState) {
     let items = build_command_items(state);

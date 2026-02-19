@@ -34,11 +34,8 @@ execute shell commands, and search codebases to help users accomplish their goal
 ///
 /// Combines the base identity, model-specific hints, environment block,
 /// and any loaded instruction files into a single string.
-pub fn build_system_prompt(
-    model: &str,
-    workspace_root: &Path,
-    is_git_repo: bool,
-) -> String {
+#[must_use]
+pub fn build_system_prompt(model: &str, workspace_root: &Path, is_git_repo: bool) -> String {
     let mut parts = Vec::with_capacity(4);
 
     // 1. Base identity
@@ -66,21 +63,32 @@ pub fn build_system_prompt(
 fn model_hints(model: &str) -> Option<&'static str> {
     let model_lower = model.to_lowercase();
     if model_lower.contains("claude") {
-        Some("## Model Notes\n\
+        Some(
+            "## Model Notes\n\
               You are running on a Claude model. Use extended thinking for complex tasks. \
-              Structure tool calls clearly with explicit IDs.")
-    } else if model_lower.contains("gpt") || model_lower.contains("o1") || model_lower.contains("o3") {
-        Some("## Model Notes\n\
+              Structure tool calls clearly with explicit IDs.",
+        )
+    } else if model_lower.contains("gpt")
+        || model_lower.contains("o1")
+        || model_lower.contains("o3")
+    {
+        Some(
+            "## Model Notes\n\
               You are running on an OpenAI model. Be precise with function calling syntax. \
-              Use structured outputs when available.")
+              Use structured outputs when available.",
+        )
     } else if model_lower.contains("gemini") {
-        Some("## Model Notes\n\
+        Some(
+            "## Model Notes\n\
               You are running on a Google Gemini model. Leverage grounding capabilities \
-              when performing web searches.")
+              when performing web searches.",
+        )
     } else if model_lower.contains("deepseek") {
-        Some("## Model Notes\n\
+        Some(
+            "## Model Notes\n\
               You are running on a DeepSeek model. Focus on code-centric responses \
-              and be thorough with technical details.")
+              and be thorough with technical details.",
+        )
     } else {
         None
     }
@@ -111,6 +119,7 @@ fn build_environment_block(model: &str, workspace_root: &Path, is_git_repo: bool
 }
 
 /// Check if a directory is a git repository.
+#[must_use]
 pub fn is_git_repo(workspace_root: &Path) -> bool {
     workspace_root.join(".git").exists()
 }

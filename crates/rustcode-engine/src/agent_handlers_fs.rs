@@ -1,4 +1,7 @@
-use super::{Engine, CommandContext, ExecutionError, IoError, AgentOptions, PathOperation, path_utils, AgentState, Glob, Regex};
+use super::{
+    path_utils, AgentOptions, AgentState, CommandContext, Engine, ExecutionError, Glob, IoError,
+    PathOperation, Regex,
+};
 
 impl Engine {
     pub(crate) async fn agent_tool_exec(

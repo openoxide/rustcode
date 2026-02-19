@@ -7,15 +7,17 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 use rustcode_core::config::ResolvedConfig;
-use rustcode_core::event::Event;
 use rustcode_core::error::{ExecutionError, PublishError};
+use rustcode_core::event::Event;
 use rustcode_core::ports::{CommandExecutor, EventPublisher, ToolApprover};
 use rustcode_core::tool_approval::ToolApprovalRequest;
 use rustcode_core::SessionInfo;
 
 mod backend;
 
-pub use backend::{CreateSessionOptions, LocalSessionBackend, RemoteSessionBackend, SessionBackend};
+pub use backend::{
+    CreateSessionOptions, LocalSessionBackend, RemoteSessionBackend, SessionBackend,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum InteractiveSubmitMode {
@@ -79,6 +81,12 @@ impl InteractiveHandles {
             rx,
             approver: Arc::new(TuiToolApprover { tx }),
         }
+    }
+}
+
+impl Default for InteractiveHandles {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -166,12 +166,7 @@ impl ConfigLoader {
         let trusted_projects =
             trusted_project_set(&[global_cfg.as_ref(), user_cfg.as_ref()], &sources.cwd);
 
-        apply_project_config(
-            &mut cfg,
-            sources,
-            &project_config_path,
-            &trusted_projects,
-        )?;
+        apply_project_config(&mut cfg, sources, &project_config_path, &trusted_projects)?;
         apply_env_overrides(&mut cfg, sources);
         apply_cli_overrides(&mut cfg, sources);
 

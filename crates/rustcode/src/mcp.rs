@@ -9,7 +9,7 @@ mod config;
 mod login;
 mod registry;
 
-use config::{McpConfigEntry, parse_mcp_edit_scope, parse_mcp_env_assignments};
+use config::{parse_mcp_edit_scope, parse_mcp_env_assignments, McpConfigEntry};
 
 pub use registry::{build_mcp_registry, classify_mcp_error};
 
@@ -26,13 +26,8 @@ pub async fn handle_mcp_command(
             registry::handle_mcp_list(&store, json_output, trust_project_config)?;
         }
         McpCommand::Status { name } => {
-            registry::handle_mcp_status(
-                &store,
-                name.as_deref(),
-                json_output,
-                trust_project_config,
-            )
-            .await?;
+            registry::handle_mcp_status(&store, name.as_deref(), json_output, trust_project_config)
+                .await?;
         }
         McpCommand::Login {
             name,
@@ -80,8 +75,16 @@ pub async fn handle_mcp_command(
             scope,
         } => {
             handle_mcp_add(
-                &name, url, command, args, &env, oauth.as_deref(), client_id,
-                client_secret_env, &scope, json_output,
+                &name,
+                url,
+                command,
+                args,
+                &env,
+                oauth.as_deref(),
+                client_id,
+                client_secret_env,
+                &scope,
+                json_output,
             )?;
         }
         McpCommand::Remove { name, scope } => {

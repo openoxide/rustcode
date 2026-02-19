@@ -53,21 +53,21 @@ mod agent_handlers_patch;
 mod agent_handlers_search;
 mod agent_handlers_web;
 mod agent_runtime;
+mod agent_tool_specs;
+mod agent_tools;
+mod agent_util;
 pub mod compaction;
 pub mod context_tracker;
-pub mod instructions;
-pub mod retry;
-pub mod session_summary;
-pub mod system_prompt;
-mod agent_tools;
-mod agent_tool_specs;
-mod agent_util;
 mod engine_commands;
+pub mod instructions;
+pub mod mcp;
 mod path_utils;
+pub mod retry;
 mod serve_api;
 mod serve_http;
 mod serve_runtime;
-pub mod mcp;
+pub mod session_summary;
+pub mod system_prompt;
 
 #[derive(Clone)]
 pub struct ChannelPublisher {
@@ -75,7 +75,7 @@ pub struct ChannelPublisher {
 }
 
 impl ChannelPublisher {
-    #[must_use] 
+    #[must_use]
     pub fn new(sender: mpsc::Sender<Event>) -> Self {
         Self { sender }
     }
@@ -154,6 +154,7 @@ impl Engine {
         }
     }
 
+    #[must_use]
     pub fn with_mcp(mut self, mcp: mcp::McpRegistry) -> Self {
         self.mcp = Some(mcp);
         self

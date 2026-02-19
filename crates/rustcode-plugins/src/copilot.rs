@@ -66,10 +66,10 @@ impl CopilotPlugin {
     /// Copilot API base URL (differs for Enterprise).
     #[must_use]
     pub fn api_base_url(&self) -> Option<String> {
-        if self.domain != DEFAULT_DOMAIN {
-            Some(format!("https://copilot-api.{}", self.domain))
-        } else {
+        if self.domain == DEFAULT_DOMAIN {
             None
+        } else {
+            Some(format!("https://copilot-api.{}", self.domain))
         }
     }
 
@@ -110,9 +110,9 @@ pub struct DeviceCodeResponse {
 pub struct TokenPollResponse {
     /// Access token (present on success).
     pub access_token: Option<String>,
-    /// Error code (e.g. "authorization_pending", "slow_down").
+    /// Error code (e.g. "`authorization_pending`", "`slow_down`").
     pub error: Option<String>,
-    /// Server-suggested polling interval (for slow_down).
+    /// Server-suggested polling interval (for `slow_down`).
     pub interval: Option<u64>,
 }
 
@@ -121,7 +121,10 @@ pub struct TokenPollResponse {
 pub fn copilot_request_headers(token: &str, is_agent: bool) -> Vec<(String, String)> {
     let mut headers = vec![
         ("Authorization".to_string(), format!("Bearer {token}")),
-        (COPILOT_INTENT_HEADER.to_string(), COPILOT_INTENT_VALUE.to_string()),
+        (
+            COPILOT_INTENT_HEADER.to_string(),
+            COPILOT_INTENT_VALUE.to_string(),
+        ),
     ];
 
     let initiator = if is_agent { "agent" } else { "user" };
@@ -150,8 +153,14 @@ mod tests {
     #[test]
     fn default_urls() {
         let plugin = CopilotPlugin::new();
-        assert_eq!(plugin.device_code_url(), "https://github.com/login/device/code");
-        assert_eq!(plugin.access_token_url(), "https://github.com/login/oauth/access_token");
+        assert_eq!(
+            plugin.device_code_url(),
+            "https://github.com/login/device/code"
+        );
+        assert_eq!(
+            plugin.access_token_url(),
+            "https://github.com/login/oauth/access_token"
+        );
         assert!(plugin.api_base_url().is_none());
         assert_eq!(plugin.provider_id(), "github-copilot");
     }
@@ -159,7 +168,10 @@ mod tests {
     #[test]
     fn enterprise_urls() {
         let plugin = CopilotPlugin::enterprise("https://company.ghe.com/");
-        assert_eq!(plugin.device_code_url(), "https://company.ghe.com/login/device/code");
+        assert_eq!(
+            plugin.device_code_url(),
+            "https://company.ghe.com/login/device/code"
+        );
         assert_eq!(
             plugin.api_base_url(),
             Some("https://copilot-api.company.ghe.com".to_string())
@@ -170,13 +182,19 @@ mod tests {
     #[test]
     fn request_headers_user() {
         let headers = copilot_request_headers("test-token", false);
-        assert!(headers.iter().any(|(k, v)| k == "Authorization" && v == "Bearer test-token"));
-        assert!(headers.iter().any(|(k, v)| k == "x-initiator" && v == "user"));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "Authorization" && v == "Bearer test-token"));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "x-initiator" && v == "user"));
     }
 
     #[test]
     fn request_headers_agent() {
         let headers = copilot_request_headers("test-token", true);
-        assert!(headers.iter().any(|(k, v)| k == "x-initiator" && v == "agent"));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "x-initiator" && v == "agent"));
     }
 }

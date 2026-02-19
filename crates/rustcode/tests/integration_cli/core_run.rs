@@ -209,7 +209,12 @@ fn run_attach_streams_output_chunks_from_server() {
 fn human_run_output_uses_event_envelope_with_event_debug() {
     let sessions_dir = make_temp_dir_path("sessions-human-run-debug");
     let output = Command::new(rustcode_bin())
-        .args(["--deny-network", "--event-debug", "run", "integration-human-debug"])
+        .args([
+            "--deny-network",
+            "--event-debug",
+            "run",
+            "integration-human-debug",
+        ])
         .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
         .output()
         .expect("must run rustcode binary");

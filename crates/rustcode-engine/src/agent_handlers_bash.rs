@@ -118,9 +118,7 @@ fn truncate_output(output: &str, max_bytes: usize) -> String {
     let head = &output[..keep];
     let tail = &output[output.len() - keep..];
     let omitted = output.len() - max_bytes;
-    format!(
-        "{head}\n\n[rustcode: output truncated — {omitted} bytes omitted]\n\n{tail}"
-    )
+    format!("{head}\n\n[rustcode: output truncated — {omitted} bytes omitted]\n\n{tail}")
 }
 
 #[cfg(test)]

@@ -56,6 +56,7 @@ fn global_config_dir() -> Option<PathBuf> {
 ///
 /// Returns a list of instruction files found (workspace first, then global).
 /// At most one file per location is returned (the first match by priority).
+#[must_use]
 pub fn load_instructions(workspace_root: &Path) -> Vec<InstructionFile> {
     let mut results = Vec::new();
 
@@ -92,6 +93,7 @@ pub fn load_instructions(workspace_root: &Path) -> Vec<InstructionFile> {
 /// file contents...
 /// </instructions>
 /// ```
+#[must_use]
 pub fn format_instructions(files: &[InstructionFile]) -> String {
     if files.is_empty() {
         return String::new();

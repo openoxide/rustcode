@@ -28,8 +28,8 @@ pub use provider::{
     ProviderDiagnostics, ProviderProtocolName,
 };
 pub use types::{
-    ChatMessage, ChatRequest, ChatResponse, ChatRole, LlmClient, LlmError, LlmRequest,
-    LlmResponse, NullLlmClient, RequestInitiator, ToolCall, ToolSpec, TokenUsage,
+    ChatMessage, ChatRequest, ChatResponse, ChatRole, LlmClient, LlmError, LlmRequest, LlmResponse,
+    NullLlmClient, RequestInitiator, TokenUsage, ToolCall, ToolSpec,
 };
 
 pub fn build_client(config: &ResolvedConfig) -> Result<Arc<dyn LlmClient>, LlmError> {

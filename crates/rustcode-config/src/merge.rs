@@ -6,8 +6,7 @@ use rustcode_core::config::{
 use rustcode_core::permissions::PermissionRule;
 
 use crate::{
-    BackendSelectionPolicyConfig, FileConfig, LlmConfig, McpOAuthFileConfig,
-    McpServerFileConfig,
+    BackendSelectionPolicyConfig, FileConfig, LlmConfig, McpOAuthFileConfig, McpServerFileConfig,
 };
 
 /// Apply a parsed file config layer onto the resolved config.
@@ -121,13 +120,13 @@ fn merge_mcp_servers(
         if !server.env.is_empty() {
             entry.env.clone_from(&server.env);
         }
-        entry.oauth = resolve_mcp_oauth(&server.oauth, &entry.oauth);
+        entry.oauth = resolve_mcp_oauth(server.oauth.as_ref(), &entry.oauth);
         current.insert(name.clone(), entry);
     }
 }
 
 fn resolve_mcp_oauth(
-    incoming: &Option<McpOAuthFileConfig>,
+    incoming: Option<&McpOAuthFileConfig>,
     current: &McpOAuthConfig,
 ) -> McpOAuthConfig {
     match incoming {

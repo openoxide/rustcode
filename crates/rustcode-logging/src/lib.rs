@@ -38,8 +38,8 @@ pub fn init() {
 ///
 /// Safe to call multiple times — subsequent calls are no-ops.
 pub fn init_with_default_level(default_level: &str) {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(default_level));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
 
     let _ = tracing_subscriber::fmt()
         .compact()
