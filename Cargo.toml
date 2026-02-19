@@ -12,6 +12,8 @@ members = [
   "crates/rustcode-io",
   "crates/rustcode-plugins",
   "crates/rustcode-llm",
+  "crates/rustcode-skills",
+  "crates/rustcode-memories",
   "crates/rustcode-tui",
 ]
 resolver = "2"
@@ -45,6 +47,8 @@ globset = "0.4"
 regex = "1.11"
 ratatui = "0.29"
 crossterm = "0.28"
+rustcode-skills = { path = "crates/rustcode-skills" }
+rustcode-memories = { path = "crates/rustcode-memories" }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

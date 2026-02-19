@@ -10,7 +10,9 @@ rustcode-core = { path = "../rustcode-core" }
 rustcode-io = { path = "../rustcode-io" }
 rustcode-llm = { path = "../rustcode-llm" }
 rustcode-mcp = { path = "../rustcode-mcp" }
+rustcode-memories = { path = "../rustcode-memories" }
 rustcode-plugins = { path = "../rustcode-plugins" }
+rustcode-skills = { path = "../rustcode-skills" }
 rustcode-state = { path = "../rustcode-state" }
 async-trait.workspace = true
 futures-util.workspace = true

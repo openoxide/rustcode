@@ -67,35 +67,51 @@ suggest natural next steps if any exist.
 
 /// Build the full system prompt.
 ///
-/// Combines the base identity, model-specific hints, tool summary,
-/// environment block, and any loaded instruction files into a single string.
+/// Combines the base identity, persistent memory, model-specific hints, tool summary,
+/// available skills, environment block, and any loaded instruction files.
 #[must_use]
 pub fn build_system_prompt(
     model: &str,
     workspace_root: &Path,
     is_git_repo: bool,
     tools: &[rustcode_llm::ToolSpec],
+    skills: &[rustcode_skills::SkillFile],
+    memory_summary: Option<&str>,
 ) -> String {
-    let mut parts = Vec::with_capacity(5);
+    let mut parts = Vec::with_capacity(7);
 
     // 1. Base identity + guidelines
     parts.push(BASE_PROMPT.to_string());
 
-    // 2. Model-specific hints
+    // 2. Persistent memory (injected early so the model treats it as context)
+    if let Some(mem) = memory_summary {
+        let section = rustcode_memories::build_memory_section(mem);
+        if !section.is_empty() {
+            parts.push(section);
+        }
+    }
+
+    // 3. Model-specific hints
     if let Some(hints) = model_hints(model) {
         parts.push(hints.to_string());
     }
 
-    // 3. Available tools summary
+    // 4. Available tools summary
     let tool_summary = build_tool_summary(tools);
     if !tool_summary.is_empty() {
         parts.push(tool_summary);
     }
 
-    // 4. Environment block
+    // 5. Available skills
+    let skills_section = rustcode_skills::build_skills_section(skills);
+    if !skills_section.is_empty() {
+        parts.push(skills_section);
+    }
+
+    // 6. Environment block
     parts.push(build_environment_block(model, workspace_root, is_git_repo));
 
-    // 5. Loaded instructions
+    // 7. Loaded instructions
     let instruction_files = instructions::load_instructions(workspace_root);
     let formatted = instructions::format_instructions(&instruction_files);
     if !formatted.is_empty() {
@@ -268,27 +284,55 @@ mod tests {
 
     #[test]
     fn build_system_prompt_contains_identity() {
-        let prompt = build_system_prompt("gpt-4o", Path::new("/tmp/test"), false, &mock_tools());
+        let prompt = build_system_prompt(
+            "gpt-4o",
+            Path::new("/tmp/test"),
+            false,
+            &mock_tools(),
+            &[],
+            None,
+        );
         assert!(prompt.contains("You are rustcode"));
         assert!(prompt.contains("production-grade"));
     }
 
     #[test]
     fn build_system_prompt_contains_editing_constraints() {
-        let prompt = build_system_prompt("gpt-4o", Path::new("/tmp/test"), false, &mock_tools());
+        let prompt = build_system_prompt(
+            "gpt-4o",
+            Path::new("/tmp/test"),
+            false,
+            &mock_tools(),
+            &[],
+            None,
+        );
         assert!(prompt.contains("Editing Constraints"));
         assert!(prompt.contains("apply_patch"));
     }
 
     #[test]
     fn build_system_prompt_contains_tool_usage_policy() {
-        let prompt = build_system_prompt("gpt-4o", Path::new("/tmp/test"), false, &mock_tools());
+        let prompt = build_system_prompt(
+            "gpt-4o",
+            Path::new("/tmp/test"),
+            false,
+            &mock_tools(),
+            &[],
+            None,
+        );
         assert!(prompt.contains("Tool Usage Policy"));
     }
 
     #[test]
     fn build_system_prompt_contains_git_hygiene() {
-        let prompt = build_system_prompt("gpt-4o", Path::new("/tmp/test"), false, &mock_tools());
+        let prompt = build_system_prompt(
+            "gpt-4o",
+            Path::new("/tmp/test"),
+            false,
+            &mock_tools(),
+            &[],
+            None,
+        );
         assert!(prompt.contains("Git & Workspace Hygiene"));
         assert!(prompt.contains("NEVER revert existing changes"));
     }
@@ -300,6 +344,8 @@ mod tests {
             Path::new("/project"),
             true,
             &mock_tools(),
+            &[],
+            None,
         );
         assert!(prompt.contains("<environment>"));
         assert!(prompt.contains("claude-3.5-sonnet"));
@@ -309,7 +355,14 @@ mod tests {
 
     #[test]
     fn build_system_prompt_includes_tool_summary() {
-        let prompt = build_system_prompt("gpt-4o", Path::new("/tmp/test"), false, &mock_tools());
+        let prompt = build_system_prompt(
+            "gpt-4o",
+            Path::new("/tmp/test"),
+            false,
+            &mock_tools(),
+            &[],
+            None,
+        );
         assert!(prompt.contains("<tools>"));
         assert!(prompt.contains("**read**"));
         assert!(prompt.contains("**write**"));
@@ -319,7 +372,7 @@ mod tests {
 
     #[test]
     fn build_system_prompt_no_tools() {
-        let prompt = build_system_prompt("gpt-4o", Path::new("/tmp/test"), false, &[]);
+        let prompt = build_system_prompt("gpt-4o", Path::new("/tmp/test"), false, &[], &[], None);
         assert!(!prompt.contains("<tools>"));
     }
 

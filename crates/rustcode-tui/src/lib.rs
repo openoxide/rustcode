@@ -41,6 +41,8 @@ mod interactive;
 pub struct InteractiveDefaults {
     pub workspace_root: PathBuf,
     pub model: String,
+    /// Skills available in this workspace session.
+    pub skills: Vec<rustcode_skills::SkillFile>,
 }
 
 #[derive(Debug, Clone)]

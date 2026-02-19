@@ -102,13 +102,21 @@
 - [x] Markdown rendering in transcript (headings, code fences, bold/italic/inline code)
 
 ## Milestone 7: Advanced Features
-- [ ] Skill system (reference: opencode `skill/`, codex `skills/`)
-- [ ] Worktree management (reference: opencode `worktree/`)
+
+### M7a: Skills + Memories + Scheduler ✅
+- [x] Skill system — `rustcode-skills` crate, TOML frontmatter, global + project scoped (reference: opencode `skill/`, codex `skills/`)
+- [x] Memories system — `rustcode-memories` crate, Phase 1 extraction + Phase 2 consolidation (reference: codex `memories/`)
+- [x] Scheduler — tokio interval-based background task runner in `rustcode-engine` (reference: opencode `scheduler/`)
+- [x] `/skill` and `/memory` TUI slash commands
+- [x] Skills and memory summary injected into system prompt
+
+### M7b: PTY + IDE (planned)
 - [ ] PTY subprocess (reference: opencode `pty/`)
-- [ ] Scheduler (reference: opencode `scheduler/`)
-- [ ] LSP integration (reference: opencode `lsp/`)
 - [ ] IDE integration hooks (reference: opencode `ide/`)
-- [ ] Memories system (reference: codex `memories/`)
+
+### M7c: Worktree + LSP (planned)
+- [ ] Worktree management (reference: opencode `worktree/`)
+- [ ] LSP integration (reference: opencode `lsp/`)
 
 ## Milestone 8: Production Reliability
 - [ ] Crash recovery
@@ -118,7 +126,97 @@
 - [ ] Cross-platform validation (macOS + Linux)
 - [ ] File watcher (reference: codex `file_watcher.rs`)
 
-## Milestone 9: Testing & Verification
+## Milestone 9: Manual End-to-End Testing
+
+All items below must be tested live (not just unit tests).
+Run `cargo build --release` first. Binary: `target/release/rustcode`.
+
+### M0.5 / M1 — Core CLI (re-verify after refactors)
+- [ ] `rustcode --version` — prints version
+- [ ] `rustcode auth login openrouter` — OAuth flow completes, token stored
+- [ ] `rustcode auth login anthropic` — API key prompt, stored
+- [ ] `rustcode auth list` — shows stored providers
+- [ ] `rustcode session list` — returns sessions
+- [ ] `rustcode session create` — creates and prints session id
+- [ ] `rustcode session show <id>` — prints session details
+- [ ] `rustcode session fork <id>` — forks and prints forked session id
+- [ ] `rustcode session delete <id>` — deletes session
+- [ ] `rustcode run "hello"` — single-turn prompt, response printed to stdout
+- [ ] `rustcode run "hello"` with streaming — output chunks appear live
+- [ ] `rustcode serve` — starts HTTP server, `curl /health` returns 200
+
+### M2 — Tool Execution
+- [ ] Agent uses `read` tool — reads a file in workspace correctly
+- [ ] Agent uses `write` tool — creates a new file, contents correct
+- [ ] Agent uses `edit` tool — edits existing file, replacement applied
+- [ ] Agent uses `list` tool — lists workspace directory
+- [ ] Agent uses `bash` tool — runs a shell command, output returned
+- [ ] Agent uses `apply_patch` — applies a unified diff correctly
+- [ ] Agent uses `multiedit` — multiple edits to same file applied sequentially
+- [ ] Agent uses `batch` — parallel read + list calls return both results
+- [ ] Agent uses `plan` tool — creates structured plan in response
+- [ ] Agent uses `websearch` tool — returns web results (requires network)
+- [ ] Agent uses `question` tool — prompts user mid-run, waits for input
+
+### M3 — Context Compaction
+- [ ] Long conversation (50+ turns) — context tracker status shows in footer
+- [ ] Context overflow triggers compaction — summary injected, conversation continues
+- [ ] Compaction preserves important facts from earlier messages
+
+### M4 — Session & State
+- [ ] `RUSTCODE.md` in workspace — instructions appear in system prompt
+- [ ] `~/.config/rustcode/RUSTCODE.md` — global instructions loaded
+- [ ] Session summary shown after agent run — git diff stats printed
+- [ ] LLM retry on 429 — retries with backoff, succeeds (simulate with rate-limited key)
+
+### M5 — Provider Auth
+- [ ] OpenRouter live call — response streams correctly
+- [ ] Anthropic direct call — response streams correctly
+- [ ] GitHub Copilot auth — device code flow, token refresh
+- [ ] Codex auth — PKCE flow completes, token stored
+
+### M6 — TUI Interactive
+- [ ] Launch TUI: `rustcode` — opens new session directly
+- [ ] Type message, Enter to submit — response streams in transcript
+- [ ] Ctrl+C — cancels running agent
+- [ ] `/help` — help overlay appears
+- [ ] `/clear` — composer cleared
+- [ ] `/sessions` — navigates to session list
+- [ ] `/new` — creates new session in-place
+- [ ] `/fork` — forks current session
+- [ ] `/model` — shows current model name in toast
+- [ ] `/find` or `/search` — search modal opens, finds text in transcript
+- [ ] Ctrl+T — file search popup opens, selecting file inserts @path
+- [ ] Alt+Up / Alt+Down — cycles through prompt history
+- [ ] Ctrl+Q — opens command palette
+- [ ] Tool approval overlay — edit/exec approval prompts shown, user can Allow/Deny
+- [ ] Approval: Allow All Edits — subsequent edits auto-approved
+- [ ] Approval: Allow All Commands — subsequent exec auto-approved
+- [ ] Session list: Enter opens session, rename works, delete with confirm
+- [ ] Footer shows model name, error messages appear in red
+- [ ] Markdown rendered: `##` headings, `**bold**`, `` `code` ``, code fences
+- [ ] System messages NOT shown in transcript (only user/assistant)
+- [ ] Resize terminal — UI reflows correctly
+
+### M7a — Skills + Memories + Scheduler
+- [ ] Create `~/.config/rustcode/skills/test.md` with TOML frontmatter → `/skill list` shows it
+- [ ] `/skill test` — injects skill content into composer
+- [ ] Skill injected into system prompt — agent aware of skill instructions
+- [ ] Project skill at `.rustcode/skills/override.md` with same name overrides global
+- [ ] Complete agent session → `~/.config/rustcode/memories/raw/<session>.md` created
+- [ ] Wait 10 min (or trigger manually) → `summary.md` written
+- [ ] New session after summary exists → memory summary in system prompt
+- [ ] `/memory` — shows summary excerpt in toast
+- [ ] `/memory clear` — clears raw files, confirms with toast
+
+### Regression Checklist (run after every milestone)
+- [ ] `cargo test --workspace` — 0 failures
+- [ ] `cargo clippy --workspace -- -D warnings` — 0 errors
+- [ ] `cargo fmt --check` — no formatting diff
+- [ ] All M0.5 core CLI tests still pass
+- [ ] TUI launches without panic
+
+## Milestone 9b: Automated Testing Expansion
 - [ ] Unit test coverage for all new modules
 - [ ] Integration tests for agent loop
 - [ ] Snapshot CLI tests

@@ -48,6 +48,7 @@ fn sessions_screen_renders_title_and_help() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            skills: Vec::new(),
         },
 
         pending_approval: None,
@@ -146,6 +147,7 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            skills: Vec::new(),
         },
 
         pending_approval: None,
@@ -254,6 +256,7 @@ fn chat_screen_hides_system_messages() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            skills: Vec::new(),
         },
         pending_approval: None,
         submit_mode: InteractiveSubmitMode::Agent,
@@ -307,6 +310,7 @@ fn approval_modal_renders_tool_name() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            skills: Vec::new(),
         },
 
         pending_approval: Some(PendingApproval {
@@ -372,6 +376,7 @@ fn approval_modal_shows_allow_all_edits_for_write() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            skills: Vec::new(),
         },
         pending_approval: Some(PendingApproval {
             request: ToolApprovalRequest {
@@ -434,6 +439,7 @@ fn approval_modal_keeps_actions_visible_with_long_arguments() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            skills: Vec::new(),
         },
         pending_approval: Some(PendingApproval {
             request: ToolApprovalRequest {
@@ -519,6 +525,7 @@ fn alt_tab_cycles_focus_in_chat() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            skills: Vec::new(),
         },
         pending_approval: None,
         submit_mode: InteractiveSubmitMode::Agent,
@@ -598,6 +605,7 @@ fn tab_does_not_change_focus_in_chat() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            skills: Vec::new(),
         },
         pending_approval: None,
         submit_mode: InteractiveSubmitMode::Agent,
@@ -677,6 +685,7 @@ fn mouse_click_changes_chat_focus() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            skills: Vec::new(),
         },
         pending_approval: None,
         submit_mode: InteractiveSubmitMode::Agent,
@@ -776,6 +785,7 @@ fn activity_details_modal_renders_tool_arguments() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            skills: Vec::new(),
         },
 
         pending_approval: None,
@@ -830,6 +840,7 @@ fn command_palette_renders_actions_and_search() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            skills: Vec::new(),
         },
         pending_approval: None,
         submit_mode: InteractiveSubmitMode::Agent,

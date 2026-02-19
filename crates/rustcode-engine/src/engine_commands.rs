@@ -3,6 +3,7 @@ use super::{
     EventPayload, EventPublisher, EventScope, ExecutionError, IoError, LlmRequest, MessageRole,
     PathBuf, PathOperation, ProcessOutput, StoredMessage, SystemTime, Value, UNIX_EPOCH,
 };
+use rustcode_state::SessionStore;
 
 impl Engine {
     async fn run_exec(
@@ -309,6 +310,44 @@ impl CommandExecutor for Engine {
                 let result = self
                     .run_agent(prompt, options, history, &context, publisher.clone())
                     .await;
+
+                // Trigger Phase 1 memory extraction in the background after a successful run
+                if result.is_ok() {
+                    if let Some(mem_storage) = self.memories.clone() {
+                        let session_id = context.session.session_id.clone();
+                        let model = context.config.model.clone();
+                        let llm = self.llm.clone();
+                        tokio::spawn(async move {
+                            // Load stored messages for this session
+                            let messages = SessionStore::open_default()
+                                .load_messages(&session_id)
+                                .unwrap_or_default();
+                            let pairs: Vec<(String, String)> = messages
+                                .iter()
+                                .filter_map(|m| {
+                                    let role = match m.role {
+                                        MessageRole::User => "user",
+                                        MessageRole::Assistant => "assistant",
+                                        _ => return None,
+                                    };
+                                    let content = m.content.as_str()?.to_string();
+                                    Some((role.to_string(), content))
+                                })
+                                .collect();
+                            if let Err(e) = rustcode_memories::phase1::extract_memories(
+                                &session_id,
+                                &pairs,
+                                llm,
+                                &mem_storage,
+                                &model,
+                            )
+                            .await
+                            {
+                                tracing::debug!("memory extraction skipped: {e}");
+                            }
+                        });
+                    }
+                }
 
                 // Compute and emit session summary after agent completes
                 if result.is_ok() {

@@ -1,0 +1,15 @@
+[package]
+name = "rustcode-memories"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+rustcode-llm = { path = "../rustcode-llm" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

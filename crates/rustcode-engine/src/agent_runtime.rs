@@ -30,11 +30,20 @@ impl Engine {
 
         let mut state = AgentState::default();
 
+        // Load memory summary if available
+        let memory_summary = self
+            .memories
+            .as_ref()
+            .and_then(|m| m.load_summary())
+            .map(|s| s.content);
+
         let system_prompt = crate::system_prompt::build_system_prompt(
             &context.config.model,
             &context.config.workspace_root,
             crate::system_prompt::is_git_repo(&context.config.workspace_root),
             &tools,
+            self.skills.all(),
+            memory_summary.as_deref(),
         );
 
         let mut messages = self

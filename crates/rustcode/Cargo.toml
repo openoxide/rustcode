@@ -16,6 +16,7 @@ rustcode-engine = { path = "../rustcode-engine" }
 rustcode-io = { path = "../rustcode-io" }
 rustcode-llm = { path = "../rustcode-llm" }
 rustcode-plugins = { path = "../rustcode-plugins" }
+rustcode-skills = { path = "../rustcode-skills" }
 rustcode-state = { path = "../rustcode-state" }
 rustcode-tui = { path = "../rustcode-tui" }
 serde.workspace = true

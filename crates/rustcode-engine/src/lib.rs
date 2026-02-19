@@ -63,6 +63,7 @@ pub mod instructions;
 pub mod mcp;
 mod path_utils;
 pub mod retry;
+pub mod scheduler;
 mod serve_api;
 mod serve_http;
 mod serve_runtime;
@@ -121,6 +122,12 @@ pub struct Engine {
     recorder: Option<Arc<dyn TranscriptRecorder>>,
     approver: Option<Arc<dyn ToolApprover>>,
     mcp: Option<mcp::McpRegistry>,
+    /// Loaded skills for this workspace session.
+    pub(crate) skills: rustcode_skills::SkillsManager,
+    /// Memory storage (None if home directory is unavailable).
+    pub(crate) memories: Option<Arc<rustcode_memories::MemoryStorage>>,
+    /// Background scheduler handle (drives memory consolidation).
+    scheduler: scheduler::SchedulerHandle,
     next_event_id: AtomicU64,
     next_message_id: AtomicU64,
 }
@@ -149,9 +156,49 @@ impl Engine {
             recorder,
             approver,
             mcp: None,
+            skills: rustcode_skills::SkillsManager::default(),
+            memories: None,
+            scheduler: scheduler::SchedulerHandle::default(),
             next_event_id: AtomicU64::new(1),
             next_message_id: AtomicU64::new(1),
         }
+    }
+
+    /// Load skills from the given workspace root and start the background scheduler.
+    ///
+    /// Call this after constructing the engine to enable skill injection and memory consolidation.
+    #[must_use]
+    pub fn with_workspace(mut self, workspace_root: &Path) -> Self {
+        self.skills = rustcode_skills::SkillsManager::load(workspace_root);
+        let memories = rustcode_memories::MemoryStorage::new().map(Arc::new);
+        let sched = if let Some(mem) = &memories {
+            scheduler::SchedulerHandle::start(Some((
+                mem.clone(),
+                self.llm.clone(),
+                String::new(), // model resolved per-request; consolidation uses current config
+            )))
+        } else {
+            scheduler::SchedulerHandle::default()
+        };
+        self.memories = memories;
+        self.scheduler = sched;
+        self
+    }
+
+    /// Provide an explicit model name for the scheduler's memory consolidation task.
+    ///
+    /// Call after `with_workspace` if you have a specific model configured.
+    #[must_use]
+    pub fn with_memory_model(mut self, model: impl Into<String>) -> Self {
+        // Restart scheduler with the real model name
+        if let Some(mem) = &self.memories {
+            self.scheduler = scheduler::SchedulerHandle::start(Some((
+                mem.clone(),
+                self.llm.clone(),
+                model.into(),
+            )));
+        }
+        self
     }
 
     #[must_use]

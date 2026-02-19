@@ -1,8 +1,8 @@
 use super::{
-    build_prompt_history, build_transcript_lines, composer_clear, compute_find_matches,
-    compute_sessions_view, filter_files, open_command_palette, push_toast, scan_workspace_files,
-    sort_sessions, AppState, ChatFocus, ChatNav, ChatState, CommandId, CreateSessionOptions,
-    Duration, Modal, Screen, ToastVariant,
+    build_prompt_history, build_transcript_lines, composer_clear, composer_insert_str,
+    compute_find_matches, compute_sessions_view, filter_files, open_command_palette, push_toast,
+    scan_workspace_files, sort_sessions, AppState, ChatFocus, ChatNav, ChatState, CommandId,
+    CreateSessionOptions, Duration, Modal, Screen, ToastVariant,
 };
 
 pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
@@ -503,6 +503,115 @@ pub(super) fn handle_slash_command(
                         Duration::from_secs(4),
                     );
                 }
+            }
+            ChatNav::Stay
+        }
+        // ── /skill ──────────────────────────────────────────────────────────
+        "skill" | "skill list" => {
+            let skills = &state.defaults.skills;
+            if skills.is_empty() {
+                push_toast(
+                    state,
+                    ToastVariant::Info,
+                    "no skills loaded — add .md files to ~/.config/rustcode/skills/",
+                    Duration::from_secs(5),
+                );
+            } else {
+                let list: String = skills
+                    .iter()
+                    .filter(|s| s.metadata.enabled)
+                    .map(|s| format!("  {} — {}", s.metadata.name, s.metadata.description))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                push_toast(
+                    state,
+                    ToastVariant::Info,
+                    format!("skills:\n{list}"),
+                    Duration::from_secs(6),
+                );
+            }
+            ChatNav::Stay
+        }
+        _ if cmd.starts_with("skill ") => {
+            let skill_name = cmd.trim_start_matches("skill ").trim();
+            match state
+                .defaults
+                .skills
+                .iter()
+                .find(|s| s.metadata.name == skill_name && s.metadata.enabled)
+            {
+                Some(skill) => {
+                    let prefix = format!("[skill: {}]\n", skill.metadata.name);
+                    let injection = format!("{}{}\n\n", prefix, skill.content.trim());
+                    composer_insert_str(chat, &injection);
+                    push_toast(
+                        state,
+                        ToastVariant::Success,
+                        format!("injected skill: {}", skill.metadata.name),
+                        Duration::from_secs(3),
+                    );
+                }
+                None => {
+                    push_toast(
+                        state,
+                        ToastVariant::Warning,
+                        format!("skill not found: {skill_name}"),
+                        Duration::from_secs(3),
+                    );
+                }
+            }
+            ChatNav::Stay
+        }
+        // ── /memory ─────────────────────────────────────────────────────────
+        "memory" => {
+            match rustcode_memories::MemoryStorage::new().and_then(|s| s.load_summary()) {
+                Some(summary) => {
+                    let excerpt: String = summary.content.chars().take(200).collect();
+                    let suffix = if summary.content.len() > 200 {
+                        "…"
+                    } else {
+                        ""
+                    };
+                    push_toast(
+                        state,
+                        ToastVariant::Info,
+                        format!("memory summary:\n{excerpt}{suffix}"),
+                        Duration::from_secs(7),
+                    );
+                }
+                None => {
+                    push_toast(
+                        state,
+                        ToastVariant::Info,
+                        "no memory summary yet — complete a session to build memories",
+                        Duration::from_secs(5),
+                    );
+                }
+            }
+            ChatNav::Stay
+        }
+        "memory clear" => {
+            match rustcode_memories::MemoryStorage::new() {
+                Some(storage) => match storage.clear_raw() {
+                    Ok(()) => push_toast(
+                        state,
+                        ToastVariant::Success,
+                        "raw memories cleared",
+                        Duration::from_secs(3),
+                    ),
+                    Err(err) => push_toast(
+                        state,
+                        ToastVariant::Error,
+                        format!("failed to clear memories: {err}"),
+                        Duration::from_secs(4),
+                    ),
+                },
+                None => push_toast(
+                    state,
+                    ToastVariant::Warning,
+                    "memory storage unavailable",
+                    Duration::from_secs(3),
+                ),
             }
             ChatNav::Stay
         }

@@ -50,9 +50,13 @@ pub async fn handle_tui_command(tui: TuiCommand, cli: &Cli) -> Result<()> {
                 );
             }
 
+            let skills = rustcode_skills::SkillsManager::load(&resolved_config.workspace_root)
+                .all()
+                .to_vec();
             let defaults = rustcode_tui::InteractiveDefaults {
                 workspace_root: resolved_config.workspace_root.clone(),
                 model: resolved_config.model.clone(),
+                skills,
             };
             let config = Some(Arc::new(resolved_config));
             let backend: Arc<dyn rustcode_tui::SessionBackend> =
@@ -151,9 +155,13 @@ pub async fn handle_tui_default(
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
     let (defaults, mut initial_status, config, executor) = match load_effective_config(cli) {
         Ok(config) => {
+            let skills = rustcode_skills::SkillsManager::load(&config.workspace_root)
+                .all()
+                .to_vec();
             let defaults = rustcode_tui::InteractiveDefaults {
                 workspace_root: config.workspace_root.clone(),
                 model: config.model.clone(),
+                skills,
             };
 
             let config = Arc::new(config);
@@ -173,6 +181,8 @@ pub async fn handle_tui_default(
                             recorder,
                             Some(handles.approver.clone()),
                         )
+                        .with_workspace(&config.workspace_root)
+                        .with_memory_model(&config.model)
                     };
 
                     if config.allow_network {
@@ -195,6 +205,7 @@ pub async fn handle_tui_default(
             rustcode_tui::InteractiveDefaults {
                 workspace_root: cwd.clone(),
                 model: "unknown".to_string(),
+                skills: Vec::new(),
             },
             Some(format!("config not loaded: {err}")),
             None,
