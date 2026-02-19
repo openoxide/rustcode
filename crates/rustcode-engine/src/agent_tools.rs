@@ -316,7 +316,7 @@ impl AgentToolRegistry {
                                 .await;
                                 match result {
                                     Ok(output) => {
-                                        results.push(format!("{tool_name}: ok\n{output}"))
+                                        results.push(format!("{tool_name}: ok\n{output}"));
                                     }
                                     Err(e) => results.push(format!("{tool_name}: error\n{e}")),
                                 }

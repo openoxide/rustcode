@@ -271,7 +271,7 @@ pub(super) fn drain_messages(state: &mut AppState) {
                         match state.backend.load_messages(&chat.session.id) {
                             Ok(messages) => chat.messages = messages,
                             Err(err) => {
-                                state.status = Some(format!("failed to load transcript: {err}"))
+                                state.status = Some(format!("failed to load transcript: {err}"));
                             }
                         }
                     }

@@ -34,6 +34,7 @@ impl Engine {
             &context.config.model,
             &context.config.workspace_root,
             crate::system_prompt::is_git_repo(&context.config.workspace_root),
+            &tools,
         );
 
         let mut messages = self

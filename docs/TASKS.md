@@ -60,22 +60,28 @@
 - [ ] Manual live test: trigger compaction in long conversation
 
 ## Milestone 4: Session & State Management Enhancement
-- [x] Instruction system (reference: opencode `session/instruction.ts`, codex `instructions/`)
-- [x] System prompt management (reference: opencode `session/system.ts`)
-- [x] Retry logic (reference: opencode `session/retry.ts`)
-- [x] Summary generation (reference: opencode `session/summary.ts`)
-- [x] Status tracking (reference: opencode `session/status.ts`)
-- [ ] Message v2 format (reference: opencode `session/message-v2.ts`) - *deferred: needs rich part system*
-- [ ] Prompt construction (reference: opencode `session/prompt.ts`) - *deferred: needs message v2*
-- [ ] Revert logic (reference: opencode `session/revert.ts`) - *deferred: needs snapshot system*
-- [ ] Snapshot/share support (reference: opencode `snapshot/`, `share/`) - *deferred: needs git integration*
+- [x] Instruction system (`instructions.rs`) — load RUSTCODE.md / AGENTS.md from workspace + global
+- [x] System prompt management (`system_prompt.rs`) — rich model-aware prompt with env context
+- [x] LLM retry logic (`retry.rs`) — exponential backoff, retryable error detection
+- [x] Session summary (`session_summary.rs`) — git diff stats per session
+- [x] Status tracking (`AgentStatus` enum + events for TUI)
+- [x] Message v2 format — upgrade `StoredMessage` with structured parts
+- ~~Revert logic~~ *(deferred to M7: needs snapshot infra)*
+- ~~Snapshot/share~~ *(deferred to M7)*
+- [ ] Prompt construction (reference: opencode `session/prompt.ts`) — *deferred: needs message v2*
 
 ## Milestone 5: Provider & Auth System Hardening
-- [ ] Model registry with presets (reference: codex `models_manager/`)
-- [ ] Provider auth improvements (reference: opencode `provider/auth.ts`)
-- [ ] Response transform standardization (reference: opencode `provider/transform.ts`)
-- [ ] Copilot plugin (reference: opencode `plugin/copilot.ts`)
-- [ ] Codex plugin (reference: opencode `plugin/codex.ts`)
+- [x] Model registry with presets (`model_registry.rs`) — centralize context limits + capabilities
+- [x] Branding fix: `opencode` → `rustcode` paths in `provider_presets.rs`
+- [x] Response transform hardening — unified error extraction across protocols
+- [x] Provider auth improvements — OAuth token refresh in `resolve_api_key`
+- [x] Copilot auth plugin (`copilot.rs`) — device code OAuth + token refresh
+- [x] Codex auth plugin (`codex.rs`) — PKCE browser flow + token refresh
+
+## Post-M5 Cleanup: Integration Tests & Clippy
+- [x] Fix 4 failing integration tests — graceful LLM init fallback to `NullLlmClient`
+- [x] Fix 185 clippy warnings → 0 — lint priority fix, 20 pedantic allows, 10 manual fixes
+- [x] Update `AGENT.md` — rules 13 (fix before building) and 14 (manual testing)
 
 ## Milestone 6: TUI Architecture Overhaul
 - [ ] Design Rust-native TUI architecture (reference: codex `tui/src/`, opencode OpenTUI)

@@ -25,7 +25,7 @@ fn append_message_lines(lines: &mut Vec<Line<'static>>, msg: &StoredMessage, too
     lines.push(Line::from(vec![Span::styled(role, role_style)]));
 
     if msg.role == MessageRole::Tool {
-        append_tool_message_lines(lines, msg, tool_details)
+        append_tool_message_lines(lines, msg, tool_details);
     } else {
         append_value_lines(lines, &msg.content, "", 200);
         if !msg.tool_calls.is_empty() {
