@@ -2,7 +2,10 @@ use std::io;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crossterm::event::{self, Event as CEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event as CEvent, KeyCode, KeyEvent,
+    KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -24,8 +27,8 @@ use rustcode_core::{Command, CommandContext, ResolvedConfig, SessionInfo};
 use rustcode_core::{MessageRole, SessionMeta, StoredMessage, ToolApprovalRequest};
 
 use crate::{
-    CreateSessionOptions, InteractiveDefaults, InteractiveMsg, InteractiveServices,
-    InteractiveStart, InteractiveSubmitMode, TuiError, TuiPublisher,
+    ApprovalResponse, CreateSessionOptions, InteractiveDefaults, InteractiveMsg,
+    InteractiveServices, InteractiveStart, InteractiveSubmitMode, TuiError, TuiPublisher,
 };
 
 mod commands;

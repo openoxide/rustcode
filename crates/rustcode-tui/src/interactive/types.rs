@@ -1,7 +1,7 @@
 use super::{
-    Arc, CancellationToken, InteractiveDefaults, InteractiveMsg, InteractiveSubmitMode, Line,
-    MessageRole, Modifier, ResolvedConfig, SessionInfo, Size, Span, StoredMessage, Style,
-    SystemTime, ToolApprovalRequest,
+    ApprovalResponse, Arc, CancellationToken, InteractiveDefaults, InteractiveMsg,
+    InteractiveSubmitMode, Line, MessageRole, Modifier, ResolvedConfig, SessionInfo, Size, Span,
+    StoredMessage, Style, SystemTime, ToolApprovalRequest,
 };
 
 pub(super) enum Screen {
@@ -11,7 +11,7 @@ pub(super) enum Screen {
 
 pub(super) struct PendingApproval {
     pub(super) request: ToolApprovalRequest,
-    pub(super) reply: tokio::sync::oneshot::Sender<bool>,
+    pub(super) reply: tokio::sync::oneshot::Sender<ApprovalResponse>,
 }
 
 pub(super) struct RunningCommand {

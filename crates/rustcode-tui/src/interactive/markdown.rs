@@ -68,33 +68,30 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
 
         // ── Headings ───────────────────────────────────────────────
         if let Some(rest) = stripped.strip_prefix("### ") {
-            let mut spans = vec![Span::styled(
-                "### ",
+            let spans = restyle_spans(
+                parse_inline(rest),
                 Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
-            )];
-            spans.extend(parse_inline(rest));
+            );
             lines.push(Line::from(spans));
             continue;
         }
         if let Some(rest) = stripped.strip_prefix("## ") {
-            let mut spans = vec![Span::styled(
-                "## ",
+            let spans = restyle_spans(
+                parse_inline(rest),
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
-            )];
-            spans.extend(parse_inline(rest));
+            );
             lines.push(Line::from(spans));
             continue;
         }
         if let Some(rest) = stripped.strip_prefix("# ") {
-            let mut spans = vec![Span::styled(
-                "# ",
+            let spans = restyle_spans(
+                parse_inline_bold(rest),
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
-            )];
-            spans.extend(parse_inline_bold(rest));
+            );
             lines.push(Line::from(spans));
             continue;
         }
@@ -255,6 +252,13 @@ fn flush(spans: &mut Vec<Span<'static>>, buf: &mut String, style: Style) {
     }
 }
 
+fn restyle_spans(spans: Vec<Span<'static>>, style: Style) -> Vec<Span<'static>> {
+    spans
+        .into_iter()
+        .map(|span| Span::styled(span.content.into_owned(), span.style.patch(style)))
+        .collect()
+}
+
 /// Returns `(indent_spaces, rest)` stripping leading spaces.
 fn leading_spaces(s: &str) -> (usize, &str) {
     let trimmed = s.trim_start_matches(' ');
@@ -288,7 +292,8 @@ mod tests {
         let lines = render_markdown("# Hello");
         assert_eq!(lines.len(), 1);
         let first = &lines[0];
-        assert!(first.spans.len() >= 2);
+        assert!(first.spans.iter().any(|span| span.content == "Hello"));
+        assert!(!first.spans.iter().any(|span| span.content == "# "));
     }
 
     #[test]

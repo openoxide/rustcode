@@ -5,8 +5,8 @@ use super::{
     execute_command, filter_files, find_next, find_prev, handle_slash_command, history_next,
     history_prev, maybe_execute_palette_query, open_command_palette, push_toast,
     refresh_chat_messages, set_find, sort_sessions, submit_prompt, transcript_area_height,
-    ActivityItem, AppState, ChatFocus, ChatNav, ChatState, CommandId, CreateSessionOptions,
-    Duration, KeyCode, KeyEvent, KeyModifiers, Modal, Screen, ToastVariant,
+    ActivityItem, AppState, ApprovalResponse, ChatFocus, ChatNav, ChatState, CommandId,
+    CreateSessionOptions, Duration, KeyCode, KeyEvent, KeyModifiers, Modal, Screen, ToastVariant,
 };
 
 mod input_chat;
@@ -17,22 +17,37 @@ use self::input_sessions::handle_sessions_key;
 
 pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
     if let Some(pending) = state.pending_approval.take() {
+        let is_edit_permission = pending.request.permission.eq_ignore_ascii_case("write")
+            || pending.request.permission.eq_ignore_ascii_case("edit");
+        let is_command_permission = pending.request.permission.eq_ignore_ascii_case("exec");
         let decision = match key.code {
-            KeyCode::Char('a') => Some(true),
-            KeyCode::Char('d') => Some(false),
-            KeyCode::Esc | KeyCode::Char('q') => Some(false),
+            KeyCode::Char('a' | 'A' | 'y' | 'Y' | '1') => Some(ApprovalResponse::AllowOnce),
+            KeyCode::Char('e' | 'E') if is_edit_permission => Some(ApprovalResponse::AllowAllEdits),
+            KeyCode::Char('c' | 'C') if is_command_permission => {
+                Some(ApprovalResponse::AllowAllCommands)
+            }
+            KeyCode::Char('2') if is_edit_permission => Some(ApprovalResponse::AllowAllEdits),
+            KeyCode::Char('2') if is_command_permission => Some(ApprovalResponse::AllowAllCommands),
+            KeyCode::Char('d' | 'D' | 'n' | 'N') => Some(ApprovalResponse::Deny),
+            KeyCode::Esc | KeyCode::Char('q' | 'Q') => Some(ApprovalResponse::Deny),
             _ => None,
         };
         if let Some(decision) = decision {
             let _ = pending.reply.send(decision);
+            let decision_text = match decision {
+                ApprovalResponse::AllowOnce => "allow_once",
+                ApprovalResponse::AllowAllEdits => "allow_all_edits",
+                ApprovalResponse::AllowAllCommands => "allow_all_commands",
+                ApprovalResponse::Deny => "deny",
+            };
             state.status = Some(format!(
-                "approval: tool={} decision={decision}",
-                pending.request.tool
+                "approval: tool={} decision={decision_text}",
+                pending.request.tool,
             ));
             push_toast(
                 state,
                 ToastVariant::Info,
-                format!("approval: {} -> {decision}", pending.request.tool),
+                format!("approval: {} -> {decision_text}", pending.request.tool),
                 Duration::from_secs(2),
             );
         } else {

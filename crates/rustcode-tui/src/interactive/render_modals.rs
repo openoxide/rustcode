@@ -358,7 +358,7 @@ pub(super) fn render_help_modal(frame: &mut ratatui::Frame<'_>, state: &AppState
         Style::default().add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::raw(
-        "  Tab: cycle focus (composer → transcript → activity)",
+        "  Alt+Tab / click: focus panels (composer ↔ transcript ↔ activity)",
     ));
     lines.push(Line::raw(
         "  Esc: focus back to composer / clear composer / back to sessions",

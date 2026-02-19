@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use thiserror::Error;
 use tokio::runtime::Handle;
@@ -62,8 +62,16 @@ pub enum InteractiveMsg {
     },
     ApprovalRequest {
         request: ToolApprovalRequest,
-        reply: oneshot::Sender<bool>,
+        reply: oneshot::Sender<ApprovalResponse>,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalResponse {
+    AllowOnce,
+    AllowAllEdits,
+    AllowAllCommands,
+    Deny,
 }
 
 pub struct InteractiveHandles {
@@ -76,10 +84,11 @@ impl InteractiveHandles {
     #[must_use]
     pub fn new() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
+        let policy = Arc::new(Mutex::new(ApprovalPolicy::default()));
         Self {
             tx: tx.clone(),
             rx,
-            approver: Arc::new(TuiToolApprover { tx }),
+            approver: Arc::new(TuiToolApprover { tx, policy }),
         }
     }
 }
@@ -113,17 +122,81 @@ impl EventPublisher for TuiPublisher {
 
 struct TuiToolApprover {
     tx: mpsc::UnboundedSender<InteractiveMsg>,
+    policy: Arc<Mutex<ApprovalPolicy>>,
+}
+
+#[derive(Debug, Default)]
+struct ApprovalPolicy {
+    allow_all_edits: bool,
+    allow_all_commands: bool,
+}
+
+impl ApprovalPolicy {
+    fn allows(&self, request: &ToolApprovalRequest) -> bool {
+        (self.allow_all_edits && is_edit_permission(&request.permission))
+            || (self.allow_all_commands && is_command_permission(&request.permission))
+    }
+
+    fn apply_response(
+        &mut self,
+        request: &ToolApprovalRequest,
+        response: ApprovalResponse,
+    ) -> bool {
+        match response {
+            ApprovalResponse::AllowOnce => true,
+            ApprovalResponse::AllowAllEdits => {
+                if is_edit_permission(&request.permission) {
+                    self.allow_all_edits = true;
+                }
+                true
+            }
+            ApprovalResponse::AllowAllCommands => {
+                if is_command_permission(&request.permission) {
+                    self.allow_all_commands = true;
+                }
+                true
+            }
+            ApprovalResponse::Deny => false,
+        }
+    }
+}
+
+fn is_edit_permission(permission: &str) -> bool {
+    matches!(permission, "write" | "edit")
+}
+
+fn is_command_permission(permission: &str) -> bool {
+    permission == "exec"
 }
 
 #[async_trait::async_trait]
 impl ToolApprover for TuiToolApprover {
     async fn approve(&self, request: ToolApprovalRequest) -> Result<bool, ExecutionError> {
+        {
+            let policy = self.policy.lock().map_err(|_| {
+                ExecutionError::Executor("approval policy lock poisoned".to_string())
+            })?;
+            if policy.allows(&request) {
+                return Ok(true);
+            }
+        }
+
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(InteractiveMsg::ApprovalRequest { request, reply: tx })
+            .send(InteractiveMsg::ApprovalRequest {
+                request: request.clone(),
+                reply: tx,
+            })
             .map_err(|_| ExecutionError::Executor("approval channel closed".to_string()))?;
-        rx.await
-            .map_err(|_| ExecutionError::Executor("approval response dropped".to_string()))
+        let response = rx
+            .await
+            .map_err(|_| ExecutionError::Executor("approval response dropped".to_string()))?;
+
+        let mut policy = self
+            .policy
+            .lock()
+            .map_err(|_| ExecutionError::Executor("approval policy lock poisoned".to_string()))?;
+        Ok(policy.apply_response(&request, response))
     }
 }
 
@@ -278,5 +351,15 @@ mod tests {
             .expect("run should succeed");
         assert_eq!(summary.events_processed, 1);
         assert!(summary.shutdown_received);
+    }
+
+    #[test]
+    fn approval_policy_allows_expected_permission_groups() {
+        assert!(is_edit_permission("write"));
+        assert!(is_edit_permission("edit"));
+        assert!(!is_edit_permission("exec"));
+
+        assert!(is_command_permission("exec"));
+        assert!(!is_command_permission("write"));
     }
 }

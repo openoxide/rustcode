@@ -112,7 +112,7 @@ pub(super) fn render_activity_details_modal(frame: &mut ratatui::Frame<'_>, chat
     lines.push(Line::from(vec![
         Span::raw("Enter/Esc: close"),
         Span::raw("  "),
-        Span::raw("Tab: focus"),
+        Span::raw("Alt+Tab/click: focus"),
     ]));
 
     let modal = Paragraph::new(lines)
@@ -140,18 +140,33 @@ pub(super) fn render_approval_modal(frame: &mut ratatui::Frame<'_>, pending: &Pe
     lines.push(Line::raw(""));
     lines.push(Line::raw(format!("reason: {}", pending.request.reason)));
     lines.push(Line::raw(""));
-    lines.push(Line::raw("arguments:"));
+
+    let mut action_spans = vec![
+        approval_button("[A] Approve once", Color::Green),
+        Span::raw("  "),
+    ];
+    if is_edit_permission(&pending.request.permission) {
+        action_spans.push(approval_button("[E] Approve all edits", Color::Cyan));
+        action_spans.push(Span::raw("  "));
+    }
+    if is_command_permission(&pending.request.permission) {
+        action_spans.push(approval_button("[C] Approve all commands", Color::Cyan));
+        action_spans.push(Span::raw("  "));
+    }
+    action_spans.push(approval_button("[D] Deny", Color::Red));
+    lines.push(Line::from(action_spans));
+    lines.push(Line::from(vec![Span::raw("keys: 1=once  2=all  Esc=deny")]));
+    lines.push(Line::raw(""));
+    lines.push(Line::raw("arguments (preview):"));
     let args = serde_json::to_string_pretty(&pending.request.arguments)
         .unwrap_or_else(|_| "<unprintable>".to_string());
-    for line in args.lines().take(12) {
-        lines.push(Line::raw(line.to_string()));
+    let arg_lines = args.lines().collect::<Vec<_>>();
+    for line in arg_lines.iter().take(6) {
+        lines.push(Line::raw(truncate_modal_line(line, 100)));
     }
-    lines.push(Line::raw(""));
-    lines.push(Line::from(vec![
-        Span::raw("a: allow  "),
-        Span::raw("d: deny  "),
-        Span::raw("Esc: deny"),
-    ]));
+    if arg_lines.len() > 6 {
+        lines.push(Line::raw("...[truncated]..."));
+    }
 
     let block = Block::default()
         .title("Approval")
@@ -161,4 +176,33 @@ pub(super) fn render_approval_modal(frame: &mut ratatui::Frame<'_>, pending: &Pe
         .block(block)
         .wrap(Wrap { trim: false });
     frame.render_widget(modal, area);
+}
+
+fn approval_button(label: &str, color: Color) -> Span<'static> {
+    Span::styled(
+        format!(" {label} "),
+        Style::default()
+            .fg(color)
+            .add_modifier(Modifier::BOLD | Modifier::REVERSED),
+    )
+}
+
+fn truncate_modal_line(input: &str, max_chars: usize) -> String {
+    if input.chars().count() <= max_chars {
+        return input.to_string();
+    }
+    let mut out = input
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
+    out.push_str("...");
+    out
+}
+
+fn is_edit_permission(permission: &str) -> bool {
+    permission.eq_ignore_ascii_case("write") || permission.eq_ignore_ascii_case("edit")
+}
+
+fn is_command_permission(permission: &str) -> bool {
+    permission.eq_ignore_ascii_case("exec")
 }

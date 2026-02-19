@@ -16,6 +16,11 @@ pub(super) fn handle_chat_key(
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
 
+    if alt && matches!(key.code, KeyCode::Tab) {
+        chat.focus = next_focus(chat.focus);
+        return ChatNav::Stay;
+    }
+
     // ── Ctrl+key shortcuts (work regardless of focus) ───────────────
     if ctrl {
         match key.code {
@@ -199,13 +204,6 @@ pub(super) fn handle_chat_key(
 
     // ── Non-character keys and shortcuts ────────────────────────────
     match key.code {
-        KeyCode::Tab => {
-            chat.focus = match chat.focus {
-                ChatFocus::Composer => ChatFocus::Transcript,
-                ChatFocus::Transcript => ChatFocus::Activity,
-                ChatFocus::Activity => ChatFocus::Composer,
-            };
-        }
         KeyCode::Char('?') => state.help_open = true,
         KeyCode::Esc => {
             if chat.focus != ChatFocus::Composer {
@@ -344,4 +342,12 @@ pub(super) fn handle_chat_key(
     }
 
     ChatNav::Stay
+}
+
+fn next_focus(focus: ChatFocus) -> ChatFocus {
+    match focus {
+        ChatFocus::Composer => ChatFocus::Transcript,
+        ChatFocus::Transcript => ChatFocus::Activity,
+        ChatFocus::Activity => ChatFocus::Composer,
+    }
 }

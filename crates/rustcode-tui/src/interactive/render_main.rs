@@ -201,11 +201,49 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         .scroll((scroll_top, 0));
     frame.render_widget(transcript, left[0]);
 
-    let composer_title = if chat.running.is_some() {
+    let focus_label = match chat.focus {
+        ChatFocus::Composer => "composer",
+        ChatFocus::Transcript => "transcript",
+        ChatFocus::Activity => "activity",
+    };
+    let mode_label = match app.submit_mode {
+        super::InteractiveSubmitMode::Agent => "agent",
+        super::InteractiveSubmitMode::Run => "run",
+    };
+    let model_label = if chat.session.model.trim().is_empty() {
+        app.defaults.model.as_str()
+    } else {
+        chat.session.model.as_str()
+    };
+    let prompt_label = if chat.running.is_some() {
         "Prompt (running)"
     } else {
         "Prompt"
     };
+    let composer_title = Line::from(vec![
+        Span::styled(prompt_label, Style::default().add_modifier(Modifier::BOLD)),
+        Span::raw("  "),
+        Span::styled(
+            format!("[focus:{focus_label}]"),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("[model:{model_label}]"),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("[mode:{mode_label}]"),
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+    ]);
     let composer_border = if chat.focus == ChatFocus::Composer {
         Style::default().fg(Color::Cyan)
     } else {
@@ -266,14 +304,6 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         }
     }
 
-    let focus_label = match chat.focus {
-        ChatFocus::Composer => "composer",
-        ChatFocus::Transcript => "transcript",
-        ChatFocus::Activity => "activity",
-    };
-    let model_label = app.defaults.model.as_str();
-    let running_indicator = if chat.running.is_some() { " ⟳" } else { "" };
-
     // Line 1: status/error — truncated to fit, always visible
     let err_max = 55_usize;
     let (status_text, status_style, has_error) = if let Some(ref s) = app.status {
@@ -309,20 +339,24 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     } else {
         Span::raw("")
     };
-    let status_line = Line::from(vec![
-        Span::styled(
-            format!(" {focus_label}{running_indicator}  [{model_label}]  "),
-            Style::default().fg(Color::Cyan),
-        ),
-        Span::styled(status_text, status_style),
-        error_hint,
-    ]);
+    let mut status_spans = Vec::new();
+    if chat.running.is_some() {
+        status_spans.push(Span::styled(
+            " running  ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+    }
+    status_spans.push(Span::styled(status_text, status_style));
+    status_spans.push(error_hint);
+    let status_line = Line::from(status_spans);
 
     // Line 2: condensed key hints; swap ?:help for ^E:error when error is present
     let hints_text = if has_error {
-        " ^P:cmds  ^N:new  ^Q:sessions  ^C:cancel  Tab:focus  Enter:send  /:cmd  ^E:error"
+        " ^P:cmds  ^N:new  ^Q:sessions  ^C:cancel  Alt+Tab/click:focus  Enter:send  /:cmd  ^E:error"
     } else {
-        " ^P:cmds  ^N:new  ^Q:sessions  ^C:cancel  Tab:focus  Enter:send  /:cmd  ?:help"
+        " ^P:cmds  ^N:new  ^Q:sessions  ^C:cancel  Alt+Tab/click:focus  Enter:send  /:cmd  ?:help"
     };
     let hints_line = Line::from(vec![Span::styled(
         hints_text,

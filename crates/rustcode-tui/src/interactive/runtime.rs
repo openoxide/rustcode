@@ -2,12 +2,14 @@ use super::{
     build_prompt_history, composer_insert_str, compute_sessions_view, disable_raw_mode,
     drain_toasts, enable_raw_mode, event, execute, handle_key, io, push_toast, render,
     sort_sessions, ActivityItem, AgentOptions, AppState, Arc, CEvent, CancellationToken, ChatFocus,
-    ChatState, Command, CommandContext, CrosstermBackend, Duration, EnterAlternateScreen,
-    EventPayload, EventPublisher, ExecutableCommand, InteractiveMsg, InteractiveServices,
-    InteractiveStart, InteractiveSubmitMode, KeyEventKind, LeaveAlternateScreen, PendingApproval,
-    RunningCommand, Screen, SessionMeta, SystemTime, Terminal, ToastVariant, TuiError,
-    TuiPublisher,
+    ChatState, Command, CommandContext, Constraint, CrosstermBackend, Direction,
+    DisableMouseCapture, Duration, EnableMouseCapture, EnterAlternateScreen, EventPayload,
+    EventPublisher, ExecutableCommand, InteractiveMsg, InteractiveServices, InteractiveStart,
+    InteractiveSubmitMode, KeyEventKind, Layout, LeaveAlternateScreen, MouseButton, MouseEvent,
+    MouseEventKind, PendingApproval, Rect, RunningCommand, Screen, SessionMeta, SystemTime,
+    Terminal, ToastVariant, TuiError, TuiPublisher,
 };
+use rustcode_core::event::EventScope;
 
 pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
     let InteractiveServices {
@@ -24,7 +26,8 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
 
     let mut stdout = io::stdout();
     enable_raw_mode().map_err(|err| TuiError::Io(err.to_string()))?;
-    execute!(stdout, EnterAlternateScreen).map_err(|err| TuiError::Io(err.to_string()))?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+        .map_err(|err| TuiError::Io(err.to_string()))?;
     let _cleanup = TerminalCleanup;
 
     let term_backend = CrosstermBackend::new(stdout);
@@ -138,11 +141,61 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                         return Ok(());
                     }
                 }
+                CEvent::Mouse(mouse) => handle_mouse(&mut state, mouse),
                 CEvent::Paste(text) => handle_paste(&mut state, &text),
                 _ => {}
             }
         }
     }
+}
+
+pub(super) fn handle_mouse(state: &mut AppState, mouse: MouseEvent) {
+    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
+        return;
+    }
+    if state.pending_approval.is_some() || state.modal.is_some() || state.help_open {
+        return;
+    }
+
+    let Screen::Chat(mut chat) = std::mem::replace(&mut state.screen, Screen::Sessions) else {
+        return;
+    };
+    if chat.details_open {
+        state.screen = Screen::Chat(chat);
+        return;
+    }
+
+    let frame_area = Rect::new(0, 0, state.last_area.width, state.last_area.height);
+    let root = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
+        .split(frame_area);
+    let left = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(5),
+            Constraint::Length(3),
+        ])
+        .split(root[0]);
+
+    let col = mouse.column;
+    let row = mouse.row;
+    if contains(left[0], col, row) {
+        chat.focus = ChatFocus::Transcript;
+    } else if contains(left[1], col, row) {
+        chat.focus = ChatFocus::Composer;
+    } else if contains(root[1], col, row) {
+        chat.focus = ChatFocus::Activity;
+    }
+
+    state.screen = Screen::Chat(chat);
+}
+
+fn contains(area: Rect, col: u16, row: u16) -> bool {
+    let max_x = area.x.saturating_add(area.width);
+    let max_y = area.y.saturating_add(area.height);
+    col >= area.x && col < max_x && row >= area.y && row < max_y
 }
 
 pub(super) fn handle_paste(state: &mut AppState, text: &str) {
@@ -202,16 +255,18 @@ pub(super) fn drain_messages(state: &mut AppState) {
                             output: output.clone(),
                         }),
                         EventPayload::OutputChunk { text } => {
-                            chat.live_assistant.push_str(text);
-                            if chat.live_assistant.len() > 64 * 1024 {
-                                let keep = 48 * 1024;
-                                let mut start = chat.live_assistant.len().saturating_sub(keep);
-                                while start < chat.live_assistant.len()
-                                    && !chat.live_assistant.is_char_boundary(start)
-                                {
-                                    start += 1;
+                            if event.scope == EventScope::Command {
+                                chat.live_assistant.push_str(text);
+                                if chat.live_assistant.len() > 64 * 1024 {
+                                    let keep = 48 * 1024;
+                                    let mut start = chat.live_assistant.len().saturating_sub(keep);
+                                    while start < chat.live_assistant.len()
+                                        && !chat.live_assistant.is_char_boundary(start)
+                                    {
+                                        start += 1;
+                                    }
+                                    chat.live_assistant = chat.live_assistant[start..].to_string();
                                 }
-                                chat.live_assistant = chat.live_assistant[start..].to_string();
                             }
                             Some(ActivityItem::OutputChunk { text: text.clone() })
                         }
@@ -270,7 +325,10 @@ pub(super) fn drain_messages(state: &mut AppState) {
 
                     if refresh {
                         match state.backend.load_messages(&chat.session.id) {
-                            Ok(messages) => chat.messages = messages,
+                            Ok(messages) => {
+                                chat.messages = messages;
+                                chat.scroll = 0;
+                            }
                             Err(err) => {
                                 state.status = Some(format!("failed to load transcript: {err}"));
                             }
@@ -295,7 +353,10 @@ pub(super) fn drain_messages(state: &mut AppState) {
                         }
                     }
                     match state.backend.load_messages(&chat.session.id) {
-                        Ok(messages) => chat.messages = messages,
+                        Ok(messages) => {
+                            chat.messages = messages;
+                            chat.scroll = 0;
+                        }
                         Err(err) => {
                             state.status = Some(format!("failed to load transcript: {err}"));
                             push_toast(
@@ -429,6 +490,7 @@ impl Drop for TerminalCleanup {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let mut stdout = io::stdout();
+        let _ = stdout.execute(DisableMouseCapture);
         let _ = stdout.execute(LeaveAlternateScreen);
     }
 }
