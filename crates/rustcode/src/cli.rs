@@ -171,7 +171,36 @@ pub enum TopCommand {
         #[command(subcommand)]
         command: PrCommand,
     },
+    Worktree {
+        #[command(subcommand)]
+        command: WorktreeCommand,
+    },
     Version,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum WorktreeCommand {
+    /// Create a new git worktree on a new branch.
+    Create {
+        /// Worktree directory name (default: wt-<timestamp>)
+        #[arg(long)]
+        name: Option<String>,
+        /// Branch name (default: same as name)
+        #[arg(long)]
+        branch: Option<String>,
+    },
+    /// List all git worktrees.
+    List,
+    /// Remove a git worktree.
+    Remove {
+        /// Absolute path of the worktree to remove
+        path: String,
+    },
+    /// Hard-reset a worktree to its upstream remote branch.
+    Reset {
+        /// Absolute path of the worktree to reset
+        path: String,
+    },
 }
 
 #[derive(Debug, Clone, Subcommand)]

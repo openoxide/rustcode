@@ -5,7 +5,7 @@ use rustcode_llm::ToolSpec;
 ///
 /// This is separated from the dispatch logic in `agent_tools.rs` to keep
 /// both files under the 600 LOC limit.
-pub fn tool_specs(options: &AgentOptions, allow_network: bool) -> Vec<ToolSpec> {
+pub fn tool_specs(options: &AgentOptions, allow_network: bool, has_lsp: bool) -> Vec<ToolSpec> {
     let mut specs = vec![
         ToolSpec {
             name: "list".to_string(),
@@ -97,6 +97,55 @@ pub fn tool_specs(options: &AgentOptions, allow_network: bool) -> Vec<ToolSpec> 
             "additionalProperties": false
         }),
     });
+
+    // worktree tools — available when exec is allowed
+    if options.allow_exec {
+        specs.push(ToolSpec {
+            name: "worktree_create".to_string(),
+            description: "Create a new git worktree (sibling directory) on a new branch. Returns the path and branch name.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Worktree directory name (default: wt-<timestamp>)" },
+                    "branch": { "type": "string", "description": "Branch name to create (default: same as name)" }
+                },
+                "additionalProperties": false
+            }),
+        });
+        specs.push(ToolSpec {
+            name: "worktree_list".to_string(),
+            description: "List all git worktrees for the current repository.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        });
+        specs.push(ToolSpec {
+            name: "worktree_remove".to_string(),
+            description: "Remove a git worktree by its filesystem path. Uses --force to handle unclean state.".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute path of the worktree to remove" }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        });
+        specs.push(ToolSpec {
+            name: "worktree_reset".to_string(),
+            description: "Hard-reset a worktree to its upstream remote branch (fetch + reset --hard @{u} + clean -ffdx).".to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute path of the worktree to reset" }
+                },
+                "required": ["path"],
+                "additionalProperties": false
+            }),
+        });
+    }
 
     // pty_exec — available when exec is allowed; like bash but with a real TTY
     if options.allow_exec {
@@ -321,6 +370,44 @@ pub fn tool_specs(options: &AgentOptions, allow_network: bool) -> Vec<ToolSpec> 
                     }
                 },
                 "required": ["command"],
+                "additionalProperties": false
+            }),
+        });
+    }
+
+    // lsp tool — available when a language server is detected for the workspace
+    if has_lsp {
+        specs.push(ToolSpec {
+            name: "lsp".to_string(),
+            description: "Language Server Protocol operations via the workspace language server \
+                          (rust-analyzer, gopls, pyright, typescript-language-server). \
+                          Use for diagnostics, type info, go-to-definition, and symbol search."
+                .to_string(),
+            parameters: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "operation": {
+                        "type": "string",
+                        "description": "Operation: diagnostics | hover | definition | workspace_symbols"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Workspace-relative file path (required for hover/definition)"
+                    },
+                    "line": {
+                        "type": "integer",
+                        "description": "0-indexed line number (required for hover/definition)"
+                    },
+                    "character": {
+                        "type": "integer",
+                        "description": "0-indexed character offset (required for hover/definition)"
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Symbol name filter (required for workspace_symbols)"
+                    }
+                },
+                "required": ["operation"],
                 "additionalProperties": false
             }),
         });

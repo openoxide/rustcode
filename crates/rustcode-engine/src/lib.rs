@@ -48,11 +48,13 @@ use rustcode_state::SessionStore;
 mod agent_handlers_bash;
 mod agent_handlers_fs;
 mod agent_handlers_interactive;
+mod agent_handlers_lsp;
 mod agent_handlers_multiedit;
 mod agent_handlers_patch;
 mod agent_handlers_pty;
 mod agent_handlers_search;
 mod agent_handlers_web;
+mod agent_handlers_worktree;
 mod agent_runtime;
 mod agent_tool_specs;
 mod agent_tools;
@@ -129,6 +131,8 @@ pub struct Engine {
     pub(crate) memories: Option<Arc<rustcode_memories::MemoryStorage>>,
     /// Background scheduler handle (drives memory consolidation).
     scheduler: scheduler::SchedulerHandle,
+    /// LSP manager for the workspace (None if no server detected / no workspace set).
+    pub(crate) lsp_manager: Option<Arc<rustcode_lsp::LspManager>>,
     next_event_id: AtomicU64,
     next_message_id: AtomicU64,
 }
@@ -160,6 +164,7 @@ impl Engine {
             skills: rustcode_skills::SkillsManager::default(),
             memories: None,
             scheduler: scheduler::SchedulerHandle::default(),
+            lsp_manager: None,
             next_event_id: AtomicU64::new(1),
             next_message_id: AtomicU64::new(1),
         }
@@ -183,6 +188,7 @@ impl Engine {
         };
         self.memories = memories;
         self.scheduler = sched;
+        self.lsp_manager = rustcode_lsp::LspManager::detect(workspace_root).map(Arc::new);
         self
     }
 

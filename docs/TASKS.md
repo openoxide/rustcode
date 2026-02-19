@@ -45,7 +45,7 @@
   - [ ] `task` — sub-agent delegation *(blocked on M4: session/sub-agent infra)*
   - [x] `plan` — task planning tool
   - [x] `websearch` — web search integration (DDG Lite)
-  - [ ] `lsp` — LSP-powered tool *(blocked on M7: LSP integration)*
+  - [x] `lsp` — LSP-powered tool (diagnostics, hover, definition, workspace_symbols)
   - [ ] `skill` — skill invocation *(blocked on M7: skill system)*
   - [ ] `codesearch` — AST-aware code search *(blocked on tree-sitter dep)*
 - [x] Tool specs extracted to `agent_tool_specs.rs` (LOC compliance)
@@ -114,9 +114,9 @@
 - [x] PTY subprocess — `process_pty.rs` in `rustcode-io`, `pty_exec` agent tool (reference: opencode `pty/`, codex `utils/pty/`)
 - [x] IDE detection — `ide.rs` in `rustcode-core`, env-var based detection of VS Code, Cursor, Windsurf, etc. (reference: opencode `ide/`)
 
-### M7c: Worktree + LSP (planned)
-- [ ] Worktree management (reference: opencode `worktree/`)
-- [ ] LSP integration (reference: opencode `lsp/`)
+### M7c: Worktree + LSP ✅
+- [x] Worktree management: `worktree_create/list/remove/reset` agent tools + `rustcode worktree` CLI subcommand
+- [x] LSP integration: `rustcode-lsp` crate with JSON-RPC transport, auto-detection (rust-analyzer/gopls/pyright/typescript-language-server), `lsp` agent tool (diagnostics/hover/definition/workspace_symbols)
 
 ## Milestone 8: Production Reliability
 - [ ] Crash recovery

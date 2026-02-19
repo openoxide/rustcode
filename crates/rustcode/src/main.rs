@@ -27,6 +27,7 @@ mod run_cmds;
 mod session_cmds;
 mod tui_cmds;
 mod utils;
+mod worktree_cmds;
 
 use agent_cmds::StdioToolApprover;
 use auth::{classify_auth_error, handle_auth_command};
@@ -44,6 +45,7 @@ use utils::{
     init_tracing, is_interactive_terminal, load_effective_config, now_unix_ms,
     wait_for_shutdown_signal, write_stdout_line, write_stdout_raw,
 };
+use worktree_cmds::handle_worktree_command;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -124,6 +126,9 @@ async fn main() -> Result<()> {
     }
     if let TopCommand::Session { command } = &cli.command {
         return handle_session_command(command.clone(), cli.json);
+    }
+    if let TopCommand::Worktree { command } = &cli.command {
+        return handle_worktree_command(command, cli.json);
     }
 
     if let TopCommand::Export { session_id } = &cli.command {
@@ -460,6 +465,11 @@ async fn main() -> Result<()> {
         }
         TopCommand::Pr { .. } => {
             anyhow::bail!("internal error: pr command must be handled before engine dispatch");
+        }
+        TopCommand::Worktree { .. } => {
+            anyhow::bail!(
+                "internal error: worktree command must be handled before engine dispatch"
+            );
         }
     };
 

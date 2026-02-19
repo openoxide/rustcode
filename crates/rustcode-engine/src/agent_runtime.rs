@@ -20,8 +20,11 @@ impl Engine {
         context: &CommandContext,
         publisher: Arc<dyn EventPublisher>,
     ) -> Result<(), ExecutionError> {
-        let mut tools =
-            agent_tools::AgentToolRegistry::tool_specs(&options, context.config.allow_network);
+        let mut tools = agent_tools::AgentToolRegistry::tool_specs(
+            &options,
+            context.config.allow_network,
+            self.lsp_manager.is_some(),
+        );
 
         if context.config.allow_network {
             self.load_mcp_tools(&mut tools, publisher.clone(), context)

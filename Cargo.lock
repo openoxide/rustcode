@@ -1382,6 +1382,7 @@ dependencies = [
  "rustcode-core",
  "rustcode-io",
  "rustcode-llm",
+ "rustcode-lsp",
  "rustcode-mcp",
  "rustcode-memories",
  "rustcode-plugins",
@@ -1436,6 +1437,16 @@ version = "0.1.0"
 dependencies = [
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "rustcode-lsp"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

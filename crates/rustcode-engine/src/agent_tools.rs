@@ -47,6 +47,18 @@ fn opt_u64(args: &Value, key: &str) -> Result<Option<u64>, ExecutionError> {
     }
 }
 
+fn opt_u32(args: &Value, key: &str) -> Result<Option<u32>, ExecutionError> {
+    match args.get(key) {
+        None => Ok(None),
+        Some(Value::Number(num)) => num.as_u64().map(|n| Some(n as u32)).ok_or_else(|| {
+            ExecutionError::Dispatch(format!("{key} must be a non-negative integer"))
+        }),
+        Some(_) => Err(ExecutionError::Dispatch(format!(
+            "{key} must be an integer"
+        ))),
+    }
+}
+
 fn opt_str_list(args: &Value, key: &str) -> Result<Vec<String>, ExecutionError> {
     match args.get(key) {
         None => Ok(Vec::new()),
@@ -69,8 +81,8 @@ fn opt_str_list(args: &Value, key: &str) -> Result<Vec<String>, ExecutionError> 
 }
 
 impl AgentToolRegistry {
-    pub fn tool_specs(options: &AgentOptions, allow_network: bool) -> Vec<ToolSpec> {
-        super::agent_tool_specs::tool_specs(options, allow_network)
+    pub fn tool_specs(options: &AgentOptions, allow_network: bool, has_lsp: bool) -> Vec<ToolSpec> {
+        super::agent_tool_specs::tool_specs(options, allow_network, has_lsp)
     }
 
     pub fn execute<'a>(
@@ -542,6 +554,68 @@ impl AgentToolRegistry {
                         "todos": normalized,
                     })
                     .to_string())
+                }
+                "lsp" => {
+                    ensure_allowed_keys(
+                        &args,
+                        &["operation", "path", "line", "character", "query"],
+                    )?;
+                    let operation = opt_str(&args, "operation")?.ok_or_else(|| {
+                        ExecutionError::Dispatch("lsp tool requires operation".to_string())
+                    })?;
+                    let path = opt_str(&args, "path")?;
+                    let line = opt_u32(&args, "line")?;
+                    let character = opt_u32(&args, "character")?;
+                    let query = opt_str(&args, "query")?;
+                    engine
+                        .agent_tool_lsp(operation, path, line, character, query, context)
+                        .await
+                }
+                "worktree_create" => {
+                    ensure_allowed_keys(&args, &["name", "branch"])?;
+                    if !options.allow_exec {
+                        return Err(ExecutionError::Dispatch(
+                            "worktree_create is disabled; rerun with --allow-exec".to_string(),
+                        ));
+                    }
+                    let name = opt_str(&args, "name")?;
+                    let branch = opt_str(&args, "branch")?;
+                    engine
+                        .agent_tool_worktree_create(name, branch, context)
+                        .await
+                }
+                "worktree_list" => {
+                    ensure_allowed_keys(&args, &[])?;
+                    if !options.allow_exec {
+                        return Err(ExecutionError::Dispatch(
+                            "worktree_list is disabled; rerun with --allow-exec".to_string(),
+                        ));
+                    }
+                    engine.agent_tool_worktree_list(context).await
+                }
+                "worktree_remove" => {
+                    ensure_allowed_keys(&args, &["path"])?;
+                    if !options.allow_exec {
+                        return Err(ExecutionError::Dispatch(
+                            "worktree_remove is disabled; rerun with --allow-exec".to_string(),
+                        ));
+                    }
+                    let path = opt_str(&args, "path")?.ok_or_else(|| {
+                        ExecutionError::Dispatch("worktree_remove requires path".to_string())
+                    })?;
+                    engine.agent_tool_worktree_remove(path, context).await
+                }
+                "worktree_reset" => {
+                    ensure_allowed_keys(&args, &["path"])?;
+                    if !options.allow_exec {
+                        return Err(ExecutionError::Dispatch(
+                            "worktree_reset is disabled; rerun with --allow-exec".to_string(),
+                        ));
+                    }
+                    let path = opt_str(&args, "path")?.ok_or_else(|| {
+                        ExecutionError::Dispatch("worktree_reset requires path".to_string())
+                    })?;
+                    engine.agent_tool_worktree_reset(path, context).await
                 }
                 _ => Err(ExecutionError::Dispatch(format!(
                     "unknown tool call: {name}"
