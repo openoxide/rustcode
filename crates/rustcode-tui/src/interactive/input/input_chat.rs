@@ -2,9 +2,9 @@ use super::{
     build_prompt_history, composer_backspace, composer_clear, composer_delete, composer_insert_str,
     composer_kill_line_backward, composer_kill_line_forward, composer_move_down, composer_move_end,
     composer_move_home, composer_move_left, composer_move_right, composer_move_up,
-    composer_word_left, composer_word_right, execute_command, handle_slash_command,
-    history_next, history_prev, open_command_palette, push_toast, refresh_chat_messages,
-    submit_prompt, AppState, ChatFocus, ChatNav, ChatState, CommandId,
+    composer_word_left, composer_word_right, execute_command, filter_slash_commands,
+    handle_slash_command, history_next, history_prev, open_command_palette, push_toast,
+    refresh_chat_messages, submit_prompt, AppState, ChatFocus, ChatNav, ChatState, CommandId,
     CreateSessionOptions, Duration, KeyCode, KeyEvent, KeyModifiers, Modal, ToastVariant,
 };
 
@@ -15,6 +15,68 @@ pub(super) fn handle_chat_key(
 ) -> ChatNav {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     let alt = key.modifiers.contains(KeyModifiers::ALT);
+
+    // ── SlashHelp popup navigation (Up/Down/Tab/Esc; Enter falls through) ────
+    if matches!(&state.modal, Some(Modal::SlashHelp { .. })) && !ctrl && !alt {
+        match key.code {
+            KeyCode::Up => {
+                if let Some(Modal::SlashHelp { selected, .. }) = &mut state.modal {
+                    *selected = selected.saturating_sub(1);
+                }
+                return ChatNav::Stay;
+            }
+            KeyCode::Down => {
+                if let Some(Modal::SlashHelp { query, selected }) = &mut state.modal {
+                    let count = filter_slash_commands(query).len();
+                    if count > 0 {
+                        *selected = (*selected + 1).min(count - 1);
+                    }
+                }
+                return ChatNav::Stay;
+            }
+            KeyCode::Tab => {
+                complete_slash_selection(state, chat);
+                return ChatNav::Stay;
+            }
+            KeyCode::Esc => {
+                state.modal = None;
+                return ChatNav::Stay;
+            }
+            KeyCode::Enter => {
+                // Determine whether the selected command takes arguments.
+                let has_args = if let Some(Modal::SlashHelp { query, selected }) = &state.modal {
+                    filter_slash_commands(query).get(*selected).map(|(cmd, _)| {
+                        cmd.trim_start_matches('/').contains(' ')
+                    })
+                } else {
+                    None
+                };
+                match has_args {
+                    Some(true) => {
+                        // Command needs arguments (e.g. /find <query>) — complete
+                        // with a trailing space so the user can type the argument,
+                        // but do NOT execute yet.
+                        complete_slash_selection(state, chat);
+                        return ChatNav::Stay;
+                    }
+                    Some(false) => {
+                        // Argument-free command — complete the composer text (e.g.
+                        // "/help") and fall through so normal Enter executes it.
+                        complete_slash_selection(state, chat);
+                        // modal is now None; fall through to normal Enter handling.
+                    }
+                    None => {
+                        // No match or no SlashHelp modal — close popup and fall through.
+                        if matches!(state.modal, Some(Modal::SlashHelp { .. })) {
+                            state.modal = None;
+                        }
+                    }
+                }
+                // fall through to normal Enter
+            }
+            _ => {} // fall through to normal key handling
+        }
+    }
 
     if alt && matches!(key.code, KeyCode::Tab) {
         chat.focus = next_focus(chat.focus, chat.activity_hidden);
@@ -194,6 +256,21 @@ pub(super) fn handle_chat_key(
                     return ChatNav::Stay;
                 }
             }
+            // Ctrl+D: toggle tool call details (expand/collapse tool batches)
+            KeyCode::Char('d' | 'D') => {
+                chat.tool_details = !chat.tool_details;
+                push_toast(
+                    state,
+                    ToastVariant::Info,
+                    if chat.tool_details {
+                        "tools: expanded"
+                    } else {
+                        "tools: collapsed"
+                    },
+                    Duration::from_secs(2),
+                );
+                return ChatNav::Stay;
+            }
             // Ctrl+Left/Right: word jump
             KeyCode::Left => {
                 if chat.focus == ChatFocus::Composer {
@@ -276,12 +353,6 @@ pub(super) fn handle_chat_key(
     // ── Non-character keys and shortcuts ────────────────────────────
     match key.code {
         KeyCode::Char('?') => state.help_open = true,
-        // '>' toggles expanded tool-call details in the transcript.
-        // Only reaches here when focus is not Composer (Composer focus
-        // returns early and inserts the char as text instead).
-        KeyCode::Char('>') => {
-            chat.tool_details = !chat.tool_details;
-        }
         KeyCode::Esc => {
             if chat.focus != ChatFocus::Composer {
                 chat.focus = ChatFocus::Composer;
@@ -369,7 +440,6 @@ pub(super) fn handle_chat_key(
                 return ChatNav::Stay;
             }
 
-
             if chat.running.is_some() {
                 return ChatNav::Stay;
             }
@@ -404,5 +474,39 @@ fn next_focus(focus: ChatFocus, activity_hidden: bool) -> ChatFocus {
             }
         }
         ChatFocus::Activity => ChatFocus::Composer,
+    }
+}
+
+/// Replace the composer content with the currently selected slash command and
+/// close the [`Modal::SlashHelp`] popup.
+///
+/// For commands that take arguments (contain a space in the table entry, e.g.
+/// `/find <query>`), the composer is populated with `/cmd ` (trailing space)
+/// so the user can type the argument immediately.  For argument-free commands
+/// the full command text is inserted.
+fn complete_slash_selection(state: &mut AppState, chat: &mut ChatState) {
+    let completion = if let Some(Modal::SlashHelp { query, selected }) = &state.modal {
+        let filtered = filter_slash_commands(query);
+        filtered.get(*selected).map(|(cmd, _)| {
+            // Strip the leading `/`, split on whitespace to get the bare name.
+            let bare = cmd.trim_start_matches('/');
+            if bare.contains(' ') {
+                // Command takes arguments — insert `/cmd ` with trailing space.
+                let stem = bare.split_whitespace().next().unwrap_or(bare);
+                format!("/{stem} ")
+            } else {
+                format!("/{bare}")
+            }
+        })
+    } else {
+        None
+    };
+
+    if let Some(text) = completion {
+        // Replace composer with the completed command.
+        let byte_len = text.len();
+        chat.composer = text;
+        chat.composer_cursor = byte_len;
+        state.modal = None;
     }
 }

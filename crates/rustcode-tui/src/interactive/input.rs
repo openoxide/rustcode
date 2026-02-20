@@ -10,7 +10,7 @@ use super::{
     sort_sessions, submit_prompt, transcript_area_height, AppState, ApprovalResponse, Arc,
     ChatFocus, ChatNav, ChatState, CommandId, ConnectMethod, CreateSessionOptions, Duration,
     KeyCode, KeyEvent, KeyModifiers, Modal, ProviderManagerStep, ProviderOAuthDone,
-    ProviderOAuthStarted, Screen, ToastVariant,
+    ProviderOAuthStarted, Screen, ToastVariant, SLASH_COMMANDS,
 };
 
 mod input_chat;
@@ -91,8 +91,12 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
     }
 
     if state.modal.is_some() {
-        handle_modal_key(state, key);
-        return false;
+        // SlashHelp is a transparent popup — keys still reach handle_chat_key so
+        // the user can keep typing while the suggestion list is visible.
+        if !matches!(&state.modal, Some(Modal::SlashHelp { .. })) {
+            handle_modal_key(state, key);
+            return false;
+        }
     }
 
     // Global: Ctrl+E shows full error details from any screen/focus
@@ -115,6 +119,7 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
             let nav = handle_chat_key(state, &mut chat, key);
             match nav {
                 ChatNav::Stay => {
+                    sync_slash_help(state, &chat);
                     state.screen = Screen::Chat(chat);
                     false
                 }
@@ -125,6 +130,46 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
                 ChatNav::Exit => true,
             }
         }
+    }
+}
+
+/// Returns the subset of [`SLASH_COMMANDS`] whose command name contains `query`
+/// (case-insensitive prefix/substring match).
+pub(super) fn filter_slash_commands(query: &str) -> Vec<(&'static str, &'static str)> {
+    if query.is_empty() {
+        return SLASH_COMMANDS.to_vec();
+    }
+    let needle = query.to_ascii_lowercase();
+    SLASH_COMMANDS
+        .iter()
+        .filter(|(cmd, _)| {
+            // Match on the part after '/' before any space (the command stem)
+            let stem = cmd.trim_start_matches('/');
+            let stem = stem.split_whitespace().next().unwrap_or(stem);
+            stem.to_ascii_lowercase().contains(&needle)
+        })
+        .copied()
+        .collect()
+}
+
+/// Sync the [`Modal::SlashHelp`] popup with the current composer content.
+///
+/// Called after every key event while in chat screen.  Opens the popup when
+/// the composer starts with `/` on a single line; closes it otherwise.
+fn sync_slash_help(state: &mut AppState, chat: &ChatState) {
+    if chat.composer.starts_with('/') && !chat.composer.contains('\n') {
+        let query = chat.composer.trim_start_matches('/').to_string();
+        match &mut state.modal {
+            Some(Modal::SlashHelp { query: q, .. }) => *q = query,
+            _ => {
+                state.modal = Some(Modal::SlashHelp {
+                    query,
+                    selected: 0,
+                })
+            }
+        }
+    } else if matches!(state.modal, Some(Modal::SlashHelp { .. })) {
+        state.modal = None;
     }
 }
 
@@ -442,6 +487,10 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
         },
         Modal::ErrorDetail { .. } => {
             // Any key dismisses the error detail popup
+        }
+        Modal::SlashHelp { .. } => {
+            // SlashHelp is transparent — handle_chat_key handles all keys.
+            // This arm is unreachable in normal flow (see input.rs handle_key).
         }
         Modal::SkillToggle {
             mut skills,

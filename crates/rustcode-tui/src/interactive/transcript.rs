@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use super::{
-    markdown::render_markdown, push_toast,
+    markdown::render_markdown,
+    push_toast,
     syntax_highlight::{highlight_code_line, HighlightState},
-    AppState, ChatState, Color, Duration, FindState, Line, MessageRole, Modifier, Span,
-    StoredMessage, Style, SystemTime, ToastVariant,
+    ActivityItem, AppState, ChatState, Color, Duration, FindState, Line, MessageRole, Modifier,
+    Span, StoredMessage, Style, SystemTime, ToastVariant,
 };
 
 fn append_message_lines(
@@ -21,70 +22,106 @@ fn append_message_lines(
         return;
     }
 
-    let role = match msg.role {
-        MessageRole::System => "System",
-        MessageRole::User => "You",
-        MessageRole::Assistant => "Assistant",
-        MessageRole::Tool => unreachable!(),
-    };
-
-    let role_style = match msg.role {
-        MessageRole::System => Style::default().add_modifier(Modifier::DIM),
-        MessageRole::User => Style::default()
-            .fg(Color::Cyan)
-            .add_modifier(Modifier::BOLD),
-        MessageRole::Assistant => Style::default()
-            .fg(Color::Magenta)
-            .add_modifier(Modifier::BOLD),
-        MessageRole::Tool => unreachable!(),
-    };
-
-    lines.push(Line::from(vec![Span::styled(role, role_style)]));
-
-    {
-        // Use markdown rendering for user/assistant/system messages
-        match msg.content.as_str() {
-            Some(text) if !text.is_empty() => {
-                let rendered = render_markdown(text);
-                let truncated = if rendered.len() > 400 {
-                    let mut t = rendered[..400].to_vec();
-                    t.push(Line::raw("...[truncated]..."));
-                    t
-                } else {
-                    rendered
-                };
-                lines.extend(truncated);
-            }
-            _ => {
-                append_value_lines(lines, &msg.content, "", 200);
-            }
-        }
-        if !msg.tool_calls.is_empty() {
-            if tool_details {
-                lines.push(Line::raw(""));
-                // Expanded: show each ▶ tool_name with key arg and optional JSON
-                for call in &msg.tool_calls {
-                    let key_arg = extract_key_arg(&call.name, &call.arguments);
-                    let label = if key_arg.is_empty() {
-                        format!("▶ {}", call.name)
+    // Role-specific content rendering — no role label shown.
+    match msg.role {
+        MessageRole::User => {
+            let bg = Style::default().bg(Color::Rgb(25, 45, 80));
+            match msg.content.as_str() {
+                Some(text) if !text.is_empty() => {
+                    let rendered = render_markdown(text);
+                    let mut truncated = if rendered.len() > 400 {
+                        let mut t = rendered[..400].to_vec();
+                        t.push(Line::raw("...[truncated]..."));
+                        t
                     } else {
-                        format!("▶ {}  {}", call.name, key_arg)
+                        rendered
                     };
-                    lines.push(Line::from(vec![Span::styled(
-                        label,
-                        Style::default()
-                            .fg(Color::Cyan)
-                            .add_modifier(Modifier::BOLD),
-                    )]));
-                    let pretty = serde_json::from_str::<serde_json::Value>(&call.arguments)
-                        .ok()
-                        .and_then(|value| serde_json::to_string_pretty(&value).ok())
-                        .unwrap_or_else(|| call.arguments.clone());
-                    append_value_lines(lines, &serde_json::Value::String(pretty), "  ", 32);
+                    // Prefix the first non-empty rendered line with ▶  (distinct from ◆).
+                    if !truncated.is_empty() {
+                        let idx = truncated.iter().position(|l| l.width() > 0).unwrap_or(0);
+                        if idx < truncated.len() {
+                            let mut spans = vec![Span::styled(
+                                "▶  ",
+                                Style::default().fg(Color::Rgb(120, 200, 200)),
+                            )];
+                            spans.extend(truncated[idx].spans.iter().cloned());
+                            truncated[idx] = Line::from(spans);
+                        }
+                    }
+                    lines.extend(truncated.into_iter().map(|l| l.style(bg)));
+                }
+                _ => {
+                    append_value_lines(lines, &msg.content, "", 200);
                 }
             }
-            // Collapsed: nothing shown — the ✓/✗ result follows.
         }
+        MessageRole::Assistant => {
+            match msg.content.as_str() {
+                Some(text) if !text.is_empty() => {
+                    let rendered = render_markdown(text);
+                    let mut truncated = if rendered.len() > 400 {
+                        let mut t = rendered[..400].to_vec();
+                        t.push(Line::raw("...[truncated]..."));
+                        t
+                    } else {
+                        rendered
+                    };
+                    // Prefix the first non-empty rendered line with ◆
+                    if !truncated.is_empty() {
+                        let idx = truncated.iter().position(|l| l.width() > 0).unwrap_or(0);
+                        if idx < truncated.len() {
+                            let mut spans =
+                                vec![Span::styled("◆  ", Style::default().fg(Color::Cyan))];
+                            spans.extend(truncated[idx].spans.iter().cloned());
+                            truncated[idx] = Line::from(spans);
+                        }
+                    }
+                    lines.extend(truncated);
+                }
+                _ => {
+                    append_value_lines(lines, &msg.content, "", 200);
+                }
+            }
+        }
+        MessageRole::System => {
+            // System messages are skipped in build_transcript_lines, but handle gracefully.
+            match msg.content.as_str() {
+                Some(text) if !text.is_empty() => {
+                    lines.extend(render_markdown(text));
+                }
+                _ => {
+                    append_value_lines(lines, &msg.content, "", 200);
+                }
+            }
+        }
+        MessageRole::Tool => unreachable!(),
+    }
+
+    if !msg.tool_calls.is_empty() {
+        if tool_details {
+            lines.push(Line::raw(""));
+            // Expanded: show each ▶ tool_name with key arg and optional JSON
+            for call in &msg.tool_calls {
+                let key_arg = extract_key_arg(&call.name, &call.arguments);
+                let label = if key_arg.is_empty() {
+                    format!("▶ {}", call.name)
+                } else {
+                    format!("▶ {}  {}", call.name, key_arg)
+                };
+                lines.push(Line::from(vec![Span::styled(
+                    label,
+                    Style::default()
+                        .fg(Color::Cyan)
+                        .add_modifier(Modifier::BOLD),
+                )]));
+                let pretty = serde_json::from_str::<serde_json::Value>(&call.arguments)
+                    .ok()
+                    .and_then(|value| serde_json::to_string_pretty(&value).ok())
+                    .unwrap_or_else(|| call.arguments.clone());
+                append_value_lines(lines, &serde_json::Value::String(pretty), "  ", 32);
+            }
+        }
+        // Collapsed: nothing shown — the ✓/✗ result follows.
     }
 
     // Only add a trailing blank spacer if there was visible text content.
@@ -290,10 +327,7 @@ fn render_tool_output(lines: &mut Vec<Line<'static>>, output: &str, expanded: bo
                 if is_diff_line {
                     let mut line_spans = vec![
                         Span::styled("  │ ", Style::default().fg(pipe_color)),
-                        Span::styled(
-                            gutter,
-                            Style::default().fg(pipe_color),
-                        ),
+                        Span::styled(gutter, Style::default().fg(pipe_color)),
                         Span::styled(sign.to_string(), Style::default().fg(pipe_color)),
                     ];
                     if let Some(ref mut state) = hl {
@@ -301,16 +335,10 @@ fn render_tool_output(lines: &mut Vec<Line<'static>>, output: &str, expanded: bo
                         if !hl_spans.is_empty() {
                             line_spans.extend(hl_spans);
                         } else {
-                            line_spans.push(Span::styled(
-                                code_text.to_string(),
-                                content_style,
-                            ));
+                            line_spans.push(Span::styled(code_text.to_string(), content_style));
                         }
                     } else {
-                        line_spans.push(Span::styled(
-                            code_text.to_string(),
-                            content_style,
-                        ));
+                        line_spans.push(Span::styled(code_text.to_string(), content_style));
                     }
                     let bg = if raw.starts_with('+') {
                         Style::default().bg(Color::Rgb(3, 40, 0))
@@ -338,7 +366,7 @@ fn render_tool_output(lines: &mut Vec<Line<'static>>, output: &str, expanded: bo
         // Apply tilde_path to shorten absolute paths in output.
         let output_lines: Vec<String> = output
             .lines()
-            .map(|l| tilde_path_in_line(l))
+            .map(|l| sanitize_output_line(&tilde_path_in_line(l)))
             .collect();
         let total = output_lines.len();
         let text_style = if !ok {
@@ -357,41 +385,35 @@ fn render_tool_output(lines: &mut Vec<Line<'static>>, output: &str, expanded: bo
                     )));
                     break;
                 }
-                lines.push(Line::from(Span::styled(
-                    format!("  {line}"),
-                    text_style,
-                )));
+                lines.push(Line::from(Span::styled(format!("  {line}"), text_style)));
             }
         } else if total > 6 {
             // Collapsed, long output: show first 3 + last 3 with a hint.
             for line in output_lines.iter().take(3) {
-                lines.push(Line::from(Span::styled(
-                    format!("  {line}"),
-                    text_style,
-                )));
+                lines.push(Line::from(Span::styled(format!("  {line}"), text_style)));
             }
             lines.push(Line::from(Span::styled(
-                format!("  ··· ({} more lines — press > to expand)", total - 6),
+                format!("  ··· ({} more lines — Ctrl+D to expand)", total - 6),
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::DIM),
             )));
             for line in output_lines.iter().skip(total - 3) {
-                lines.push(Line::from(Span::styled(
-                    format!("  {line}"),
-                    text_style,
-                )));
+                lines.push(Line::from(Span::styled(format!("  {line}"), text_style)));
             }
         } else if total > 0 {
             // Short output: show all lines.
             for line in &output_lines {
-                lines.push(Line::from(Span::styled(
-                    format!("  {line}"),
-                    text_style,
-                )));
+                lines.push(Line::from(Span::styled(format!("  {line}"), text_style)));
             }
         }
         // else: empty output — the ✓/✗ header is enough.
+        if total > 0 {
+            lines.push(Line::from(Span::styled(
+                "  └─",
+                Style::default().fg(Color::DarkGray),
+            )));
+        }
     }
 }
 
@@ -550,6 +572,222 @@ pub(super) fn compute_find_matches(lines: &[Line<'static>], query: &str) -> Vec<
     out
 }
 
+/// Extract the human-readable `output` field from a raw tool-result JSON payload.
+///
+/// The engine emits `{"ok":bool,"output":"...","truncated":bool}` as the raw
+/// content of `ActivityItem::ToolResult`.  This helper unwraps the `output`
+/// string so the live feed shows plain text rather than raw JSON.
+fn extract_tool_output_text(raw: &str) -> String {
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) {
+        if let Some(s) = v.get("output").and_then(|o| o.as_str()) {
+            return s.to_string();
+        }
+    }
+    raw.to_string()
+}
+
+/// Format a `Duration` as a human-readable string like `"30s"`, `"1m 12s"`, `"7m 27s"`.
+fn format_elapsed(d: std::time::Duration) -> String {
+    let secs = d.as_secs();
+    let mins = secs / 60;
+    let rem = secs % 60;
+    if mins == 0 {
+        format!("{secs}s")
+    } else if rem == 0 {
+        format!("{mins}m")
+    } else {
+        format!("{mins}m {rem}s")
+    }
+}
+
+/// Emit one combined tool-call summary line for the entire transcript.
+///
+/// - **Expanded** (`tool_details = true`): renders each message individually.
+/// - **Collapsed** (`tool_details = false`): one `▶ N tool calls (Ctrl+D to expand)` line
+///   in normal (non-dim) colour.  Only called once per transcript — at the
+///   position of the *last* batch of `Tool` messages so it appears just before
+///   the final assistant response.
+fn emit_combined_tool_summary(
+    lines: &mut Vec<Line<'static>>,
+    pending: &[&StoredMessage],
+    total_tools: usize,
+    total_failures: usize,
+    tool_details: bool,
+    tool_args_map: &HashMap<String, String>,
+) {
+    if pending.is_empty() {
+        return;
+    }
+    if tool_details {
+        for msg in pending {
+            append_tool_message_lines(lines, msg, true, tool_args_map);
+        }
+    } else {
+        let fail_part = if total_failures > 0 {
+            format!("  {} \u{2717}", total_failures)
+        } else {
+            String::new()
+        };
+        lines.push(Line::from(Span::styled(
+            format!(
+                "  \u{25b6} {} tool call{}{}  (Ctrl+D to expand)",
+                total_tools,
+                if total_tools == 1 { "" } else { "s" },
+                fail_part
+            ),
+            Style::default().fg(Color::Rgb(160, 165, 180)),
+        )));
+        lines.push(Line::raw(""));
+    }
+}
+
+/// Render a compact live feed of tool calls while a run is in progress.
+///
+/// Style matches the screenshot: `● Name(args)` header, `└  first line` output,
+/// `   subsequent lines`, and `… +N lines (> to expand)` collapse hint.
+/// Disappears when the run ends and messages reload.
+fn render_live_activity_lines(lines: &mut Vec<Line<'static>>, activity: &[ActivityItem], ms: u128) {
+    // Braille spinner: ⠋⠙⠸⠴⠦⠇ (6 frames × 100 ms)
+    const SPIN: &[char] = &['⠋', '⠙', '⠸', '⠴', '⠦', '⠇'];
+    let spin_frame = SPIN[(ms / 100 % 6) as usize];
+
+    // Build map: tool_call_id -> (ok, output_text)
+    let mut results: HashMap<&str, (bool, &str)> = HashMap::new();
+    for item in activity {
+        if let ActivityItem::ToolResult { id, ok, output, .. } = item {
+            results.insert(id.as_str(), (*ok, output.as_str()));
+        }
+    }
+
+    // Collect the last 8 displayable items (ToolCall / Warning / Failure).
+    let displayable: Vec<&ActivityItem> = activity
+        .iter()
+        .filter(|item| {
+            matches!(
+                item,
+                ActivityItem::ToolCall { .. }
+                    | ActivityItem::Warning { .. }
+                    | ActivityItem::Failure { .. }
+            )
+        })
+        .collect();
+    let show_from = displayable.len().saturating_sub(8);
+    let show = &displayable[show_from..];
+
+    // Shared dim-grey style for output lines.
+    let out_style = Style::default()
+        .fg(Color::Rgb(100, 105, 120))
+        .add_modifier(Modifier::DIM);
+
+    for item in show {
+        match item {
+            ActivityItem::ToolCall {
+                id,
+                name,
+                arguments,
+            } => {
+                let result = results.get(id.as_str());
+                let is_pending = result.is_none();
+                let is_ok = result.is_some_and(|(ok, _)| *ok);
+
+                // Capitalize first letter of tool name: bash → Bash
+                let name_cap: String = {
+                    let mut c = name.chars();
+                    match c.next() {
+                        None => String::new(),
+                        Some(f) => f.to_uppercase().to_string() + c.as_str(),
+                    }
+                };
+
+                // Header: `● Name(key_arg)` or just `● Name`
+                let key_arg = extract_key_arg(name, arguments);
+                let header_text = if key_arg.is_empty() {
+                    name_cap
+                } else {
+                    format!("{name_cap}({key_arg})")
+                };
+
+                let (bullet, bullet_style) = if is_pending {
+                    (
+                        format!("{spin_frame} "),
+                        Style::default().fg(Color::Rgb(90, 95, 115)),
+                    )
+                } else if is_ok {
+                    (
+                        "● ".to_string(),
+                        Style::default().fg(Color::Rgb(60, 190, 80)),
+                    )
+                } else {
+                    (
+                        "● ".to_string(),
+                        Style::default().fg(Color::Rgb(200, 70, 70)),
+                    )
+                };
+                let header_style = if is_pending {
+                    Style::default().fg(Color::Rgb(120, 125, 145))
+                } else {
+                    Style::default()
+                        .fg(Color::Rgb(160, 165, 180))
+                        .add_modifier(Modifier::DIM)
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(bullet, bullet_style),
+                    Span::styled(header_text, header_style),
+                ]));
+
+                // Output preview for completed tool calls.
+                if let Some((_, output)) = result {
+                    let decoded = extract_tool_output_text(output);
+                    let output_lines: Vec<String> = decoded
+                        .lines()
+                        .filter(|l| !l.trim().is_empty())
+                        .map(|l| sanitize_output_line(&tilde_path_in_line(l)))
+                        .collect();
+                    let total = output_lines.len();
+                    const PREVIEW: usize = 3;
+
+                    for (i, line) in output_lines.iter().take(PREVIEW).enumerate() {
+                        let capped: String = line.chars().take(90).collect();
+                        // First line gets └ connector; subsequent lines align with it.
+                        let prefix = if i == 0 { "└  " } else { "   " };
+                        lines.push(Line::from(Span::styled(
+                            format!("{prefix}{capped}"),
+                            out_style,
+                        )));
+                    }
+                    if total > PREVIEW {
+                        lines.push(Line::from(Span::styled(
+                            format!("… +{} lines (Ctrl+D to expand)", total - PREVIEW),
+                            Style::default()
+                                .fg(Color::Rgb(80, 85, 100))
+                                .add_modifier(Modifier::DIM),
+                        )));
+                    }
+                }
+            }
+            ActivityItem::Warning { message } => {
+                let capped: String = message.chars().take(70).collect();
+                lines.push(Line::from(Span::styled(
+                    format!("⚠ {capped}"),
+                    Style::default()
+                        .fg(Color::Rgb(180, 150, 60))
+                        .add_modifier(Modifier::DIM),
+                )));
+            }
+            ActivityItem::Failure { message } => {
+                let capped: String = message.chars().take(70).collect();
+                lines.push(Line::from(Span::styled(
+                    format!("✗ {capped}"),
+                    Style::default()
+                        .fg(Color::Rgb(190, 70, 70))
+                        .add_modifier(Modifier::DIM),
+                )));
+            }
+            _ => {}
+        }
+    }
+}
+
 pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
     // Build tool_call_id → arguments map from Assistant messages so tool results
     // can display context (e.g., the command for bash, the pattern for glob).
@@ -563,69 +801,191 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
     }
 
     let mut lines = Vec::new();
-    for msg in &chat.messages {
-        // Skip system messages — internal instructions are never shown to users
+
+    // Pre-compute global tool totals so collapsed mode can show ONE combined
+    // summary line (instead of one-per-batch) at the last batch position.
+    let total_tools: usize = chat
+        .messages
+        .iter()
+        .filter(|m| m.role == MessageRole::Tool)
+        .count();
+    let total_tool_failures: usize = chat
+        .messages
+        .iter()
+        .filter(|m| {
+            m.role == MessageRole::Tool
+                && parse_tool_payload(m.content.as_str().unwrap_or(""))
+                    .is_some_and(|(ok, _, _)| !ok)
+        })
+        .count();
+    // Index of the last Tool message so we know which batch is the last one.
+    let last_tool_idx = chat
+        .messages
+        .iter()
+        .rposition(|m| m.role == MessageRole::Tool);
+
+    let mut pending_tools: Vec<&StoredMessage> = Vec::new();
+    let mut pending_includes_last = false;
+    let mut collapsed_summary_shown = false;
+
+    for (msg_idx, msg) in chat.messages.iter().enumerate() {
         if msg.role == MessageRole::System {
             continue;
         }
+        if msg.role == MessageRole::Tool {
+            pending_tools.push(msg);
+            if Some(msg_idx) == last_tool_idx {
+                pending_includes_last = true;
+            }
+            continue;
+        }
+        // Non-tool message: flush any pending tool batch.
+        if !pending_tools.is_empty() {
+            if chat.tool_details {
+                // Expanded: render each tool message individually.
+                for m in &pending_tools {
+                    append_tool_message_lines(&mut lines, m, true, &tool_args_map);
+                }
+            } else if pending_includes_last && !collapsed_summary_shown {
+                // Collapsed: this is the last batch — show ONE combined summary.
+                emit_combined_tool_summary(
+                    &mut lines,
+                    &pending_tools,
+                    total_tools,
+                    total_tool_failures,
+                    false,
+                    &tool_args_map,
+                );
+                collapsed_summary_shown = true;
+            }
+            // Earlier batches in collapsed mode are silently dropped (combined).
+            pending_tools.clear();
+            pending_includes_last = false;
+        }
         append_message_lines(&mut lines, msg, chat.tool_details, &tool_args_map);
+    }
+    // Handle trailing Tool messages (conversation ending with a tool result).
+    if !pending_tools.is_empty() {
+        if chat.tool_details {
+            for m in &pending_tools {
+                append_tool_message_lines(&mut lines, m, true, &tool_args_map);
+            }
+        } else if !collapsed_summary_shown && total_tools > 0 {
+            emit_combined_tool_summary(
+                &mut lines,
+                &pending_tools,
+                total_tools,
+                total_tool_failures,
+                false,
+                &tool_args_map,
+            );
+        }
     }
     // Show the in-flight user prompt immediately (before backend confirms it)
     if let Some(pending) = &chat.pending_prompt {
         if !pending.trim().is_empty() {
-            lines.push(Line::from(vec![Span::styled(
-                "You",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )]));
-            let rendered = render_markdown(pending.as_str());
-            lines.extend(rendered);
+            let bg = Style::default().bg(Color::Rgb(25, 45, 80));
+            let mut rendered = render_markdown(pending.as_str());
+            if !rendered.is_empty() {
+                let idx = rendered.iter().position(|l| l.width() > 0).unwrap_or(0);
+                if idx < rendered.len() {
+                    let mut spans = vec![Span::styled(
+                        "▶  ",
+                        Style::default().fg(Color::Rgb(120, 200, 200)),
+                    )];
+                    spans.extend(rendered[idx].spans.iter().cloned());
+                    rendered[idx] = Line::from(spans);
+                }
+            }
+            lines.extend(rendered.into_iter().map(|l| l.style(bg)));
             lines.push(Line::raw(""));
         }
     }
+    let ms = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_else(|_| Duration::from_secs(0))
+        .as_millis();
+
     if !chat.live_assistant.trim().is_empty() {
-        lines.push(Line::from(vec![Span::styled(
-            "Assistant (streaming)",
-            Style::default()
-                .fg(Color::Magenta)
-                .add_modifier(Modifier::BOLD),
-        )]));
         let rendered = render_markdown(chat.live_assistant.as_str());
-        let truncated = if rendered.len() > 400 {
+        let mut truncated = if rendered.len() > 400 {
             let mut t = rendered[..400].to_vec();
             t.push(Line::raw("...[streaming truncated]..."));
             t
         } else {
             rendered
         };
+        // Prefix the first non-empty line with ◆
+        if !truncated.is_empty() {
+            let idx = truncated.iter().position(|l| l.width() > 0).unwrap_or(0);
+            if idx < truncated.len() {
+                let mut spans = vec![Span::styled("◆  ", Style::default().fg(Color::Cyan))];
+                spans.extend(truncated[idx].spans.iter().cloned());
+                truncated[idx] = Line::from(spans);
+            }
+        }
         lines.extend(truncated);
         lines.push(Line::raw(""));
-    } else if chat.running.is_some() {
-        // No streaming text yet — show animated thinking indicator.
-        // Quarter-circle spinner: ◐◓◑◒ (4 frames × 150 ms each)
-        let ms = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_else(|_| Duration::from_secs(0))
-            .as_millis();
-        const FRAMES: &[char] = &['◐', '◓', '◑', '◒'];
-        let frame = FRAMES[(ms / 150 % 4) as usize];
-        lines.push(Line::from(vec![
-            Span::styled(
-                "Assistant",
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::raw("  "),
-            Span::styled(
-                format!("{frame} thinking\u{2026}"),
-                Style::default()
-                    .fg(Color::Magenta)
-                    .add_modifier(Modifier::DIM),
-            ),
-        ]));
     }
+
+    if chat.running.is_some() {
+        // Show live tool call feed in the transcript while a run is active.
+        // Only ToolCall/Warning/Failure items are displayed; ToolResult info is
+        // folded back onto the ToolCall line (✓/✗ indicator).
+        let has_tool_calls = chat
+            .activity
+            .iter()
+            .any(|item| matches!(item, ActivityItem::ToolCall { .. }));
+
+        if has_tool_calls {
+            render_live_activity_lines(&mut lines, &chat.activity, ms);
+            // Elapsed as a very dim sub-line after the tool feed.
+            if let Some(started) = chat.run_started_at {
+                lines.push(Line::from(Span::styled(
+                    format!("   {}", format_elapsed(started.elapsed())),
+                    Style::default()
+                        .fg(Color::Rgb(50, 55, 65))
+                        .add_modifier(Modifier::DIM),
+                )));
+            }
+        } else if chat.live_assistant.trim().is_empty() {
+            // Nothing streaming and no tool calls yet — show spinner with inline elapsed.
+            const FRAMES: &[char] = &['◐', '◓', '◑', '◒'];
+            let frame = FRAMES[(ms / 150 % 4) as usize];
+            let mut thinking_spans = vec![
+                Span::styled("◆  ", Style::default().fg(Color::Cyan)),
+                Span::styled(
+                    format!("{frame} thinking\u{2026}"),
+                    Style::default()
+                        .fg(Color::Magenta)
+                        .add_modifier(Modifier::DIM),
+                ),
+            ];
+            if let Some(started) = chat.run_started_at {
+                thinking_spans.push(Span::styled(
+                    format!("  {}", format_elapsed(started.elapsed())),
+                    Style::default()
+                        .fg(Color::Rgb(55, 60, 75))
+                        .add_modifier(Modifier::DIM),
+                ));
+            }
+            lines.push(Line::from(thinking_spans));
+        }
+    }
+
+    // Show "* done in Xs" summary after the run completes.
+    if let Some(elapsed) = chat.last_run_elapsed {
+        lines.push(Line::from(Span::styled(
+            format!("* done in {}", format_elapsed(elapsed)),
+            Style::default()
+                .fg(Color::Rgb(90, 95, 110))
+                .add_modifier(Modifier::DIM),
+        )));
+        lines.push(Line::raw(""));
+    }
+
+    lines.push(Line::raw(""));
+    lines.push(Line::raw(""));
     lines
 }
 
@@ -850,6 +1210,36 @@ fn tilde_path_in_line(line: &str) -> String {
         }
     }
     line.to_string()
+}
+
+/// Strip ANSI escape sequences and ASCII control characters from a line of tool
+/// output before rendering it in the TUI.
+///
+/// Binary file content (e.g. from grep on `.rmeta`/`.rlib` files) can contain
+/// escape sequences that corrupt terminal rendering when passed through raw.
+fn sanitize_output_line(line: &str) -> String {
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c == '\x1b' {
+            // ESC — skip the entire ANSI escape sequence (ESC [ ... alpha).
+            if chars.peek() == Some(&'[') {
+                chars.next();
+                for nc in chars.by_ref() {
+                    if nc.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        // Drop other ASCII control characters except horizontal tab.
+        if c.is_control() && c != '\t' {
+            continue;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Append contextual spans to the tool result header based on tool type and args.

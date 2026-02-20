@@ -48,7 +48,7 @@ pub(super) fn build_command_items(
     items.push(CommandItem {
         id: CommandId::Help,
         title: "Help".to_string(),
-        detail: "Show keybinds and tips".to_string(),
+        detail: "Show keybindings and tips  ?".to_string(),
         enabled: true,
         disabled_reason: None,
     });
@@ -56,7 +56,7 @@ pub(super) fn build_command_items(
     items.push(CommandItem {
         id: CommandId::Sessions,
         title: "Sessions".to_string(),
-        detail: "Go to session picker".to_string(),
+        detail: "Go to session picker  Ctrl+Q".to_string(),
         enabled: true,
         disabled_reason: None,
     });
@@ -64,7 +64,7 @@ pub(super) fn build_command_items(
     items.push(CommandItem {
         id: CommandId::NewSession,
         title: "New session".to_string(),
-        detail: "Create a new session".to_string(),
+        detail: "Create a new session  Ctrl+N".to_string(),
         enabled: !chat_running,
         disabled_reason: chat_running.then_some("Cannot create session while running".to_string()),
     });
@@ -72,7 +72,7 @@ pub(super) fn build_command_items(
     items.push(CommandItem {
         id: CommandId::ForkSession,
         title: "Fork session".to_string(),
-        detail: "Fork current session".to_string(),
+        detail: "Fork current session  Ctrl+F".to_string(),
         enabled: in_chat && !chat_running && can_fork,
         disabled_reason: if !in_chat {
             Some("Open a session first".to_string())
@@ -88,7 +88,7 @@ pub(super) fn build_command_items(
     items.push(CommandItem {
         id: CommandId::RenameSession,
         title: "Rename session".to_string(),
-        detail: "Edit the session title".to_string(),
+        detail: "Edit the session title  /rename <title>".to_string(),
         enabled: can_rename_delete,
         disabled_reason: (!can_rename_delete).then_some("Not supported in attach mode".to_string()),
     });
@@ -96,7 +96,7 @@ pub(super) fn build_command_items(
     items.push(CommandItem {
         id: CommandId::DeleteSession,
         title: "Delete session".to_string(),
-        detail: "Delete selected session".to_string(),
+        detail: "Delete selected session  /delete".to_string(),
         enabled: can_rename_delete,
         disabled_reason: (!can_rename_delete).then_some("Not supported in attach mode".to_string()),
     });
@@ -104,7 +104,7 @@ pub(super) fn build_command_items(
     items.push(CommandItem {
         id: CommandId::Refresh,
         title: "Refresh".to_string(),
-        detail: "Reload sessions or transcript".to_string(),
+        detail: "Reload sessions or transcript  Ctrl+R".to_string(),
         enabled: true,
         disabled_reason: None,
     });
@@ -112,7 +112,7 @@ pub(super) fn build_command_items(
     items.push(CommandItem {
         id: CommandId::ToggleTools,
         title: "Toggle tools".to_string(),
-        detail: "Toggle tool transcript details".to_string(),
+        detail: "Expand/collapse tool call details (Ctrl+D)".to_string(),
         enabled: in_chat,
         disabled_reason: (!in_chat).then_some("Open a session first".to_string()),
     });
@@ -120,7 +120,7 @@ pub(super) fn build_command_items(
     items.push(CommandItem {
         id: CommandId::Search,
         title: "Search transcript".to_string(),
-        detail: "Find in transcript".to_string(),
+        detail: "Find in transcript  /find <query>".to_string(),
         enabled: in_chat,
         disabled_reason: (!in_chat).then_some("Open a session first".to_string()),
     });
@@ -144,7 +144,7 @@ pub(super) fn build_command_items(
     items.push(CommandItem {
         id: CommandId::CancelRun,
         title: "Cancel run".to_string(),
-        detail: "Cancel the running command".to_string(),
+        detail: "Cancel the running command  Ctrl+C".to_string(),
         enabled: in_chat && chat_running,
         disabled_reason: if !in_chat {
             Some("Open a session first".to_string())
@@ -190,11 +190,12 @@ pub(super) fn build_command_items(
     items.push(CommandItem {
         id: CommandId::Quit,
         title: "Quit".to_string(),
-        detail: "Exit the app".to_string(),
+        detail: "Exit the app  Ctrl+C twice".to_string(),
         enabled: true,
         disabled_reason: None,
     });
 
+    items.sort_by(|a, b| a.title.cmp(&b.title));
     items
 }
 
@@ -333,6 +334,9 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
                         last_total_tokens: 0,
                         context_limit: 0,
                         cost_usd: 0.0,
+                        last_max_scroll: std::cell::Cell::new(0),
+                        run_started_at: None,
+                        last_run_elapsed: None,
                     });
                     push_toast(
                         state,

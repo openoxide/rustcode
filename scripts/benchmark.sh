@@ -4,7 +4,7 @@ set -euo pipefail
 usage() {
   cat <<USAGE
 Usage:
-  scripts/benchmark.sh startup [runs]
+  scripts/benchmark.sh startup [runs] [warmup]
   scripts/benchmark.sh memory [prompt]
   scripts/benchmark.sh drift [seconds] [interval]
   scripts/benchmark.sh serve [seconds] [interval]
@@ -26,12 +26,13 @@ cargo build -q -p rustcode
 
 bin="./target/debug/rustcode"
 
-run_time() {
-  if /usr/bin/time -p "$@" >/dev/null 2>&1; then
-    /usr/bin/time -p "$@" >/dev/null
-  else
-    time "$@" >/dev/null
-  fi
+run_time_ms() {
+  local start_ns end_ns elapsed_ms
+  start_ns=$(date +%s%N)
+  "$@" >/dev/null 2>&1
+  end_ns=$(date +%s%N)
+  elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
+  echo "real ${elapsed_ms}ms"
 }
 
 run_memory() {
@@ -39,21 +40,40 @@ run_memory() {
     /usr/bin/time -l "$@" >/dev/null
   elif /usr/bin/time -v "$@" >/dev/null 2>&1; then
     /usr/bin/time -v "$@" >/dev/null
-  elif /usr/bin/time -p "$@" >/dev/null 2>&1; then
-    /usr/bin/time -p "$@" >/dev/null
   else
-    time "$@" >/dev/null
+    /usr/bin/time -p "$@" >/dev/null
   fi
 }
 
 case "$mode" in
   startup)
     runs="${1:-5}"
-    echo "Benchmark: startup ($runs runs)"
+    warmup="${2:-1}"
+    echo "Benchmark: startup ($runs runs, $warmup warmup)"
+    
+    for w in $(seq 1 "$warmup"); do
+      "$bin" --json version >/dev/null 2>&1
+    done
+    echo "warmup complete"
+    
+    latencies_ms=()
     for i in $(seq 1 "$runs"); do
       echo "run=$i"
-      run_time "$bin" --json version
+      start_ns=$(date +%s%N)
+      "$bin" --json version >/dev/null 2>&1
+      end_ns=$(date +%s%N)
+      elapsed_ms=$(( (end_ns - start_ns) / 1000000 ))
+      echo "real ${elapsed_ms}ms"
+      latencies_ms+=("$elapsed_ms")
     done
+    if [[ ${#latencies_ms[@]} -gt 0 ]]; then
+      avg_ms=$(printf '%s\n' "${latencies_ms[@]}" | awk '{sum+=$1} END {printf "%.0f", sum/NR}')
+      min_ms=$(printf '%s\n' "${latencies_ms[@]}" | sort -n | head -n1)
+      max_ms=$(printf '%s\n' "${latencies_ms[@]}" | sort -n | tail -n1)
+      echo "startup_avg_ms=$avg_ms"
+      echo "startup_min_ms=$min_ms"
+      echo "startup_max_ms=$max_ms"
+    fi
     ;;
   memory)
     prompt="${1:-memory benchmark prompt}"

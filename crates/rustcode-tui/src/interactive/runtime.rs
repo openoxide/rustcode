@@ -1,14 +1,12 @@
 use super::{
-    build_prompt_history, composer_insert_str, compute_sessions_view,
-    disable_raw_mode, drain_toasts, enable_raw_mode, event, execute, handle_key, io, push_toast,
-    render, sort_sessions, ActivityItem, AgentOptions, AppState, Arc, CEvent,
-    CancellationToken, ChatFocus, ChatState, Command, CommandContext, CrosstermBackend,
-    Duration, EnterAlternateScreen,
+    build_prompt_history, composer_insert_str, compute_sessions_view, disable_raw_mode,
+    drain_toasts, enable_raw_mode, event, execute, handle_key, io, push_toast, render,
+    sort_sessions, ActivityItem, AgentOptions, AppState, Arc, CEvent, CancellationToken, ChatFocus,
+    ChatState, Command, CommandContext, CrosstermBackend, Duration, EnterAlternateScreen,
     EventPayload, EventPublisher, ExecutableCommand, InteractiveMsg, InteractiveServices,
-    InteractiveStart, InteractiveSubmitMode, KeyEventKind, LeaveAlternateScreen,
-    MessageRole, Modal, PendingApproval, ProviderManagerStep,
-    RunningCommand, Screen, SessionMeta, SystemTime, Terminal, ToastVariant, TuiError,
-    TuiPublisher,
+    InteractiveStart, InteractiveSubmitMode, KeyEventKind, LeaveAlternateScreen, MessageRole,
+    Modal, MouseEventKind, PendingApproval, ProviderManagerStep, RunningCommand, Screen,
+    SessionMeta, SystemTime, Terminal, ToastVariant, TuiError, TuiPublisher,
 };
 use rustcode_core::event::EventScope;
 
@@ -104,6 +102,9 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                 last_total_tokens: 0,
                 context_limit: 0,
                 cost_usd: 0.0,
+                last_max_scroll: std::cell::Cell::new(0),
+                run_started_at: None,
+                last_run_elapsed: None,
             });
             if should_submit {
                 auto_submit = prompt;
@@ -139,7 +140,9 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,
         llm_cell,
+        git_stat: None,
     };
+    refresh_git_stat(&mut state);
 
     if let Some(prompt) = auto_submit {
         if !prompt.trim().is_empty() {
@@ -147,7 +150,17 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
         }
     }
 
+    let mut last_screen_is_chat = matches!(state.screen, Screen::Chat(_));
+
     loop {
+        // Clear terminal when transitioning between Sessions and Chat screens
+        // to prevent ghost cells from the previous layout.
+        let screen_is_chat = matches!(state.screen, Screen::Chat(_));
+        if screen_is_chat != last_screen_is_chat {
+            let _ = terminal.clear();
+        }
+        last_screen_is_chat = screen_is_chat;
+
         if let Ok(size) = terminal.size() {
             state.last_area = size;
         }
@@ -168,6 +181,43 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                     }
                 }
                 CEvent::Paste(text) => handle_paste(&mut state, &text),
+                CEvent::Mouse(mouse) => {
+                    if let Screen::Chat(mut chat) =
+                        std::mem::replace(&mut state.screen, Screen::Sessions)
+                    {
+                        match mouse.kind {
+                            MouseEventKind::ScrollUp => {
+                                chat.scroll = chat.scroll.saturating_add(3);
+                            }
+                            MouseEventKind::ScrollDown => {
+                                // Clamp to last known max_scroll before subtracting so
+                                // that over-scrolling up doesn't require many ticks to
+                                // "drain" before visual movement resumes.
+                                let max = chat.last_max_scroll.get();
+                                let clamped = if max > 0 {
+                                    chat.scroll.min(max)
+                                } else {
+                                    chat.scroll
+                                };
+                                chat.scroll = clamped.saturating_sub(3);
+                            }
+                            MouseEventKind::Down(_) => {
+                                // Click in the activity panel (right 28%) → switch focus there;
+                                // click elsewhere → return focus to composer.
+                                if !chat.activity_hidden {
+                                    let activity_x = state.last_area.width * 72 / 100;
+                                    if mouse.column >= activity_x {
+                                        chat.focus = ChatFocus::Activity;
+                                    } else {
+                                        chat.focus = ChatFocus::Composer;
+                                    }
+                                }
+                            }
+                            _ => {}
+                        }
+                        state.screen = Screen::Chat(chat);
+                    }
+                }
                 _ => {}
             }
         }
@@ -334,7 +384,13 @@ pub(super) fn drain_messages(state: &mut AppState) {
                 state.approval_selection = 0;
             }
             InteractiveMsg::RunEnded { ok, message } => {
+                if ok {
+                    refresh_git_stat(state);
+                }
                 if let Screen::Chat(chat) = &mut screen {
+                    if let Some(started) = chat.run_started_at.take() {
+                        chat.last_run_elapsed = Some(started.elapsed());
+                    }
                     chat.running = None;
                     chat.pending_prompt = None;
                     chat.live_assistant.clear();
@@ -354,17 +410,16 @@ pub(super) fn drain_messages(state: &mut AppState) {
 
                             // Auto-rename untitled sessions from the first user message.
                             if ok && chat.session.title.is_none() {
-                                if let Some(first_user_msg) = chat
-                                    .messages
-                                    .iter()
-                                    .find(|m| m.role == MessageRole::User)
+                                if let Some(first_user_msg) =
+                                    chat.messages.iter().find(|m| m.role == MessageRole::User)
                                 {
                                     if let Some(text) = first_user_msg.content.as_str() {
                                         let clean = text.trim().replace('\n', " ");
                                         if !clean.is_empty() {
                                             let title = if clean.chars().count() > 50 {
                                                 // Truncate at word boundary
-                                                let short: String = clean.chars().take(50).collect();
+                                                let short: String =
+                                                    clean.chars().take(50).collect();
                                                 if let Some(pos) = short.rfind(' ') {
                                                     format!("{}…", &short[..pos])
                                                 } else {
@@ -373,10 +428,10 @@ pub(super) fn drain_messages(state: &mut AppState) {
                                             } else {
                                                 clean
                                             };
-                                            if let Ok(info) = state.backend.update_session_title(
-                                                &chat.session.id,
-                                                Some(title),
-                                            ) {
+                                            if let Ok(info) = state
+                                                .backend
+                                                .update_session_title(&chat.session.id, Some(title))
+                                            {
                                                 chat.session = info;
                                             }
                                         }
@@ -445,10 +500,14 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
     chat.running = Some(RunningCommand {
         cancellation: cancellation.clone(),
     });
+    chat.run_started_at = Some(std::time::Instant::now());
+    chat.last_run_elapsed = None;
     chat.pending_prompt = Some(prompt.clone());
     chat.scroll = 0; // auto-scroll to bottom on new prompt
     state.status = None;
     chat.live_assistant.clear();
+    chat.activity.clear();
+    chat.activity_selected = 0;
 
     let trimmed = prompt.trim();
     if !trimmed.is_empty()
@@ -476,6 +535,9 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
     let runtime = state.runtime.clone();
     let submit_mode = state.submit_mode;
     runtime.spawn(async move {
+        let cancel_timeout = cancellation.clone();
+        let tx_timeout = tx.clone();
+
         let context = CommandContext::with_cancellation(
             config,
             SessionMeta {
@@ -503,12 +565,22 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
             InteractiveSubmitMode::Run => Command::Run { prompt },
         };
 
-        let result = executor.execute(command, context, publisher).await;
-        let (ok, message) = match result {
-            Ok(()) => (true, None),
-            Err(err) => (false, Some(err.to_string())),
-        };
-        let _ = tx.send(InteractiveMsg::RunEnded { ok, message });
+        tokio::select! {
+            result = executor.execute(command, context, publisher) => {
+                let (ok, message) = match result {
+                    Ok(()) => (true, None),
+                    Err(err) => (false, Some(err.to_string())),
+                };
+                let _ = tx.send(InteractiveMsg::RunEnded { ok, message });
+            }
+            _ = tokio::time::sleep(std::time::Duration::from_secs(7 * 60)) => {
+                cancel_timeout.cancel();
+                let _ = tx_timeout.send(InteractiveMsg::RunEnded {
+                    ok: false,
+                    message: Some("\u{23f1} Run timed out after 7 minutes".to_string()),
+                });
+            }
+        }
     });
 }
 
@@ -690,6 +762,63 @@ fn clean_failure_message(msg: &str) -> String {
     } else {
         capped
     }
+}
+
+/// Refresh git diff stats by running `git diff --shortstat HEAD` in the workspace root.
+///
+/// Non-blocking: if git is unavailable or the directory isn't a repo, the stat is cleared.
+fn refresh_git_stat(state: &mut AppState) {
+    let Ok(output) = std::process::Command::new("git")
+        .args(["diff", "--shortstat", "HEAD"])
+        .current_dir(&state.defaults.workspace_root)
+        .output()
+    else {
+        state.git_stat = None;
+        return;
+    };
+    let text = String::from_utf8_lossy(&output.stdout);
+    state.git_stat = parse_git_shortstat(text.trim());
+}
+
+/// Parse the output of `git diff --shortstat HEAD` into a `GitStat`.
+///
+/// Example inputs:
+/// - `"1 file changed, 3 insertions(+), 1 deletion(-)"`
+/// - `"15 files changed, 406 insertions(+), 269 deletions(-)"`
+/// - `"1 file changed, 1 insertion(+)"`
+fn parse_git_shortstat(text: &str) -> Option<super::GitStat> {
+    if text.is_empty() {
+        return None;
+    }
+    let files: u32 = text
+        .split_once(" file")
+        .and_then(|(n, _)| n.trim().parse().ok())?;
+
+    let insertions: u32 = text
+        .find("insertion")
+        .and_then(|pos| {
+            text[..pos]
+                .trim()
+                .rsplit_once(|c: char| !c.is_ascii_digit())
+                .and_then(|(_, n)| n.parse().ok())
+        })
+        .unwrap_or(0);
+
+    let deletions: u32 = text
+        .find("deletion")
+        .and_then(|pos| {
+            text[..pos]
+                .trim()
+                .rsplit_once(|c: char| !c.is_ascii_digit())
+                .and_then(|(_, n)| n.parse().ok())
+        })
+        .unwrap_or(0);
+
+    Some(super::GitStat {
+        files,
+        insertions,
+        deletions,
+    })
 }
 
 struct TerminalCleanup;

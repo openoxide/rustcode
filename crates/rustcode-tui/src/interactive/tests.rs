@@ -71,6 +71,7 @@ fn sessions_screen_renders_title_and_help() {
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,
         llm_cell: None,
+        git_stat: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -151,11 +152,14 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                last_total_tokens: 0,
-                context_limit: 0,
-                cost_usd: 0.0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            last_total_tokens: 0,
+            context_limit: 0,
+            cost_usd: 0.0,
+            last_max_scroll: std::cell::Cell::new(0),
+            run_started_at: None,
+            last_run_elapsed: None,
         }),
         status: None,
         toasts: Vec::new(),
@@ -187,13 +191,14 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,
         llm_cell: None,
+        git_stat: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
-    // Tool results are now rendered as "  ✓ read" (no "Tool:" role header)
-    assert!(text.contains("read"), "text={text}");
-    assert!(text.contains("tool output"), "text={text}");
+    // Collapsed mode (tool_details=false): tool calls show as batch summary
+    assert!(text.contains("tool call"), "text={text}");
+    assert!(text.contains("to expand"), "text={text}");
     assert!(text.contains("model:null"), "text={text}");
     assert!(text.contains("mode:agent"), "text={text}");
     // "ok=true" and "Output:" were removed in the new compact rendering
@@ -206,7 +211,8 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
     }
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
-    // Expanded: full output still shown (but no "Output:" header in new rendering)
+    // Expanded mode: tool name and output are shown
+    assert!(text.contains("read"), "text={text}");
     assert!(text.contains("tool output"), "text={text}");
 }
 
@@ -274,11 +280,14 @@ fn chat_screen_hides_system_messages() {
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                last_total_tokens: 0,
-                context_limit: 0,
-                cost_usd: 0.0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            last_total_tokens: 0,
+            context_limit: 0,
+            cost_usd: 0.0,
+            last_max_scroll: std::cell::Cell::new(0),
+            run_started_at: None,
+            last_run_elapsed: None,
         }),
         status: None,
         toasts: Vec::new(),
@@ -309,6 +318,7 @@ fn chat_screen_hides_system_messages() {
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,
         llm_cell: None,
+        git_stat: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -360,11 +370,14 @@ fn approval_modal_renders_tool_name() {
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                last_total_tokens: 0,
-                context_limit: 0,
-                cost_usd: 0.0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            last_total_tokens: 0,
+            context_limit: 0,
+            cost_usd: 0.0,
+            last_max_scroll: std::cell::Cell::new(0),
+            run_started_at: None,
+            last_run_elapsed: None,
         }),
         status: None,
         toasts: Vec::new(),
@@ -405,6 +418,7 @@ fn approval_modal_renders_tool_name() {
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,
         llm_cell: None,
+        git_stat: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -459,11 +473,14 @@ fn approval_modal_shows_allow_all_edits_for_write() {
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                last_total_tokens: 0,
-                context_limit: 0,
-                cost_usd: 0.0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            last_total_tokens: 0,
+            context_limit: 0,
+            cost_usd: 0.0,
+            last_max_scroll: std::cell::Cell::new(0),
+            run_started_at: None,
+            last_run_elapsed: None,
         }),
         status: None,
         toasts: Vec::new(),
@@ -503,6 +520,7 @@ fn approval_modal_shows_allow_all_edits_for_write() {
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,
         llm_cell: None,
+        git_stat: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -555,11 +573,14 @@ fn approval_modal_keeps_actions_visible_with_long_arguments() {
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                last_total_tokens: 0,
-                context_limit: 0,
-                cost_usd: 0.0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            last_total_tokens: 0,
+            context_limit: 0,
+            cost_usd: 0.0,
+            last_max_scroll: std::cell::Cell::new(0),
+            run_started_at: None,
+            last_run_elapsed: None,
         }),
         status: None,
         toasts: Vec::new(),
@@ -599,6 +620,7 @@ fn approval_modal_keeps_actions_visible_with_long_arguments() {
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,
         llm_cell: None,
+        git_stat: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -656,11 +678,14 @@ fn alt_tab_cycles_focus_in_chat() {
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                last_total_tokens: 0,
-                context_limit: 0,
-                cost_usd: 0.0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            last_total_tokens: 0,
+            context_limit: 0,
+            cost_usd: 0.0,
+            last_max_scroll: std::cell::Cell::new(0),
+            run_started_at: None,
+            last_run_elapsed: None,
         }),
         status: None,
         toasts: Vec::new(),
@@ -691,6 +716,7 @@ fn alt_tab_cycles_focus_in_chat() {
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,
         llm_cell: None,
+        git_stat: None,
     };
 
     // Alt+Tab with activity_hidden=true: focus stays at Composer (no-op)
@@ -762,11 +788,14 @@ fn tab_does_not_change_focus_in_chat() {
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                last_total_tokens: 0,
-                context_limit: 0,
-                cost_usd: 0.0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            last_total_tokens: 0,
+            context_limit: 0,
+            cost_usd: 0.0,
+            last_max_scroll: std::cell::Cell::new(0),
+            run_started_at: None,
+            last_run_elapsed: None,
         }),
         status: None,
         toasts: Vec::new(),
@@ -797,6 +826,7 @@ fn tab_does_not_change_focus_in_chat() {
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,
         llm_cell: None,
+        git_stat: None,
     };
 
     let key = KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE);
@@ -855,11 +885,14 @@ fn activity_details_modal_renders_tool_arguments() {
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                last_total_tokens: 0,
-                context_limit: 0,
-                cost_usd: 0.0,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            last_total_tokens: 0,
+            context_limit: 0,
+            cost_usd: 0.0,
+            last_max_scroll: std::cell::Cell::new(0),
+            run_started_at: None,
+            last_run_elapsed: None,
         }),
         status: None,
         toasts: Vec::new(),
@@ -891,6 +924,7 @@ fn activity_details_modal_renders_tool_arguments() {
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,
         llm_cell: None,
+        git_stat: None,
     };
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
@@ -950,6 +984,7 @@ fn command_palette_renders_actions_and_search() {
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,
         llm_cell: None,
+        git_stat: None,
     };
 
     open_command_palette(&mut state, None);

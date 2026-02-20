@@ -1,7 +1,7 @@
 use super::{
     render_provider_manager_modal, AppState, Block, Borders, Clear, Color, Constraint, Direction,
     InteractiveSubmitMode, Layout, Line, List, ListItem, Modal, Modifier, Paragraph, Rect, Span,
-    Style, Wrap,
+    Style, Wrap, SLASH_COMMANDS,
 };
 
 pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
@@ -584,6 +584,9 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
         Modal::ProviderManager { step } => {
             render_provider_manager_modal(frame, step);
         }
+        Modal::SlashHelp { query, selected } => {
+            render_slash_help(frame, query, *selected);
+        }
         Modal::ErrorDetail { message } => {
             let area = centered_rect(80, 60, frame.area());
             frame.render_widget(Clear, area);
@@ -676,9 +679,7 @@ pub(super) fn render_help_modal(frame: &mut ratatui::Frame<'_>, state: &AppState
     lines.push(Line::raw(
         "  Up/Down: edit text (composer) / select item (activity)",
     ));
-    lines.push(Line::raw(
-        "  PgUp/PgDn: scroll transcript",
-    ));
+    lines.push(Line::raw("  PgUp/PgDn: scroll transcript"));
     lines.push(Line::raw(
         "  / (any focus): move to composer and insert / for slash commands",
     ));
@@ -723,6 +724,86 @@ pub(super) fn render_help_modal(frame: &mut ratatui::Frame<'_>, state: &AppState
         )
         .wrap(Wrap { trim: false });
     frame.render_widget(dialog, area);
+}
+
+/// Render the slash-command autocomplete popup.
+fn render_slash_help(frame: &mut ratatui::Frame<'_>, query: &str, selected: usize) {
+    let filtered: Vec<(&str, &str)> = if query.is_empty() {
+        SLASH_COMMANDS.to_vec()
+    } else {
+        let needle = query.to_ascii_lowercase();
+        SLASH_COMMANDS
+            .iter()
+            .filter(|(cmd, _)| {
+                let stem = cmd
+                    .trim_start_matches('/')
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("");
+                stem.to_ascii_lowercase().contains(&needle)
+            })
+            .copied()
+            .collect()
+    };
+
+    let area = slash_popup_rect(frame.area(), filtered.len());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title("/ commands  (Tab: complete  Esc: close)")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if filtered.is_empty() {
+        let msg = Paragraph::new("(no matches)").style(Style::default().add_modifier(Modifier::DIM));
+        frame.render_widget(msg, inner);
+        return;
+    }
+
+    let clamped = selected.min(filtered.len().saturating_sub(1));
+    let items: Vec<ListItem<'_>> = filtered
+        .iter()
+        .enumerate()
+        .map(|(i, (cmd, desc))| {
+            let style = if i == clamped {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default()
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(*cmd, style.fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled("  ", style),
+                Span::styled(*desc, style.fg(Color::DarkGray)),
+            ]))
+        })
+        .collect();
+
+    let mut list_state = ratatui::widgets::ListState::default();
+    list_state.select(Some(clamped));
+    let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    frame.render_stateful_widget(list, inner, &mut list_state);
+}
+
+/// Compute the popup rect for the slash-help popup.
+///
+/// Anchored to the lower-left of the terminal, just above the composer+footer
+/// (~8 rows from the bottom).  Width is half the terminal; height grows with
+/// the number of matches up to 10 rows.
+fn slash_popup_rect(r: Rect, item_count: usize) -> Rect {
+    let content_h = (item_count as u16).max(1).min(10);
+    // +2 for borders
+    let h = content_h + 2;
+    let w = r.width / 2;
+    // Position above the composer+footer (~8 rows from bottom)
+    let y = r.y + r.height.saturating_sub(h + 8);
+    Rect {
+        x: r.x + 1,
+        y,
+        width: w,
+        height: h,
+    }
 }
 
 pub(super) fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {

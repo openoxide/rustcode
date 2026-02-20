@@ -15,7 +15,7 @@ impl Default for AgentOptions {
     fn default() -> Self {
         Self {
             max_steps: 8,
-            max_tool_calls_per_step: 8,
+            max_tool_calls_per_step: 300,
             allow_write: false,
             allow_edit: false,
             allow_exec: false,

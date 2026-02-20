@@ -6,6 +6,26 @@ use super::{
     ProviderManagerStep, Screen, ToastVariant,
 };
 
+/// All slash commands available in the composer, with short descriptions.
+///
+/// Shown in the [`Modal::SlashHelp`] autocomplete popup.
+pub(super) const SLASH_COMMANDS: &[(&str, &str)] = &[
+    ("/clear", "Clear composer input"),
+    ("/delete", "Delete current session"),
+    ("/find <query>", "Search transcript"),
+    ("/fork", "Fork current session  (Ctrl+F)"),
+    ("/help", "Show keybindings and tips"),
+    ("/memory", "Show memory summary"),
+    ("/model", "Switch LLM model  (Ctrl+M)"),
+    ("/new", "Create a new session  (Ctrl+N)"),
+    ("/providers", "Connect/disconnect providers  (Ctrl+A)"),
+    ("/refresh", "Reload transcript  (Ctrl+R)"),
+    ("/rename <title>", "Rename current session"),
+    ("/sessions", "Go to sessions screen  (Ctrl+Q)"),
+    ("/skill", "List or inject a skill  (Ctrl+S)"),
+    ("/tools", "Toggle tool call details  (Ctrl+D)"),
+];
+
 /// Filter `entries` (each a `"provider/model"` string) by case-insensitive substring match.
 pub(super) fn filter_models(entries: &[String], query: &str) -> Vec<usize> {
     if query.trim().is_empty() {
@@ -92,6 +112,9 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                         last_total_tokens: 0,
                         context_limit: 0,
                         cost_usd: 0.0,
+                        last_max_scroll: std::cell::Cell::new(0),
+                        run_started_at: None,
+                        last_run_elapsed: None,
                     });
                     push_toast(
                         state,
@@ -274,8 +297,7 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
             });
         }
         CommandId::Search => {
-            let Screen::Chat(chat) = std::mem::replace(&mut state.screen, Screen::Sessions)
-            else {
+            let Screen::Chat(chat) = std::mem::replace(&mut state.screen, Screen::Sessions) else {
                 push_toast(
                     state,
                     ToastVariant::Warning,

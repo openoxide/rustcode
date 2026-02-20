@@ -68,6 +68,9 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         last_total_tokens: 0,
                         context_limit: 0,
                         cost_usd: 0.0,
+                        last_max_scroll: std::cell::Cell::new(0),
+                        run_started_at: None,
+                        last_run_elapsed: None,
                     });
                 }
                 state.sessions_filter_active = false;
@@ -182,6 +185,9 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 last_total_tokens: 0,
                 context_limit: 0,
                 cost_usd: 0.0,
+                last_max_scroll: std::cell::Cell::new(0),
+                run_started_at: None,
+                last_run_elapsed: None,
             });
         }
         _ => {}

@@ -1,9 +1,9 @@
 use super::{
     apply_find_highlight, build_transcript_lines, composer_cursor_visual, format_age,
     render_activity, render_activity_details_modal, render_approval_inline,
-    render_approval_selector, render_help_modal, render_modal, AppState, Block,
-    Borders, ChatFocus, ChatState, Color, Constraint, Direction, Layout, Line, List, ListItem,
-    Modifier, Paragraph, Screen, Span, Style, ToastVariant, Wrap,
+    render_approval_selector, render_help_modal, render_modal, AppState, Block, Borders, ChatFocus,
+    ChatState, Color, Constraint, Direction, Layout, Line, List, ListItem, Modal, Modifier,
+    Paragraph, Screen, Span, Style, ToastVariant, Wrap,
 };
 
 /// Timeout for typing indicator (milliseconds).
@@ -250,7 +250,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                 provider_str = model;
             }
         }
-        
+
         // Title-case the provider name
         let mut chars = provider_str.chars();
         match chars.next() {
@@ -262,43 +262,46 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             None => app.defaults.model.clone(),
         }
     };
-    // Build context info from real token usage data
-    let mut ctx_parts: Vec<String> = Vec::new();
-    if chat.last_total_tokens > 0 {
-        // Format token count with commas
-        let tokens = format_tokens(chat.last_total_tokens);
-        ctx_parts.push(format!("{tokens} tokens"));
-    }
-    if chat.context_limit > 0 && chat.last_total_tokens > 0 {
-        let pct = ((chat.last_total_tokens as f64 / chat.context_limit as f64) * 100.0).min(100.0);
-        ctx_parts.push(format!("{pct:.0}% used"));
-    }
-    if chat.cost_usd > 0.001 {
-        ctx_parts.push(format!("${:.2}", chat.cost_usd));
-    }
-    let ctx_display = if ctx_parts.is_empty() {
-        provider_label.clone()
-    } else {
-        format!("{}  {}", provider_label, ctx_parts.join("  "))
-    };
+    // Build transcript title spans with distinct colors per metric.
     let mut transcript_title_spans = vec![
         Span::styled(session_title, Style::default().add_modifier(Modifier::BOLD)),
         Span::raw("  "),
+        // App brand — purple
         Span::styled(
-            ctx_display,
+            "RustCode",
             Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
+                .fg(Color::Rgb(180, 120, 240))
+                .add_modifier(Modifier::BOLD),
         ),
     ];
-    // Tool details toggle indicator
-    if chat.tool_details {
+    if chat.last_total_tokens > 0 {
+        let tokens = format_tokens(chat.last_total_tokens);
         transcript_title_spans.push(Span::raw("  "));
         transcript_title_spans.push(Span::styled(
-            "[tools expanded]",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::DIM),
+            format!("{tokens} tokens"),
+            Style::default().fg(Color::Rgb(160, 210, 160)),
+        ));
+    }
+    if chat.context_limit > 0 && chat.last_total_tokens > 0 {
+        let pct = ((chat.last_total_tokens as f64 / chat.context_limit as f64) * 100.0).min(100.0);
+        let pct_color = if pct < 50.0 {
+            Color::Rgb(80, 200, 80)
+        } else if pct < 75.0 {
+            Color::Rgb(220, 200, 60)
+        } else {
+            Color::Rgb(220, 110, 60)
+        };
+        transcript_title_spans.push(Span::raw("  "));
+        transcript_title_spans.push(Span::styled(
+            format!("{pct:.0}% used"),
+            Style::default().fg(pct_color),
+        ));
+    }
+    if chat.cost_usd > 0.001 {
+        transcript_title_spans.push(Span::raw("  "));
+        transcript_title_spans.push(Span::styled(
+            format!("~${:.3}", chat.cost_usd),
+            Style::default().fg(Color::Rgb(220, 200, 100)),
         ));
     }
     if let Some(find) = &chat.find {
@@ -337,10 +340,16 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         .iter()
         .map(|l| {
             let w = l.width();
-            if w <= inner_w { 1 } else { (w + inner_w - 1) / inner_w }
+            if w <= inner_w {
+                1
+            } else {
+                (w + inner_w - 1) / inner_w
+            }
         })
         .sum();
     let max_scroll = wrapped_count.saturating_sub(transcript_inner_h) as u16;
+    // Update Cell so the scroll event handler can clamp immediately.
+    chat.last_max_scroll.set(max_scroll);
     let from_bottom = chat.scroll.min(max_scroll);
     let scroll_top = max_scroll.saturating_sub(from_bottom);
 
@@ -364,13 +373,20 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     ))
     .right_aligned();
 
+    let mut transcript_block = Block::default()
+        .title(Line::from(transcript_title_spans))
+        .title_bottom(transcript_bottom)
+        .borders(Borders::ALL);
+    if chat.tool_details {
+        transcript_block = transcript_block.title_bottom(Line::from(Span::styled(
+            "[tools expanded]",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::DIM),
+        )));
+    }
     let transcript = Paragraph::new(lines)
-        .block(
-            Block::default()
-                .title(Line::from(transcript_title_spans))
-                .title_bottom(transcript_bottom)
-                .borders(Borders::ALL),
-        )
+        .block(transcript_block)
         .wrap(Wrap { trim: false })
         .scroll((scroll_top, 0));
     frame.render_widget(transcript, left[0]);
@@ -401,14 +417,21 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         Span::styled(
             format!("[model:{model_label}]"),
             Style::default()
-                .fg(Color::Green)
+                .fg(Color::Rgb(60, 210, 120))
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
         Span::styled(
             format!("[mode:{mode_label}]"),
             Style::default()
-                .fg(Color::Yellow)
+                .fg(Color::Rgb(240, 190, 55))
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("  "),
+        Span::styled(
+            format!("[{provider_label}]"),
+            Style::default()
+                .fg(Color::Rgb(100, 160, 220))
                 .add_modifier(Modifier::BOLD),
         ),
     ];
@@ -424,9 +447,9 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     }
     let composer_title = Line::from(composer_title_spans);
     let composer_border = if chat.focus == ChatFocus::Composer {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(Color::Rgb(80, 220, 220))
     } else {
-        Style::default()
+        Style::default().fg(Color::Rgb(60, 70, 85))
     };
     let composer_text = if chat.composer.is_empty() {
         "Type a prompt... (Enter to submit, Shift+Enter for newline)"
@@ -455,21 +478,50 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             0
         };
 
+        // Build the composer block with an optional right-aligned git stat title.
+        let mut composer_block = Block::default()
+            .title(composer_title)
+            .borders(Borders::ALL)
+            .border_style(composer_border);
+        if let Some(stat) = app.git_stat.as_ref() {
+            if stat.files > 0 {
+                let mut git_spans = Vec::new();
+                git_spans.push(Span::styled(
+                    format!("{} files", stat.files),
+                    Style::default().fg(Color::DarkGray),
+                ));
+                if stat.insertions > 0 {
+                    git_spans.push(Span::raw(" "));
+                    git_spans.push(Span::styled(
+                        format!("+{}", stat.insertions),
+                        Style::default().fg(Color::Rgb(80, 210, 80)),
+                    ));
+                }
+                if stat.deletions > 0 {
+                    git_spans.push(Span::raw(" "));
+                    git_spans.push(Span::styled(
+                        format!("-{}", stat.deletions),
+                        Style::default().fg(Color::Rgb(210, 80, 80)),
+                    ));
+                }
+                git_spans.push(Span::raw(" ")); // trailing padding inside border
+                composer_block =
+                    composer_block.title(Line::from(git_spans).right_aligned());
+            }
+        }
+
         let composer = Paragraph::new(composer_text)
             .style(composer_style)
-            .block(
-                Block::default()
-                    .title(composer_title)
-                    .borders(Borders::ALL)
-                    .border_style(composer_border),
-            )
+            .block(composer_block)
             .wrap(Wrap { trim: false })
             .scroll((composer_scroll as u16, 0));
         frame.render_widget(composer, composer_area);
 
+        // Show cursor when composing, even if the slash-help popup is open.
+        let slash_help_open = matches!(&app.modal, Some(Modal::SlashHelp { .. }));
         if chat.focus == ChatFocus::Composer
             && !app.help_open
-            && app.modal.is_none()
+            && (app.modal.is_none() || slash_help_open)
             && !chat.details_open
         {
             let x = composer_area
@@ -578,14 +630,20 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ));
-            spans.push(Span::styled(":switch focus  ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                ":switch focus  ",
+                Style::default().fg(Color::DarkGray),
+            ));
             spans.push(Span::styled(
                 "Ctrl+W",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
             ));
-            spans.push(Span::styled(":toggle activity  ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                ":toggle activity  ",
+                Style::default().fg(Color::DarkGray),
+            ));
         }
         spans.push(Span::styled(
             "/",
@@ -599,7 +657,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             Span::styled(":cmd", Style::default().fg(Color::DarkGray))
         });
         spans.push(Span::styled(
-            "  /tools:toggle tool details",
+            "  Ctrl+D:toggle tools",
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
@@ -634,12 +692,18 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                 "   Alt+Tab",
                 Style::default().fg(Color::DarkGray),
             ));
-            spans.push(Span::styled(" switch focus", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                " switch focus",
+                Style::default().fg(Color::DarkGray),
+            ));
             spans.push(Span::styled(
                 "   Ctrl+W",
                 Style::default().fg(Color::DarkGray),
             ));
-            spans.push(Span::styled(" toggle activity", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                " toggle activity",
+                Style::default().fg(Color::DarkGray),
+            ));
         }
         spans.push(error_part);
         Line::from(spans)

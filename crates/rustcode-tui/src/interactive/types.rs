@@ -106,6 +106,13 @@ pub(super) enum Modal {
     ProviderManager {
         step: ProviderManagerStep,
     },
+    /// Slash-command autocomplete popup shown while composer starts with `/`.
+    SlashHelp {
+        /// Text after `/` used for filtering.
+        query: String,
+        /// Currently highlighted row index within the filtered list.
+        selected: usize,
+    },
 }
 
 /// An entry in the provider manager list.
@@ -449,6 +456,21 @@ pub(super) struct ChatState {
     pub(super) context_limit: u64,
     /// Estimated cumulative cost in USD.
     pub(super) cost_usd: f64,
+    /// Last `max_scroll` value computed by the render pass — updated each frame
+    /// via `Cell` interior mutability so the scroll event handler can clamp
+    /// `scroll` immediately without phantom over-scrolling.
+    pub(super) last_max_scroll: std::cell::Cell<u16>,
+    /// Instant when the current run started — cleared when the run ends.
+    pub(super) run_started_at: Option<Instant>,
+    /// Elapsed duration of the most recently completed run.
+    pub(super) last_run_elapsed: Option<std::time::Duration>,
+}
+
+/// Cached result of `git diff --shortstat HEAD`.
+pub(super) struct GitStat {
+    pub(super) files: u32,
+    pub(super) insertions: u32,
+    pub(super) deletions: u32,
 }
 
 pub(super) struct AppState {
@@ -493,6 +515,8 @@ pub(super) struct AppState {
     /// requests to use the new client, enabling live model/provider switching
     /// without restarting the engine.  `None` in remote/attach mode.
     pub(super) llm_cell: Option<Arc<std::sync::RwLock<Arc<dyn rustcode_llm::LlmClient>>>>,
+    /// Cached git diff stats — refreshed after each successful run completion.
+    pub(super) git_stat: Option<GitStat>,
 }
 
 pub(super) fn build_prompt_history(messages: &[StoredMessage]) -> Vec<String> {

@@ -84,18 +84,18 @@ pub(super) fn render_approval_selector(
 
     frame.render_widget(
         Paragraph::new(option_lines)
-        .block(
-            Block::default()
-                .title(Span::styled(
-                    "Approval",
-                    Style::default()
-                        .fg(Color::Yellow)
-                        .add_modifier(Modifier::BOLD),
-                ))
-                .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow)),
-        )
-        .wrap(Wrap { trim: false }),
+            .block(
+                Block::default()
+                    .title(Span::styled(
+                        "Approval",
+                        Style::default()
+                            .fg(Color::Yellow)
+                            .add_modifier(Modifier::BOLD),
+                    ))
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow)),
+            )
+            .wrap(Wrap { trim: false }),
         area,
     );
 }
@@ -213,18 +213,11 @@ fn render_approval_preview(
             let n = start_line + i;
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(
-                    format!("{n:>3} "),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(format!("{n:>3} "), Style::default().fg(Color::DarkGray)),
                 Span::styled("  ", Style::default()),
             ];
             spans.extend(code_spans(old_lines[i], &mut hl));
-            out.push(padded_line(
-                spans,
-                Style::default(),
-                w,
-            ));
+            out.push(padded_line(spans, Style::default(), w));
             displayed += 1;
         }
 
@@ -293,29 +286,27 @@ fn render_approval_preview(
         }
 
         // Show context after the change (first N lines of common suffix).
-        let ctx_after_count = common_suffix.min(CONTEXT).min(MAX_DISPLAY.saturating_sub(displayed));
+        let ctx_after_count = common_suffix
+            .min(CONTEXT)
+            .min(MAX_DISPLAY.saturating_sub(displayed));
         for i in 0..ctx_after_count {
             let old_idx = old_changed_end + i;
             let n = start_line + old_idx;
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(
-                    format!("{n:>3} "),
-                    Style::default().fg(Color::DarkGray),
-                ),
+                Span::styled(format!("{n:>3} "), Style::default().fg(Color::DarkGray)),
                 Span::styled("  ", Style::default()),
             ];
             spans.extend(code_spans(old_lines[old_idx], &mut hl));
-            out.push(padded_line(
-                spans,
-                Style::default(),
-                w,
-            ));
+            out.push(padded_line(spans, Style::default(), w));
             // (last context line, no need to track displayed further)
         }
         if common_suffix > ctx_after_count {
             out.push(Line::from(Span::styled(
-                format!("     … {} unchanged lines below", common_suffix - ctx_after_count),
+                format!(
+                    "     … {} unchanged lines below",
+                    common_suffix - ctx_after_count
+                ),
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::DIM),
@@ -376,9 +367,7 @@ fn render_approval_preview(
         let cmd = get_arg_str(args, &["command", "cmd"]);
         if !cmd.is_empty() {
             let short: String = cmd.chars().take(80).collect();
-            let mut cmd_spans = vec![
-                Span::styled("  $ ", Style::default().fg(Color::Yellow)),
-            ];
+            let mut cmd_spans = vec![Span::styled("  $ ", Style::default().fg(Color::Yellow))];
             // Apply bash syntax highlighting to the command.
             let mut hl_bash = HighlightState::new("sh");
             cmd_spans.extend(code_spans(&short, &mut hl_bash));

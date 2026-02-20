@@ -1,9 +1,13 @@
 use super::{
-    centered_rect, ActivityItem, Block, Borders, ChatFocus, ChatState, Clear, Color,
-    Duration, Line, List, ListItem, Modifier, Paragraph, Rect, Span, Style, SystemTime, Wrap,
+    centered_rect, ActivityItem, Block, Borders, ChatFocus, ChatState, Clear, Color, Duration,
+    Line, List, ListItem, Modifier, Paragraph, Rect, Span, Style, SystemTime, Wrap,
 };
 
-pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: &ChatState) {
+pub(super) fn render_activity(
+    frame: &mut ratatui::Frame<'_>,
+    area: Rect,
+    chat: &ChatState,
+) {
     let border = if chat.focus == ChatFocus::Activity {
         Style::default().fg(Color::Cyan)
     } else {
@@ -21,11 +25,13 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
     } else {
         ' '
     };
-    let title = if chat.running.is_some() {
+    let base_title = if chat.running.is_some() {
         format!("Activity {spinner}")
     } else {
         "Activity".to_string()
     };
+
+    let title_line = Line::raw(base_title);
 
     if chat.activity.is_empty() {
         let empty = if chat.running.is_some() {
@@ -35,7 +41,7 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
         };
         let list = List::new(vec![ListItem::new(empty)]).block(
             Block::default()
-                .title(title)
+                .title(title_line)
                 .borders(Borders::ALL)
                 .border_style(border),
         );
@@ -83,7 +89,7 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
     let list = List::new(items)
         .block(
             Block::default()
-                .title(title)
+                .title(title_line)
                 .borders(Borders::ALL)
                 .border_style(border),
         )
@@ -112,4 +118,3 @@ pub(super) fn render_activity_details_modal(frame: &mut ratatui::Frame<'_>, chat
         .wrap(Wrap { trim: false });
     frame.render_widget(modal, area);
 }
-

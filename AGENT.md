@@ -20,13 +20,14 @@
 ## Development Discipline
 
 - Every milestone must leave the system buildable
-- **Commit work after every milestone completion** (`git add -A && git commit`) even if you are doing in phases so commit each phase of milestone.
+- **Commit work after every milestone completion** (`git add -A -S && git commit`) even if you are doing in phases so commit each phase of milestone.
 - No incomplete feature merges
 - Tests written before or alongside implementation
 - Update docs after each milestone
 - **Always sync `docs/TASKS.md`** from the artifact `task.md` after every task update
 - Maintain milestone tracking during compaction
 - `unsafe_code = "forbid"` (enforced in `Cargo.toml`)
+- Always commit after you complete a big feature no co authors should be there [always use signed commits -S]
 
 ## Architecture
 

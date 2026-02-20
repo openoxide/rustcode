@@ -39,10 +39,7 @@ fn find_syntax(extension: &str) -> Option<&'static SyntaxReference> {
 /// The returned spans have transparent backgrounds so the caller's diff
 /// background colour shows through. If highlighting fails, a single
 /// white-foreground span is returned as a fallback.
-pub(super) fn highlight_code_line(
-    text: &str,
-    state: &mut HighlightState,
-) -> Vec<Span<'static>> {
+pub(super) fn highlight_code_line(text: &str, state: &mut HighlightState) -> Vec<Span<'static>> {
     // The syntax set was loaded with `load_defaults_newlines`, so each line
     // passed to `highlight_line` MUST end with `\n` — otherwise single-line
     // scopes (like Python `#` comments) never close and bleed into later lines.

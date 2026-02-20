@@ -3,8 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crossterm::event::{
-    self, Event as CEvent, KeyCode, KeyEvent,
-    KeyEventKind, KeyModifiers,
+    self, Event as CEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
 };
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -49,7 +48,9 @@ mod syntax_highlight;
 mod transcript;
 mod types;
 
-use commands::{execute_command, filter_models, handle_slash_command, refresh_chat_messages};
+use commands::{
+    execute_command, filter_models, handle_slash_command, refresh_chat_messages, SLASH_COMMANDS,
+};
 use composer::{
     composer_backspace, composer_clear, composer_cursor_visual, composer_delete,
     composer_insert_str, composer_kill_line_backward, composer_kill_line_forward,
@@ -80,7 +81,7 @@ use transcript::{
 };
 use types::{
     build_prompt_history, ActivityItem, AppState, ChatFocus, ChatNav, ChatState, CommandId,
-    CommandItem, ConnectMethod, FindState, Modal, PendingApproval, ProviderEntry,
+    CommandItem, ConnectMethod, FindState, GitStat, Modal, PendingApproval, ProviderEntry,
     ProviderManagerStep, ProviderOAuthDone, ProviderOAuthStarted, RunningCommand, Screen, Toast,
     ToastVariant,
 };
