@@ -56,6 +56,7 @@ pub async fn handle_tui_command(tui: TuiCommand, cli: &Cli) -> Result<()> {
             let defaults = rustcode_tui::InteractiveDefaults {
                 workspace_root: resolved_config.workspace_root.clone(),
                 model: resolved_config.model.clone(),
+                provider: resolved_config.llm_provider.clone(),
                 skills,
             };
             let config = Some(Arc::new(resolved_config));
@@ -154,70 +155,73 @@ pub async fn handle_tui_default(
     let handles = rustcode_tui::InteractiveHandles::new();
     let store = SessionStore::open_default();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-    let (defaults, mut initial_status, config, executor, llm_cell) = match load_effective_config(cli) {
-        Ok(config) => {
-            let skills = rustcode_skills::SkillsManager::load(&config.workspace_root)
-                .all()
-                .to_vec();
-            let defaults = rustcode_tui::InteractiveDefaults {
-                workspace_root: config.workspace_root.clone(),
-                model: config.model.clone(),
-                skills,
-            };
+    let (defaults, mut initial_status, config, executor, llm_cell) =
+        match load_effective_config(cli) {
+            Ok(config) => {
+                let skills = rustcode_skills::SkillsManager::load(&config.workspace_root)
+                    .all()
+                    .to_vec();
+                let defaults = rustcode_tui::InteractiveDefaults {
+                    workspace_root: config.workspace_root.clone(),
+                    model: config.model.clone(),
+                    provider: config.llm_provider.clone(),
+                    skills,
+                };
 
-            let config = Arc::new(config);
-            let (initial_status, executor, llm_cell) = match build_client(&config) {
-                Ok(llm_client) => {
-                    let recorder: Option<Arc<dyn rustcode_core::TranscriptRecorder>> =
-                        Some(Arc::new(FileTranscriptRecorder::new(store.clone())));
+                let config = Arc::new(config);
+                let (initial_status, executor, llm_cell) = match build_client(&config) {
+                    Ok(llm_client) => {
+                        let recorder: Option<Arc<dyn rustcode_core::TranscriptRecorder>> =
+                            Some(Arc::new(FileTranscriptRecorder::new(store.clone())));
 
-                    let (swappable, llm_cell) =
-                        rustcode_llm::SwappableLlmClient::new(llm_client);
+                        let (swappable, llm_cell) =
+                            rustcode_llm::SwappableLlmClient::new(llm_client);
 
-                    let mut engine = {
-                        let io = Arc::new(LocalIo);
-                        Engine::new(
-                            Arc::new(swappable),
-                            io.clone(),
-                            io,
-                            Arc::new(WorkspacePermissionPolicy),
-                            PluginRegistry::default(),
-                            recorder,
-                            Some(handles.approver.clone()),
-                        )
-                        .with_workspace(&config.workspace_root)
-                        .with_memory_model(&config.model)
-                    };
+                        let mut engine = {
+                            let io = Arc::new(LocalIo);
+                            Engine::new(
+                                Arc::new(swappable),
+                                io.clone(),
+                                io,
+                                Arc::new(WorkspacePermissionPolicy),
+                                PluginRegistry::default(),
+                                recorder,
+                                Some(handles.approver.clone()),
+                            )
+                            .with_workspace(&config.workspace_root)
+                            .with_memory_model(&config.model)
+                        };
 
-                    if config.allow_network {
-                        if let Ok(registry) = build_mcp_registry(&config).await {
-                            engine = engine.with_mcp(registry);
+                        if config.allow_network {
+                            if let Ok(registry) = build_mcp_registry(&config).await {
+                                engine = engine.with_mcp(registry);
+                            }
                         }
+
+                        (
+                            None,
+                            Some(Arc::new(engine) as Arc<dyn rustcode_core::CommandExecutor>),
+                            Some(llm_cell),
+                        )
                     }
+                    Err(err) => (Some(format!("llm init failed: {err}")), None, None),
+                };
 
-                    (
-                        None,
-                        Some(Arc::new(engine) as Arc<dyn rustcode_core::CommandExecutor>),
-                        Some(llm_cell),
-                    )
-                }
-                Err(err) => (Some(format!("llm init failed: {err}")), None, None),
-            };
-
-            (defaults, initial_status, Some(config), executor, llm_cell)
-        }
-        Err(err) => (
-            rustcode_tui::InteractiveDefaults {
-                workspace_root: cwd.clone(),
-                model: "unknown".to_string(),
-                skills: Vec::new(),
-            },
-            Some(format!("config not loaded: {err}")),
-            None,
-            None,
-            None,
-        ),
-    };
+                (defaults, initial_status, Some(config), executor, llm_cell)
+            }
+            Err(err) => (
+                rustcode_tui::InteractiveDefaults {
+                    workspace_root: cwd.clone(),
+                    model: "unknown".to_string(),
+                    provider: String::new(),
+                    skills: Vec::new(),
+                },
+                Some(format!("config not loaded: {err}")),
+                None,
+                None,
+                None,
+            ),
+        };
 
     if fork && !continue_session && session.is_none() {
         initial_status = Some("--fork requires --continue or --session <SESSION_ID>".to_string());

@@ -80,12 +80,18 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                         activity: Vec::new(),
                         activity_selected: 0,
                         details_open: false,
+                        activity_hidden: true,
                         tool_details: false,
                         find: None,
                         running: None,
                         pending_prompt: None,
                         composer_cleared_by_ctrl_c: false,
                         last_typing_time: None,
+                        total_input_tokens: 0,
+                        total_output_tokens: 0,
+                        last_total_tokens: 0,
+                        context_limit: 0,
+                        cost_usd: 0.0,
                     });
                     push_toast(
                         state,
@@ -306,7 +312,17 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
         }
         CommandId::FocusActivity => {
             if let Screen::Chat(chat) = &mut state.screen {
+                chat.activity_hidden = false; // reveal panel before focusing
                 chat.focus = ChatFocus::Activity;
+            }
+        }
+        CommandId::ToggleActivity => {
+            if let Screen::Chat(chat) = &mut state.screen {
+                chat.activity_hidden = !chat.activity_hidden;
+                // If activity was focused and we just hid it, move focus to Composer
+                if chat.activity_hidden && chat.focus == ChatFocus::Activity {
+                    chat.focus = ChatFocus::Composer;
+                }
             }
         }
         CommandId::CancelRun => {

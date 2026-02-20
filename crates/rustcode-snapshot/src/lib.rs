@@ -106,9 +106,9 @@ impl SnapshotStore {
     /// # Errors
     /// Returns [`SnapshotError::Git`] if staging or tree creation fails.
     pub async fn track(&self) -> Result<String, SnapshotError> {
-        // Stage everything
-        self.git_work_tree(&["add", "--all", "--force", "."])
-            .await?;
+        // Stage everything (without --force so .gitignore is respected, keeping
+        // large build artefacts like target/ out of the snapshot index)
+        self.git_work_tree(&["add", "--all", "."]).await?;
 
         // Write the tree object and capture its hash
         let out = self.git_work_tree_raw(&["write-tree"]).output().await?;
@@ -149,8 +149,7 @@ impl SnapshotStore {
     /// # Errors
     /// Returns [`SnapshotError::Git`] if the diff operation fails.
     pub async fn changed_files(&self, snapshot_hash: &str) -> Result<Vec<String>, SnapshotError> {
-        self.git_work_tree(&["add", "--all", "--force", "."])
-            .await?;
+        self.git_work_tree(&["add", "--all", "."]).await?;
 
         let out = self
             .git_work_tree_raw(&[

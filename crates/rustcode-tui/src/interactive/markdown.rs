@@ -7,6 +7,7 @@
 /// - Horizontal rules: `---` / `===` (3+ chars)
 /// - Inline: `**bold**`, `*italic*`, `` `code` ``
 /// - Plain text passthrough
+use super::syntax_highlight::{highlight_code_line, HighlightState};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -17,6 +18,7 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     let mut in_code_block = false;
     let mut code_lang = String::new();
+    let mut code_hl: Option<HighlightState> = None;
 
     for raw in text.lines() {
         let stripped = raw.trim_end();
@@ -26,6 +28,7 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
             if in_code_block {
                 in_code_block = false;
                 code_lang.clear();
+                code_hl = None;
                 lines.push(Line::from(vec![Span::styled(
                     "─".repeat(40),
                     Style::default().fg(Color::DarkGray),
@@ -38,9 +41,15 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
                 } else {
                     code_lang.clone()
                 };
+                code_hl = HighlightState::new(&code_lang);
                 lines.push(Line::from(vec![
                     Span::styled("─── ", Style::default().fg(Color::DarkGray)),
-                    Span::styled(label, Style::default().fg(Color::Yellow)),
+                    Span::styled(
+                        label,
+                        Style::default()
+                            .fg(Color::White)
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled(" ───", Style::default().fg(Color::DarkGray)),
                 ]));
             }
@@ -48,10 +57,24 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
         }
 
         if in_code_block {
-            lines.push(Line::from(vec![Span::styled(
-                format!("  {stripped}"),
-                Style::default().fg(Color::Yellow),
-            )]));
+            let mut code_line_spans = vec![Span::raw("  ".to_string())];
+            if let Some(ref mut hl) = code_hl {
+                let hl_spans = highlight_code_line(stripped, hl);
+                if !hl_spans.is_empty() {
+                    code_line_spans.extend(hl_spans);
+                } else {
+                    code_line_spans.push(Span::styled(
+                        stripped.to_string(),
+                        Style::default().fg(Color::Yellow),
+                    ));
+                }
+            } else {
+                code_line_spans.push(Span::styled(
+                    stripped.to_string(),
+                    Style::default().fg(Color::Yellow),
+                ));
+            }
+            lines.push(Line::from(code_line_spans));
             continue;
         }
 

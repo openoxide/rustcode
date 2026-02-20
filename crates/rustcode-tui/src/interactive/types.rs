@@ -196,6 +196,8 @@ pub(super) enum CommandId {
     FocusComposer,
     FocusTranscript,
     FocusActivity,
+    /// Toggle activity panel visibility.
+    ToggleActivity,
     CancelRun,
     Quit,
     /// Open skill toggle overlay.
@@ -266,20 +268,84 @@ impl ActivityItem {
     }
 
     pub(super) fn summary(&self) -> String {
-        let mut s = match self {
-            ActivityItem::CommandAccepted { name } => name.clone(),
-            ActivityItem::ToolCall { id, name, .. } => format!("{name} ({id})"),
-            ActivityItem::ToolResult { id, name, ok, .. } => format!("{name} ({id}) ok={ok}"),
+        let s = match self {
+            ActivityItem::CommandAccepted { name } => {
+                // Engine emits format!("{command:?}") — extract the prompt if present
+                if let Some(start) = name.find("prompt: \"") {
+                    let rest = &name[start + 9..];
+                    if let Some(end) = rest.find('"') {
+                        let prompt = rest[..end].trim();
+                        let short: String = prompt.chars().take(70).collect();
+                        return if short.len() < prompt.len() {
+                            format!("{short}…")
+                        } else {
+                            short
+                        };
+                    }
+                }
+                // Fallback: show first 70 chars of name
+                let short: String = name.chars().take(70).collect();
+                if short.len() < name.chars().count() {
+                    format!("{short}…")
+                } else {
+                    short
+                }
+            }
+            ActivityItem::ToolCall {
+                name, arguments, ..
+            } => {
+                // Show the most meaningful argument (path, command, query)
+                if let Ok(args) = serde_json::from_str::<serde_json::Value>(arguments) {
+                    if let Some(p) = args
+                        .get("path")
+                        .or_else(|| args.get("file_path"))
+                        .or_else(|| args.get("target"))
+                        .and_then(|v| v.as_str())
+                    {
+                        return format!("{name}  {p}");
+                    }
+                    if let Some(cmd) = args.get("command").and_then(|v| v.as_str()) {
+                        let short: String = cmd.chars().take(55).collect();
+                        return if short.len() < cmd.chars().count() {
+                            format!("{name}  {short}…")
+                        } else {
+                            format!("{name}  {short}")
+                        };
+                    }
+                    if let Some(q) = args.get("query").and_then(|v| v.as_str()) {
+                        let short: String = q.chars().take(55).collect();
+                        return format!("{name}  {short}");
+                    }
+                }
+                name.clone()
+            }
+            ActivityItem::ToolResult {
+                name, ok, output, ..
+            } => {
+                let indicator = if *ok { "✓" } else { "✗" };
+                // Show first meaningful output line
+                let snippet = output
+                    .lines()
+                    .find(|l| !l.trim().is_empty())
+                    .unwrap_or("")
+                    .trim();
+                if snippet.is_empty() {
+                    format!("{name}  {indicator}")
+                } else {
+                    let short: String = snippet.chars().take(60).collect();
+                    format!("{name}  {indicator}  {short}")
+                }
+            }
             ActivityItem::OutputChunk { text } => text.replace('\n', " "),
             ActivityItem::Warning { message } => message.clone(),
             ActivityItem::Failure { message } => message.clone(),
             ActivityItem::Completed => "done".to_string(),
         };
-        if s.len() > 140 {
-            s.truncate(140);
-            s.push_str("...");
+        if s.chars().count() > 140 {
+            format!("{}…", s.chars().take(140).collect::<String>())
+        } else {
+            s
         }
-        s
     }
 
     pub(super) fn details_lines(&self) -> Vec<Line<'static>> {
@@ -365,6 +431,8 @@ pub(super) struct ChatState {
     pub(super) activity: Vec<ActivityItem>,
     pub(super) activity_selected: usize,
     pub(super) details_open: bool,
+    /// Whether the activity panel is hidden (toggled with Ctrl+W).
+    pub(super) activity_hidden: bool,
     pub(super) tool_details: bool,
     pub(super) find: Option<FindState>,
     pub(super) running: Option<RunningCommand>,
@@ -374,6 +442,17 @@ pub(super) struct ChatState {
     pub(super) composer_cleared_by_ctrl_c: bool,
     /// Timestamp of last typing activity in composer.
     pub(super) last_typing_time: Option<Instant>,
+    // ── Token usage tracking (accumulated from UsageUpdate events) ───
+    /// Cumulative input tokens across all LLM steps in this session.
+    pub(super) total_input_tokens: u64,
+    /// Cumulative output tokens.
+    pub(super) total_output_tokens: u64,
+    /// Most recent total token count (current context window usage).
+    pub(super) last_total_tokens: u64,
+    /// Context window limit in tokens.
+    pub(super) context_limit: u64,
+    /// Estimated cumulative cost in USD.
+    pub(super) cost_usd: f64,
 }
 
 pub(super) struct AppState {
@@ -390,6 +469,8 @@ pub(super) struct AppState {
     pub(super) defaults: InteractiveDefaults,
 
     pub(super) pending_approval: Option<PendingApproval>,
+    /// Index of the currently highlighted option in the inline approval selector.
+    pub(super) approval_selection: usize,
 
     pub(super) submit_mode: InteractiveSubmitMode,
 
@@ -415,8 +496,7 @@ pub(super) struct AppState {
     /// Writing a new `Arc<dyn LlmClient>` here causes all subsequent LLM
     /// requests to use the new client, enabling live model/provider switching
     /// without restarting the engine.  `None` in remote/attach mode.
-    pub(super) llm_cell:
-        Option<Arc<std::sync::RwLock<Arc<dyn rustcode_llm::LlmClient>>>>,
+    pub(super) llm_cell: Option<Arc<std::sync::RwLock<Arc<dyn rustcode_llm::LlmClient>>>>,
 }
 
 pub(super) fn build_prompt_history(messages: &[StoredMessage]) -> Vec<String> {

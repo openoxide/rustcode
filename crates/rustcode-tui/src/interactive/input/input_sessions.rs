@@ -56,12 +56,18 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         activity: Vec::new(),
                         activity_selected: 0,
                         details_open: false,
+                        activity_hidden: true,
                         tool_details: false,
                         find: None,
                         running: None,
                         pending_prompt: None,
                         composer_cleared_by_ctrl_c: false,
                         last_typing_time: None,
+                        total_input_tokens: 0,
+                        total_output_tokens: 0,
+                        last_total_tokens: 0,
+                        context_limit: 0,
+                        cost_usd: 0.0,
                     });
                 }
                 state.sessions_filter_active = false;
@@ -170,6 +176,11 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 pending_prompt: None,
                 composer_cleared_by_ctrl_c: false,
                 last_typing_time: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                last_total_tokens: 0,
+                context_limit: 0,
+                cost_usd: 0.0,
             });
         }
         _ => {}

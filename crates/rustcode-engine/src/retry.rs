@@ -132,6 +132,14 @@ pub fn is_retryable(error_msg: &str) -> bool {
         return true;
     }
 
+    // Retryable: empty / invalid response from provider (often transient with proxies like
+    // OpenRouter — the upstream model occasionally returns nothing and retrying usually succeeds)
+    if lower.contains("did not include content or tool calls")
+        || lower.contains("stream did not include text deltas")
+    {
+        return true;
+    }
+
     // Retryable: server errors
     if lower.contains("500")
         || lower.contains("502")
@@ -158,7 +166,15 @@ pub fn is_retryable(error_msg: &str) -> bool {
 ///
 /// Retries the closure up to `policy.max_retries` times on retryable errors,
 /// with exponential backoff between attempts.
-pub async fn retry_llm_call<F, Fut, T, E>(policy: &RetryPolicy, mut make_call: F) -> Result<T, E>
+///
+/// The optional `on_retry` callback is invoked before each retry delay,
+/// receiving a human-readable message (e.g. "retrying in 2s (attempt 1/3)").
+/// The TUI uses this to show a toast so the user knows a retry is happening.
+pub async fn retry_llm_call<F, Fut, T, E>(
+    policy: &RetryPolicy,
+    mut make_call: F,
+    on_retry: Option<&(dyn Fn(&str) + Send + Sync)>,
+) -> Result<T, E>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<T, E>>,
@@ -178,12 +194,21 @@ where
                 }
 
                 let delay = policy.delay(attempt);
+                let msg = format!(
+                    "retrying in {}s (attempt {}/{})…",
+                    delay.as_secs(),
+                    attempt,
+                    policy.max_retries
+                );
                 tracing::warn!(
                     attempt,
                     delay_ms = delay.as_millis() as u64,
                     error = %err_msg,
                     "LLM call failed, retrying"
                 );
+                if let Some(notify) = on_retry {
+                    notify(&msg);
+                }
                 tokio::time::sleep(delay).await;
             }
         }
@@ -279,6 +304,18 @@ mod tests {
         assert!(!is_retryable("parsing error: invalid json"));
     }
 
+    #[test]
+    fn empty_provider_response_is_retryable() {
+        // OpenRouter and other proxies occasionally return empty responses transiently
+        assert!(is_retryable(
+            "provider response did not include content or tool calls"
+        ));
+        assert!(is_retryable("anthropic stream did not include text deltas"));
+        assert!(is_retryable(
+            "openai-compatible stream did not include text deltas"
+        ));
+    }
+
     // Tests for LlmErrorKind typed classification (via Display/Debug format)
     #[test]
     fn classified_ratelimit_is_retryable() {
@@ -326,16 +363,20 @@ mod tests {
             ..Default::default()
         };
 
-        let result: Result<&str, String> = retry_llm_call(&policy, || {
-            let count = counter.fetch_add(1, Ordering::SeqCst);
-            async move {
-                if count == 0 {
-                    Err("429 rate_limit_exceeded".to_string())
-                } else {
-                    Ok("success")
+        let result: Result<&str, String> = retry_llm_call(
+            &policy,
+            || {
+                let count = counter.fetch_add(1, Ordering::SeqCst);
+                async move {
+                    if count == 0 {
+                        Err("429 rate_limit_exceeded".to_string())
+                    } else {
+                        Ok("success")
+                    }
                 }
-            }
-        })
+            },
+            None,
+        )
         .await;
 
         assert_eq!(result.unwrap(), "success");
@@ -350,9 +391,11 @@ mod tests {
             ..Default::default()
         };
 
-        let result: Result<(), String> = retry_llm_call(&policy, || async {
-            Err::<(), String>("503 Service Unavailable".to_string())
-        })
+        let result: Result<(), String> = retry_llm_call(
+            &policy,
+            || async { Err::<(), String>("503 Service Unavailable".to_string()) },
+            None,
+        )
         .await;
 
         assert!(result.is_err());
@@ -367,10 +410,14 @@ mod tests {
             ..Default::default()
         };
 
-        let result: Result<(), String> = retry_llm_call(&policy, || {
-            counter.fetch_add(1, Ordering::SeqCst);
-            async { Err::<(), String>("401 Unauthorized".to_string()) }
-        })
+        let result: Result<(), String> = retry_llm_call(
+            &policy,
+            || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                async { Err::<(), String>("401 Unauthorized".to_string()) }
+            },
+            None,
+        )
         .await;
 
         assert!(result.is_err());

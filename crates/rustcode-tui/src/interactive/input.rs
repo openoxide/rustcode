@@ -1,7 +1,8 @@
 use super::{
     build_prompt_history, build_provider_entries, composer_backspace, composer_clear,
-    composer_delete, composer_insert_str, composer_move_down, composer_move_end,
-    composer_move_home, composer_move_left, composer_move_right, composer_move_up,
+    composer_delete, composer_insert_str, composer_kill_line_backward, composer_kill_line_forward,
+    composer_move_down, composer_move_end, composer_move_home, composer_move_left,
+    composer_move_right, composer_move_up, composer_word_left, composer_word_right,
     compute_palette_view, compute_sessions_view, execute_command, filter_files, filter_models,
     filter_provider_entries, find_next, find_prev, handle_slash_command, history_next,
     history_prev, maybe_execute_palette_query, open_command_palette, provider_connect_methods,
@@ -19,42 +20,64 @@ use self::input_chat::handle_chat_key;
 use self::input_sessions::handle_sessions_key;
 
 pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
-    if let Some(pending) = state.pending_approval.take() {
-        let is_edit_permission = pending.request.permission.eq_ignore_ascii_case("write")
-            || pending.request.permission.eq_ignore_ascii_case("edit");
-        let is_command_permission = pending.request.permission.eq_ignore_ascii_case("exec");
-        let decision = match key.code {
-            KeyCode::Char('a' | 'A' | 'y' | 'Y' | '1') => Some(ApprovalResponse::AllowOnce),
-            KeyCode::Char('e' | 'E') if is_edit_permission => Some(ApprovalResponse::AllowAllEdits),
-            KeyCode::Char('c' | 'C') if is_command_permission => {
-                Some(ApprovalResponse::AllowAllCommands)
+    if state.pending_approval.is_some() {
+        let perm = state
+            .pending_approval
+            .as_ref()
+            .unwrap()
+            .request
+            .permission
+            .to_lowercase();
+        let is_edit = perm == "write" || perm == "edit";
+        let is_cmd = perm == "exec";
+        let options_count: usize = if is_edit || is_cmd { 3 } else { 2 };
+
+        match key.code {
+            KeyCode::Left | KeyCode::Up => {
+                if state.approval_selection > 0 {
+                    state.approval_selection -= 1;
+                }
             }
-            KeyCode::Char('2') if is_edit_permission => Some(ApprovalResponse::AllowAllEdits),
-            KeyCode::Char('2') if is_command_permission => Some(ApprovalResponse::AllowAllCommands),
-            KeyCode::Char('d' | 'D' | 'n' | 'N') => Some(ApprovalResponse::Deny),
-            KeyCode::Esc | KeyCode::Char('q' | 'Q') => Some(ApprovalResponse::Deny),
-            _ => None,
-        };
-        if let Some(decision) = decision {
-            let _ = pending.reply.send(decision);
-            let decision_text = match decision {
-                ApprovalResponse::AllowOnce => "allow_once",
-                ApprovalResponse::AllowAllEdits => "allow_all_edits",
-                ApprovalResponse::AllowAllCommands => "allow_all_commands",
-                ApprovalResponse::Deny => "deny",
-            };
-            state.status = Some(format!(
-                "approval: tool={} decision={decision_text}",
-                pending.request.tool,
-            ));
-            push_toast(
-                state,
-                ToastVariant::Info,
-                format!("approval: {} -> {decision_text}", pending.request.tool),
-                Duration::from_secs(2),
-            );
-        } else {
-            state.pending_approval = Some(pending);
+            KeyCode::Right | KeyCode::Down => {
+                if state.approval_selection + 1 < options_count {
+                    state.approval_selection += 1;
+                }
+            }
+            KeyCode::Enter => {
+                let pending = state.pending_approval.take().unwrap();
+                let response = match state.approval_selection {
+                    0 => ApprovalResponse::AllowOnce,
+                    1 if is_edit => ApprovalResponse::AllowAllEdits,
+                    1 if is_cmd => ApprovalResponse::AllowAllCommands,
+                    _ => ApprovalResponse::Deny,
+                };
+                let label = match response {
+                    ApprovalResponse::AllowOnce => "approved once",
+                    ApprovalResponse::AllowAllEdits => "approved all edits",
+                    ApprovalResponse::AllowAllCommands => "approved all commands",
+                    ApprovalResponse::Deny => "denied",
+                };
+                push_toast(
+                    state,
+                    ToastVariant::Info,
+                    format!("{}: {label}", pending.request.tool),
+                    Duration::from_secs(2),
+                );
+                let _ = pending.reply.send(response);
+                state.approval_selection = 0;
+            }
+            KeyCode::Esc => {
+                let pending = state.pending_approval.take().unwrap();
+                push_toast(
+                    state,
+                    ToastVariant::Info,
+                    format!("{}: denied", pending.request.tool),
+                    Duration::from_secs(2),
+                );
+                let _ = pending.reply.send(ApprovalResponse::Deny);
+                state.approval_selection = 0;
+            }
+            _ => {} // all other keys: selector stays, no action
         }
         return false;
     }
@@ -550,6 +573,9 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
 
                         // 1. Update defaults so new sessions and footer fallback use new model
                         state.defaults.model = new_model.clone();
+                        if let Some((provider, _)) = new_model.split_once('/') {
+                            state.defaults.provider = provider.to_string();
+                        }
 
                         // 2. Replace state.config so the next submit_prompt uses the new model.
                         //    Also clear llm_provider so the model prefix ("openai/gpt-4o")

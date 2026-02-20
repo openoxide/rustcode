@@ -41,6 +41,8 @@ mod interactive;
 pub struct InteractiveDefaults {
     pub workspace_root: PathBuf,
     pub model: String,
+    /// The resolved LLM provider identifier (e.g., "openrouter", "anthropic").
+    pub provider: String,
     /// Skills available in this workspace session.
     pub skills: Vec<rustcode_skills::SkillFile>,
 }

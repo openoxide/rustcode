@@ -197,6 +197,62 @@ pub(super) fn composer_cursor_visual(text: &str, cursor: usize, width: u16) -> (
     (row, col)
 }
 
+/// Jump cursor left past any trailing whitespace, then past the preceding word.
+pub(super) fn composer_word_left(chat: &mut ChatState) {
+    let idx = chat.composer_cursor.min(chat.composer.len());
+    let before = &chat.composer[..idx];
+    // skip trailing whitespace, then find the last whitespace boundary
+    let trimmed = before.trim_end();
+    let new_idx = trimmed
+        .rfind(|c: char| c.is_whitespace())
+        .map(|p| {
+            // p is the byte index of the whitespace char; we want the next char start
+            let ch = trimmed[p..]
+                .chars()
+                .next()
+                .map(|c| c.len_utf8())
+                .unwrap_or(1);
+            p + ch
+        })
+        .unwrap_or(0);
+    chat.composer_cursor = new_idx;
+}
+
+/// Jump cursor right past the current word, then past any following whitespace.
+pub(super) fn composer_word_right(chat: &mut ChatState) {
+    let idx = chat.composer_cursor.min(chat.composer.len());
+    let after = &chat.composer[idx..];
+    // skip non-whitespace (the word), then skip whitespace
+    let after_word = after.trim_start_matches(|c: char| !c.is_whitespace());
+    let after_space = after_word.trim_start();
+    let delta = after.len() - after_space.len();
+    chat.composer_cursor = (idx + delta).min(chat.composer.len());
+}
+
+/// Delete from cursor to end of the current line (does not delete the `\n`).
+pub(super) fn composer_kill_line_forward(chat: &mut ChatState) {
+    let idx = chat.composer_cursor.min(chat.composer.len());
+    let end = chat.composer[idx..]
+        .find('\n')
+        .map(|p| idx + p)
+        .unwrap_or(chat.composer.len());
+    if end > idx {
+        chat.composer.replace_range(idx..end, "");
+    }
+    chat.last_typing_time = Some(std::time::Instant::now());
+}
+
+/// Delete from the start of the current line to the cursor.
+pub(super) fn composer_kill_line_backward(chat: &mut ChatState) {
+    let idx = chat.composer_cursor.min(chat.composer.len());
+    let start = chat.composer[..idx].rfind('\n').map(|p| p + 1).unwrap_or(0);
+    if idx > start {
+        chat.composer.replace_range(start..idx, "");
+        chat.composer_cursor = start;
+    }
+    chat.last_typing_time = Some(std::time::Instant::now());
+}
+
 pub(super) fn history_prev(chat: &mut ChatState) {
     if chat.prompt_history.is_empty() {
         return;

@@ -209,12 +209,17 @@ impl LlmClient for GoogleGenerativeAiClient {
 
         let parsed: Value = serde_json::from_str(&body)
             .map_err(|err| LlmError::Invalid(format!("response is not valid JSON: {err}")))?;
+        // Check for error embedded in a 200 response
+        if let Some(err_msg) = extract_stream_error_message(&parsed) {
+            return Err(LlmError::Invalid(format!("provider error: {err_msg}")));
+        }
         let tool_calls = extract_google_tool_calls(&parsed);
         let text = extract_google_text(&parsed).unwrap_or_default();
         if text.is_empty() && tool_calls.is_empty() {
-            return Err(LlmError::Invalid(
-                "provider response did not include content or tool calls".to_string(),
-            ));
+            return Err(LlmError::Invalid(format!(
+                "provider response did not include content or tool calls: {}",
+                truncate_for_error(&body)
+            )));
         }
         let usage = extract_google_usage(&parsed);
         Ok(ChatResponse {

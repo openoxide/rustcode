@@ -48,6 +48,15 @@ pub enum EventPayload {
     Failure {
         message: String,
     },
+    /// Token usage from a single LLM step — accumulated by the TUI for display.
+    UsageUpdate {
+        input_tokens: u64,
+        output_tokens: u64,
+        total_tokens: u64,
+        cache_read: u64,
+        cache_write: u64,
+        context_limit: u64,
+    },
     Completed,
 }
 

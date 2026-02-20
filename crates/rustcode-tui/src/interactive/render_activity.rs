@@ -1,7 +1,6 @@
 use super::{
     centered_rect, ActivityItem, AppState, Block, Borders, ChatFocus, ChatState, Clear, Color,
-    Duration, Line, List, ListItem, Modifier, Paragraph, PendingApproval, Rect, Span, Style,
-    SystemTime, Wrap,
+    Duration, Line, List, ListItem, Modifier, Paragraph, Rect, Span, Style, SystemTime, Wrap,
 };
 
 pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: &ChatState) {
@@ -16,12 +15,9 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_else(|_| Duration::from_secs(0))
             .as_millis();
-        match (ms / 120) % 4 {
-            0 => '|',
-            1 => '/',
-            2 => '-',
-            _ => '\\',
-        }
+        // Heavy-braille circle spinner: ⣾⣽⣻⢿⡿⣟⣯⣷ (8 frames × 80 ms)
+        const SPIN: &[char] = &['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
+        SPIN[(ms / 80 % 8) as usize]
     } else {
         ' '
     };
@@ -119,92 +115,6 @@ pub(super) fn render_activity_details_modal(frame: &mut ratatui::Frame<'_>, chat
         .block(block)
         .wrap(Wrap { trim: false });
     frame.render_widget(modal, area);
-}
-
-pub(super) fn render_approval_modal(frame: &mut ratatui::Frame<'_>, pending: &PendingApproval) {
-    let area = centered_rect(80, 60, frame.area());
-    frame.render_widget(Clear, area);
-
-    let mut lines = Vec::new();
-    lines.push(Line::from(vec![Span::styled(
-        "Tool approval required",
-        Style::default().add_modifier(Modifier::BOLD),
-    )]));
-    lines.push(Line::raw(""));
-    lines.push(Line::raw(format!("tool: {}", pending.request.tool)));
-    lines.push(Line::raw(format!(
-        "permission: {}",
-        pending.request.permission
-    )));
-    lines.push(Line::raw(format!("target: {}", pending.request.pattern)));
-    lines.push(Line::raw(""));
-    lines.push(Line::raw(format!("reason: {}", pending.request.reason)));
-    lines.push(Line::raw(""));
-
-    let mut action_spans = vec![
-        approval_button("[A] Approve once", Color::Green),
-        Span::raw("  "),
-    ];
-    if is_edit_permission(&pending.request.permission) {
-        action_spans.push(approval_button("[E] Approve all edits", Color::Cyan));
-        action_spans.push(Span::raw("  "));
-    }
-    if is_command_permission(&pending.request.permission) {
-        action_spans.push(approval_button("[C] Approve all commands", Color::Cyan));
-        action_spans.push(Span::raw("  "));
-    }
-    action_spans.push(approval_button("[D] Deny", Color::Red));
-    lines.push(Line::from(action_spans));
-    lines.push(Line::from(vec![Span::raw("keys: 1=once  2=all  Esc=deny")]));
-    lines.push(Line::raw(""));
-    lines.push(Line::raw("arguments (preview):"));
-    let args = serde_json::to_string_pretty(&pending.request.arguments)
-        .unwrap_or_else(|_| "<unprintable>".to_string());
-    let arg_lines = args.lines().collect::<Vec<_>>();
-    for line in arg_lines.iter().take(6) {
-        lines.push(Line::raw(truncate_modal_line(line, 100)));
-    }
-    if arg_lines.len() > 6 {
-        lines.push(Line::raw("...[truncated]..."));
-    }
-
-    let block = Block::default()
-        .title("Approval")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
-    let modal = Paragraph::new(lines)
-        .block(block)
-        .wrap(Wrap { trim: false });
-    frame.render_widget(modal, area);
-}
-
-fn approval_button(label: &str, color: Color) -> Span<'static> {
-    Span::styled(
-        format!(" {label} "),
-        Style::default()
-            .fg(color)
-            .add_modifier(Modifier::BOLD | Modifier::REVERSED),
-    )
-}
-
-fn truncate_modal_line(input: &str, max_chars: usize) -> String {
-    if input.chars().count() <= max_chars {
-        return input.to_string();
-    }
-    let mut out = input
-        .chars()
-        .take(max_chars.saturating_sub(3))
-        .collect::<String>();
-    out.push_str("...");
-    out
-}
-
-fn is_edit_permission(permission: &str) -> bool {
-    permission.eq_ignore_ascii_case("write") || permission.eq_ignore_ascii_case("edit")
-}
-
-fn is_command_permission(permission: &str) -> bool {
-    permission.eq_ignore_ascii_case("exec")
 }
 
 /// Render the settings panel showing directory and version info.

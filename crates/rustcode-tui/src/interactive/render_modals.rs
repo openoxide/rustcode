@@ -667,8 +667,14 @@ pub(super) fn render_help_modal(frame: &mut ratatui::Frame<'_>, state: &AppState
     lines.push(Line::raw(
         "  Enter: submit prompt (composer) / next match (transcript) / details (activity)",
     ));
-    lines.push(Line::raw("  Alt+Enter: insert newline in composer"));
+    lines.push(Line::raw(
+        "  Alt+Enter / Shift+Enter: insert newline in composer",
+    ));
     lines.push(Line::raw("  Alt+Up/Down: browse prompt history"));
+    lines.push(Line::raw(
+        "  Ctrl+K: kill to end of line  Ctrl+U: kill to start of line",
+    ));
+    lines.push(Line::raw("  Ctrl+Left/Right: jump word in composer"));
     lines.push(Line::raw(
         "  Arrow keys: edit text (composer) / scroll (transcript) / select (activity)",
     ));

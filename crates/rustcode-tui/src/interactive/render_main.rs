@@ -1,9 +1,9 @@
 use super::{
     apply_find_highlight, build_transcript_lines, composer_cursor_visual, format_age,
-    render_activity, render_activity_details_modal, render_approval_modal, render_help_modal,
-    render_modal, render_settings, AppState, Block, Borders, ChatFocus, ChatState, Color,
-    Constraint, Direction, Layout, Line, List, ListItem, Modifier, Paragraph, Screen, Span, Style,
-    ToastVariant, Wrap,
+    render_activity, render_activity_details_modal, render_approval_inline,
+    render_approval_selector, render_help_modal, render_modal, render_settings, AppState, Block,
+    Borders, ChatFocus, ChatState, Color, Constraint, Direction, Layout, Line, List, ListItem,
+    Modifier, Paragraph, Screen, Span, Style, ToastVariant, Wrap,
 };
 
 /// Timeout for typing indicator (milliseconds).
@@ -15,9 +15,6 @@ pub(super) fn render(frame: &mut ratatui::Frame<'_>, state: &AppState) {
         Screen::Chat(chat) => render_chat(frame, state, chat),
     }
 
-    if let Some(pending) = &state.pending_approval {
-        render_approval_modal(frame, pending);
-    }
     if let Some(modal) = &state.modal {
         render_modal(frame, modal);
     }
@@ -29,7 +26,7 @@ pub(super) fn render(frame: &mut ratatui::Frame<'_>, state: &AppState) {
 pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(2)])
+        .constraints([Constraint::Min(1), Constraint::Length(3)])
         .split(frame.area());
 
     let items = if state.sessions_view.is_empty() {
@@ -90,48 +87,106 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
     }
     frame.render_stateful_widget(list, chunks[0], &mut list_state);
 
-    let (status_text, status_style) = if let Some(toast) = state.toasts.last() {
+    // ─── Footer: 2-line layout matching chat screen ───────────────────────────
+    let model_label = state.defaults.model.as_str();
+
+    // Line 1: contextual status — filter mode, error/toast, or just model label
+    let (main_text, main_style) = if state.sessions_filter_active {
+        let text = if state.sessions_filter.is_empty() {
+            " filter: ".to_string()
+        } else {
+            format!(" filter: {}", state.sessions_filter)
+        };
+        (
+            text,
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        )
+    } else if !state.sessions_filter.is_empty() {
+        (
+            format!(" filter:{}", state.sessions_filter),
+            Style::default().fg(Color::Cyan),
+        )
+    } else if let Some(ref s) = state.status {
+        let capped: String = s.chars().take(80).collect();
+        (
+            format!(" {capped}"),
+            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        )
+    } else if let Some(toast) = state.toasts.last() {
         let style = match toast.variant {
             ToastVariant::Info => Style::default().fg(Color::Cyan),
             ToastVariant::Success => Style::default().fg(Color::Green),
             ToastVariant::Warning => Style::default().fg(Color::Magenta),
             ToastVariant::Error => Style::default().fg(Color::Red),
         };
-        (toast.message.as_str(), style)
+        (format!(" {}", toast.message), style)
     } else {
-        ("", Style::default())
+        (String::new(), Style::default())
     };
-    let model_label = state.defaults.model.as_str();
-    let filter_display = if state.sessions_filter.is_empty() {
-        String::new()
-    } else {
-        format!("  filter:{}", state.sessions_filter)
-    };
-    let help = Paragraph::new(Line::from(vec![
-        Span::styled(
-            " ?: help  Ctrl+P: cmds  ↑↓: select  Enter: open  /: filter  ",
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::styled(
-            "Ctrl+N: new  Ctrl+E: rename  Ctrl+D: delete  Ctrl+R: refresh  Esc: quit",
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::styled(filter_display, Style::default().fg(Color::Cyan)),
+    let status_line = Line::from(vec![
+        Span::styled(main_text, main_style),
         Span::styled(
             format!("  [{model_label}]"),
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
         ),
-        Span::raw("  "),
-        Span::styled(status_text, status_style),
-    ]))
-    .block(
+    ]);
+
+    // Line 2: key hints — filter-mode aware, styled like chat screen compact hints
+    let hints_line = if state.sessions_filter_active {
+        Line::from(vec![
+            Span::styled(
+                " Enter",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(":open  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "Esc",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(":clear  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "↑↓",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(":select", Style::default().fg(Color::DarkGray)),
+        ])
+    } else {
+        Line::from(vec![
+            Span::styled(" Ctrl+P", Style::default().fg(Color::DarkGray)),
+            Span::styled(" cmds", Style::default().fg(Color::DarkGray)),
+            Span::styled("   /", Style::default().fg(Color::DarkGray)),
+            Span::styled(" filter", Style::default().fg(Color::DarkGray)),
+            Span::styled("   N", Style::default().fg(Color::DarkGray)),
+            Span::styled(" new", Style::default().fg(Color::DarkGray)),
+            Span::styled("   E", Style::default().fg(Color::DarkGray)),
+            Span::styled(" rename", Style::default().fg(Color::DarkGray)),
+            Span::styled("   D", Style::default().fg(Color::DarkGray)),
+            Span::styled(" delete", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "   ? help",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            ),
+        ])
+    };
+
+    let footer = Paragraph::new(vec![status_line, hints_line]).block(
         Block::default()
             .borders(Borders::TOP)
             .border_style(Style::default().fg(Color::DarkGray)),
     );
-    frame.render_widget(help, chunks[1]);
+    frame.render_widget(footer, chunks[1]);
 }
 
 pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState) {
@@ -140,11 +195,34 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
         .split(frame.area());
 
+    // Dynamic composer height: expands with newlines (min 5 = 3 content + 2 borders,
+    // max 8 = 6 content + 2 borders).
+    let composer_content_lines = if chat.composer.is_empty() {
+        1
+    } else {
+        chat.composer.lines().count().max(1)
+    };
+    let composer_height = (composer_content_lines as u16 + 2).clamp(5, 8);
+
+    // When the approval selector is shown, enlarge the bottom pane to fit
+    // the vertical option list (options + hint line + 2 borders).
+    let bottom_height = if let Some(pending) = &app.pending_approval {
+        let perm = pending.request.permission.to_lowercase();
+        let opt_count: u16 = if perm == "write" || perm == "edit" || perm == "exec" {
+            3
+        } else {
+            2
+        };
+        opt_count + 3 // options + hint + top/bottom borders
+    } else {
+        composer_height
+    };
+
     let left = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(1),
-            Constraint::Length(5),
+            Constraint::Length(bottom_height),
             Constraint::Length(3),
         ])
         .split(root[0]);
@@ -156,16 +234,68 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         .as_deref()
         .unwrap_or("(new session)")
         .to_string();
+    // Extract provider name from config or model string (e.g., "openrouter" or "opencode/gpt-4o")
+    let provider_label = {
+        let mut provider_str = app.defaults.provider.as_str();
+        if provider_str.is_empty() {
+            let model = app.defaults.model.as_str();
+            if let Some((p, _)) = model.split_once('/') {
+                provider_str = p;
+            } else {
+                provider_str = model;
+            }
+        }
+        
+        // Title-case the provider name
+        let mut chars = provider_str.chars();
+        match chars.next() {
+            Some(first) => {
+                let mut s = first.to_uppercase().to_string();
+                s.extend(chars);
+                s
+            }
+            None => app.defaults.model.clone(),
+        }
+    };
+    // Build context info from real token usage data
+    let mut ctx_parts: Vec<String> = Vec::new();
+    if chat.last_total_tokens > 0 {
+        // Format token count with commas
+        let tokens = format_tokens(chat.last_total_tokens);
+        ctx_parts.push(format!("{tokens} tokens"));
+    }
+    if chat.context_limit > 0 && chat.last_total_tokens > 0 {
+        let pct = ((chat.last_total_tokens as f64 / chat.context_limit as f64) * 100.0).min(100.0);
+        ctx_parts.push(format!("{pct:.0}% used"));
+    }
+    if chat.cost_usd > 0.001 {
+        ctx_parts.push(format!("${:.2}", chat.cost_usd));
+    }
+    let ctx_display = if ctx_parts.is_empty() {
+        provider_label.clone()
+    } else {
+        format!("{}  {}", provider_label, ctx_parts.join("  "))
+    };
     let mut transcript_title_spans = vec![
         Span::styled(session_title, Style::default().add_modifier(Modifier::BOLD)),
         Span::raw("  "),
         Span::styled(
-            chat.session.id.clone(),
+            ctx_display,
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
         ),
     ];
+    // Tool details toggle indicator
+    if chat.tool_details {
+        transcript_title_spans.push(Span::raw("  "));
+        transcript_title_spans.push(Span::styled(
+            "[tools expanded]",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::DIM),
+        ));
+    }
     if let Some(find) = &chat.find {
         if !find.query.trim().is_empty() {
             transcript_title_spans.push(Span::raw("  "));
@@ -184,13 +314,33 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     let mut lines = build_transcript_lines(chat);
     lines = apply_find_highlight(lines, chat.find.as_ref());
 
+    // Append inline approval info when a tool approval is pending.
+    if let Some(pending) = &app.pending_approval {
+        let inner_w = left[0].width.saturating_sub(2);
+        let ws_root = app
+            .config
+            .as_ref()
+            .map(|c| c.workspace_root.clone())
+            .unwrap_or_default();
+        lines.extend(render_approval_inline(&pending.request, inner_w, &ws_root));
+    }
+
     let transcript_border = if chat.focus == ChatFocus::Transcript {
         Style::default().fg(Color::Cyan)
     } else {
         Style::default()
     };
     let transcript_inner_h = left[0].height.saturating_sub(2).max(1) as usize;
-    let max_scroll = lines.len().saturating_sub(transcript_inner_h) as u16;
+    let inner_w = left[0].width.saturating_sub(2).max(1) as usize;
+    // Account for line wrapping: each logical line may span multiple visual rows.
+    let wrapped_count: usize = lines
+        .iter()
+        .map(|l| {
+            let w = l.width();
+            if w <= inner_w { 1 } else { (w + inner_w - 1) / inner_w }
+        })
+        .sum();
+    let max_scroll = wrapped_count.saturating_sub(transcript_inner_h) as u16;
     let from_bottom = chat.scroll.min(max_scroll);
     let scroll_top = max_scroll.saturating_sub(from_bottom);
 
@@ -230,7 +380,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     } else {
         "Prompt"
     };
-    let composer_title = Line::from(vec![
+    let mut composer_title_spans = vec![
         Span::styled(prompt_label, Style::default().add_modifier(Modifier::BOLD)),
         Span::raw("  "),
         Span::styled(
@@ -253,7 +403,18 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
         ),
-    ]);
+    ];
+    // Show character count when the composer has content
+    if !chat.composer.is_empty() {
+        composer_title_spans.push(Span::raw("  "));
+        composer_title_spans.push(Span::styled(
+            format!("[{}c]", chat.composer.chars().count()),
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ));
+    }
+    let composer_title = Line::from(composer_title_spans);
     let composer_border = if chat.focus == ChatFocus::Composer {
         Style::default().fg(Color::Cyan)
     } else {
@@ -269,48 +430,53 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     } else {
         Style::default()
     };
-    let composer_area = left[1];
-    let inner_w = composer_area.width.saturating_sub(2);
-    let inner_h = composer_area.height.saturating_sub(2);
-    let (cursor_row, cursor_col) = if chat.focus == ChatFocus::Composer {
-        composer_cursor_visual(&chat.composer, chat.composer_cursor, inner_w)
+    if let Some(pending) = &app.pending_approval {
+        render_approval_selector(frame, left[1], &pending.request, app.approval_selection);
     } else {
-        (0, 0)
-    };
-    let composer_scroll = if chat.focus == ChatFocus::Composer {
-        cursor_row.saturating_sub(inner_h.saturating_sub(1) as usize)
-    } else {
-        0
-    };
+        let composer_area = left[1];
+        let inner_w = composer_area.width.saturating_sub(2);
+        let inner_h = composer_area.height.saturating_sub(2);
+        let (cursor_row, cursor_col) = if chat.focus == ChatFocus::Composer {
+            composer_cursor_visual(&chat.composer, chat.composer_cursor, inner_w)
+        } else {
+            (0, 0)
+        };
+        let composer_scroll = if chat.focus == ChatFocus::Composer {
+            cursor_row.saturating_sub(inner_h.saturating_sub(1) as usize)
+        } else {
+            0
+        };
 
-    let composer = Paragraph::new(composer_text)
-        .style(composer_style)
-        .block(
-            Block::default()
-                .title(composer_title)
-                .borders(Borders::ALL)
-                .border_style(composer_border),
-        )
-        .wrap(Wrap { trim: false })
-        .scroll((composer_scroll as u16, 0));
-    frame.render_widget(composer, composer_area);
+        let composer = Paragraph::new(composer_text)
+            .style(composer_style)
+            .block(
+                Block::default()
+                    .title(composer_title)
+                    .borders(Borders::ALL)
+                    .border_style(composer_border),
+            )
+            .wrap(Wrap { trim: false })
+            .scroll((composer_scroll as u16, 0));
+        frame.render_widget(composer, composer_area);
 
-    if chat.focus == ChatFocus::Composer
-        && !app.help_open
-        && app.modal.is_none()
-        && app.pending_approval.is_none()
-        && !chat.details_open
-    {
-        let x = composer_area
-            .x
-            .saturating_add(1)
-            .saturating_add(cursor_col as u16);
-        let y = composer_area
-            .y
-            .saturating_add(1)
-            .saturating_add((cursor_row.saturating_sub(composer_scroll)) as u16);
-        if x < composer_area.x + composer_area.width && y < composer_area.y + composer_area.height {
-            frame.set_cursor_position((x, y));
+        if chat.focus == ChatFocus::Composer
+            && !app.help_open
+            && app.modal.is_none()
+            && !chat.details_open
+        {
+            let x = composer_area
+                .x
+                .saturating_add(1)
+                .saturating_add(cursor_col as u16);
+            let y = composer_area
+                .y
+                .saturating_add(1)
+                .saturating_add((cursor_row.saturating_sub(composer_scroll)) as u16);
+            if x < composer_area.x + composer_area.width
+                && y < composer_area.y + composer_area.height
+            {
+                frame.set_cursor_position((x, y));
+            }
         }
     }
 
@@ -404,13 +570,6 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             ),
             Span::styled(":focus  ", Style::default().fg(Color::DarkGray)),
             Span::styled(
-                "Enter",
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":send  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
                 "/",
                 Style::default()
                     .fg(Color::Cyan)
@@ -421,6 +580,12 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             } else {
                 Span::styled(":cmd", Style::default().fg(Color::DarkGray))
             },
+            Span::styled(
+                "  /tools:toggle tool details",
+                Style::default()
+                    .fg(Color::DarkGray)
+                    .add_modifier(Modifier::DIM),
+            ),
         ])
     } else {
         // Compact hint — just enough to orient a new user
@@ -470,4 +635,17 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     if chat.details_open {
         render_activity_details_modal(frame, chat);
     }
+}
+
+/// Format a number with comma separators (e.g., 19674 → "19,674").
+fn format_tokens(n: u64) -> String {
+    let s = n.to_string();
+    let mut result = String::with_capacity(s.len() + s.len() / 3);
+    for (i, ch) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            result.push(',');
+        }
+        result.push(ch);
+    }
+    result
 }

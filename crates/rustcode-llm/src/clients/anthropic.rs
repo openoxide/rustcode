@@ -211,12 +211,17 @@ impl LlmClient for AnthropicClient {
 
         let parsed: Value = serde_json::from_str(&body)
             .map_err(|err| LlmError::Invalid(format!("response is not valid JSON: {err}")))?;
+        // Check for error embedded in a 200 response (can happen with proxies)
+        if let Some(err_msg) = extract_stream_error_message(&parsed) {
+            return Err(LlmError::Invalid(format!("provider error: {err_msg}")));
+        }
         let tool_calls = extract_anthropic_tool_calls(&parsed);
         let text = extract_anthropic_text(&parsed).unwrap_or_default();
         if text.is_empty() && tool_calls.is_empty() {
-            return Err(LlmError::Invalid(
-                "provider response did not include content or tool calls".to_string(),
-            ));
+            return Err(LlmError::Invalid(format!(
+                "provider response did not include content or tool calls: {}",
+                truncate_for_error(&body)
+            )));
         }
 
         let usage = extract_anthropic_usage(&parsed);

@@ -39,19 +39,23 @@ mod markdown;
 mod palette;
 mod provider_manager;
 mod render_activity;
+mod render_approval;
 mod render_main;
 mod render_modals;
 mod render_provider;
 mod runtime;
 mod state;
+mod syntax_highlight;
 mod transcript;
 mod types;
 
 use commands::{execute_command, filter_models, handle_slash_command, refresh_chat_messages};
 use composer::{
     composer_backspace, composer_clear, composer_cursor_visual, composer_delete,
-    composer_insert_str, composer_move_down, composer_move_end, composer_move_home,
-    composer_move_left, composer_move_right, composer_move_up, history_next, history_prev,
+    composer_insert_str, composer_kill_line_backward, composer_kill_line_forward,
+    composer_move_down, composer_move_end, composer_move_home, composer_move_left,
+    composer_move_right, composer_move_up, composer_word_left, composer_word_right, history_next,
+    history_prev,
 };
 use file_search::{filter_files, scan_workspace_files};
 use input::handle_key;
@@ -60,9 +64,8 @@ use provider_manager::{
     build_provider_entries, filter_provider_entries, provider_connect_methods,
     provider_display_name, provider_env_hint,
 };
-use render_activity::{
-    render_activity, render_activity_details_modal, render_approval_modal, render_settings,
-};
+use render_activity::{render_activity, render_activity_details_modal, render_settings};
+use render_approval::{render_approval_inline, render_approval_selector};
 use render_main::render;
 use render_modals::{centered_rect, render_help_modal, render_modal};
 use render_provider::render_provider_manager_modal;

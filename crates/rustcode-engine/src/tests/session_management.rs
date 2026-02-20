@@ -115,14 +115,18 @@ async fn retry_stops_after_max_attempts() {
     let call_count = Arc::new(Mutex::new(0));
     let call_count_clone = call_count.clone();
 
-    let result = retry::retry_llm_call(&policy, || {
-        let count = call_count_clone.clone();
-        async move {
-            let mut c = count.lock().await;
-            *c += 1;
-            Err::<(), String>("503 Service Unavailable".to_string())
-        }
-    })
+    let result = retry::retry_llm_call(
+        &policy,
+        || {
+            let count = call_count_clone.clone();
+            async move {
+                let mut c = count.lock().await;
+                *c += 1;
+                Err::<(), String>("503 Service Unavailable".to_string())
+            }
+        },
+        None,
+    )
     .await;
 
     assert!(result.is_err());
@@ -136,21 +140,25 @@ async fn retry_succeeds_on_eventual_success() {
     let call_count = Arc::new(Mutex::new(0));
     let call_count_clone = call_count.clone();
 
-    let result = retry::retry_llm_call(&policy, || {
-        let count = call_count_clone.clone();
-        async move {
-            let mut c = count.lock().await;
-            *c += 1;
-            let current = *c;
-            drop(c);
+    let result = retry::retry_llm_call(
+        &policy,
+        || {
+            let count = call_count_clone.clone();
+            async move {
+                let mut c = count.lock().await;
+                *c += 1;
+                let current = *c;
+                drop(c);
 
-            if current < 3 {
-                Err::<i32, String>("503 Service Unavailable".to_string())
-            } else {
-                Ok(42)
+                if current < 3 {
+                    Err::<i32, String>("503 Service Unavailable".to_string())
+                } else {
+                    Ok(42)
+                }
             }
-        }
-    })
+        },
+        None,
+    )
     .await;
 
     assert_eq!(result.unwrap(), 42);

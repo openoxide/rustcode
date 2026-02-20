@@ -74,15 +74,42 @@ impl Engine {
             }
 
             let retry_policy = crate::retry::RetryPolicy::default();
-            let response = crate::retry::retry_llm_call(&retry_policy, || {
-                self.run_llm_step(&messages, &tools, context)
-            })
+            let retry_publisher = publisher.clone();
+            let on_retry = move |msg: &str| {
+                let _ = retry_publisher.publish(rustcode_core::event::Event::new(
+                    0,
+                    rustcode_core::event::EventScope::Command,
+                    rustcode_core::event::EventPayload::Warning {
+                        message: msg.to_string(),
+                    },
+                ));
+            };
+            let response = crate::retry::retry_llm_call(
+                &retry_policy,
+                || self.run_llm_step(&messages, &tools, context),
+                Some(&on_retry),
+            )
             .await?;
 
             // Record token usage for context tracking
             if let Some(usage) = &response.usage {
                 context_tracker.record_usage(usage);
                 tracing::debug!("context: {}", context_tracker.status_line());
+                // Publish usage to TUI for live display
+                let _ = publisher
+                    .publish(rustcode_core::event::Event::new(
+                        0,
+                        rustcode_core::event::EventScope::Command,
+                        rustcode_core::event::EventPayload::UsageUpdate {
+                            input_tokens: usage.input,
+                            output_tokens: usage.output,
+                            total_tokens: usage.total,
+                            cache_read: usage.cache_read,
+                            cache_write: usage.cache_write,
+                            context_limit: context_tracker.context_limit(),
+                        },
+                    ))
+                    .await;
             }
 
             self.record_assistant_response(&response, &messages, publisher.clone(), context)

@@ -1,7 +1,8 @@
 use super::{
     build_prompt_history, composer_backspace, composer_clear, composer_delete, composer_insert_str,
-    composer_move_down, composer_move_end, composer_move_home, composer_move_left,
-    composer_move_right, composer_move_up, execute_command, find_next, handle_slash_command,
+    composer_kill_line_backward, composer_kill_line_forward, composer_move_down, composer_move_end,
+    composer_move_home, composer_move_left, composer_move_right, composer_move_up,
+    composer_word_left, composer_word_right, execute_command, find_next, handle_slash_command,
     history_next, history_prev, open_command_palette, push_toast, refresh_chat_messages,
     submit_prompt, transcript_area_height, AppState, ChatFocus, ChatNav, ChatState, CommandId,
     CreateSessionOptions, Duration, KeyCode, KeyEvent, KeyModifiers, Modal, ToastVariant,
@@ -179,6 +180,33 @@ pub(super) fn handle_chat_key(
                 execute_command(state, CommandId::ManageProviders);
                 return ChatNav::Stay;
             }
+            // Ctrl+K: kill to end of current line
+            KeyCode::Char('k' | 'K') => {
+                if chat.focus == ChatFocus::Composer {
+                    composer_kill_line_forward(chat);
+                    return ChatNav::Stay;
+                }
+            }
+            // Ctrl+U: kill to start of current line
+            KeyCode::Char('u' | 'U') => {
+                if chat.focus == ChatFocus::Composer {
+                    composer_kill_line_backward(chat);
+                    return ChatNav::Stay;
+                }
+            }
+            // Ctrl+Left/Right: word jump
+            KeyCode::Left => {
+                if chat.focus == ChatFocus::Composer {
+                    composer_word_left(chat);
+                    return ChatNav::Stay;
+                }
+            }
+            KeyCode::Right => {
+                if chat.focus == ChatFocus::Composer {
+                    composer_word_right(chat);
+                    return ChatNav::Stay;
+                }
+            }
             KeyCode::Char('r' | 'R') => {
                 refresh_chat_messages(state, chat);
                 push_toast(
@@ -220,6 +248,15 @@ pub(super) fn handle_chat_key(
         }
     }
 
+    // ── Shift+Enter: insert newline (alias for Alt+Enter) ────────────
+    if chat.focus == ChatFocus::Composer
+        && key.code == KeyCode::Enter
+        && key.modifiers.contains(KeyModifiers::SHIFT)
+    {
+        composer_insert_str(chat, "\n");
+        return ChatNav::Stay;
+    }
+
     // ── When the composer is focused, all plain character keys type ──
     // This must come before any single-key shortcut matches.
     if chat.focus == ChatFocus::Composer && !ctrl && !alt {
@@ -232,6 +269,12 @@ pub(super) fn handle_chat_key(
     // ── Non-character keys and shortcuts ────────────────────────────
     match key.code {
         KeyCode::Char('?') => state.help_open = true,
+        // '>' toggles expanded tool-call details in the transcript.
+        // Only reaches here when focus is not Composer (Composer focus
+        // returns early and inserts the char as text instead).
+        KeyCode::Char('>') => {
+            chat.tool_details = !chat.tool_details;
+        }
         KeyCode::Esc => {
             if chat.focus != ChatFocus::Composer {
                 chat.focus = ChatFocus::Composer;

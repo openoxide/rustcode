@@ -1,13 +1,15 @@
 use super::{
     build_prompt_history, centered_rect, composer_insert_str, compute_sessions_view,
     disable_raw_mode, drain_toasts, enable_raw_mode, event, execute, handle_key, io, push_toast,
-    render, sort_sessions, ActivityItem, AgentOptions, AppState, Arc, CEvent, CancellationToken,
-    ChatFocus, ChatState, Command, CommandContext, Constraint, CrosstermBackend, Direction,
-    DisableMouseCapture, Duration, EnableMouseCapture, EnterAlternateScreen, EventPayload,
-    EventPublisher, ExecutableCommand, InteractiveMsg, InteractiveServices, InteractiveStart,
-    InteractiveSubmitMode, KeyEventKind, Layout, LeaveAlternateScreen, Modal, MouseButton,
-    MouseEvent, MouseEventKind, PendingApproval, ProviderManagerStep, Rect, RunningCommand, Screen,
-    SessionMeta, SystemTime, Terminal, ToastVariant, TuiError, TuiPublisher,
+    render, sort_sessions, ActivityItem, AgentOptions, AppState, ApprovalResponse, Arc, CEvent,
+    CancellationToken, ChatFocus, ChatState, Command, CommandContext, Constraint, CrosstermBackend,
+    Direction, DisableMouseCapture, Duration, EnableMouseCapture, EnterAlternateScreen,
+    EventPayload, EventPublisher, ExecutableCommand, InteractiveMsg, InteractiveServices,
+    InteractiveStart, InteractiveSubmitMode, KeyEventKind, Layout, LeaveAlternateScreen,
+    MessageRole, Modal,
+    MouseButton, MouseEvent, MouseEventKind, PendingApproval, ProviderManagerStep, Rect,
+    RunningCommand, Screen, SessionMeta, SystemTime, Terminal, ToastVariant, TuiError,
+    TuiPublisher,
 };
 use rustcode_core::event::EventScope;
 
@@ -92,12 +94,18 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                 activity: Vec::new(),
                 activity_selected: 0,
                 details_open: false,
+                activity_hidden: true,
                 tool_details: false,
                 find: None,
                 running: None,
                 pending_prompt: None,
                 composer_cleared_by_ctrl_c: false,
                 last_typing_time: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                last_total_tokens: 0,
+                context_limit: 0,
+                cost_usd: 0.0,
             });
             if should_submit {
                 auto_submit = prompt;
@@ -118,6 +126,7 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
         modal: None,
         defaults,
         pending_approval: None,
+        approval_selection: 0,
         submit_mode,
         backend: session_backend,
         config,
@@ -169,6 +178,25 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
 }
 
 pub(super) fn handle_mouse(state: &mut AppState, mouse: MouseEvent) {
+    // ── Mouse scroll: scroll the transcript when wheel is used ───────
+    if matches!(
+        mouse.kind,
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
+    ) {
+        if let Screen::Chat(chat) = &mut state.screen {
+            match mouse.kind {
+                MouseEventKind::ScrollUp => {
+                    chat.scroll = chat.scroll.saturating_add(3);
+                }
+                MouseEventKind::ScrollDown => {
+                    chat.scroll = chat.scroll.saturating_sub(3);
+                }
+                _ => {}
+            }
+        }
+        return;
+    }
+
     if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
         return;
     }
@@ -179,7 +207,13 @@ pub(super) fn handle_mouse(state: &mut AppState, mouse: MouseEvent) {
         return;
     }
 
-    if state.pending_approval.is_some() || state.modal.is_some() || state.help_open {
+    // Allow clicks on the inline approval selector buttons
+    if state.pending_approval.is_some() {
+        handle_approval_mouse(state, mouse);
+        return;
+    }
+
+    if state.modal.is_some() || state.help_open {
         return;
     }
 
@@ -262,6 +296,101 @@ fn handle_feedback_mouse(state: &mut AppState, mouse: MouseEvent) {
     if let Some(Modal::Feedback { ref mut rating, .. }) = state.modal {
         *rating = Some(clicked_up);
     }
+}
+
+/// Handle a left-click when an approval request is pending.
+///
+/// The approval selector is rendered in `left[1]` (the composer area, height 5).
+/// Layout (content row 0 = `area.y + 1` after the top border):
+///
+///   `  ❯ Allow once    Allow all edits    Deny  ` (or equivalent options)
+///
+/// All option boxes have width = label_len + 4 (2 leading spaces + label + 2 trailing).
+/// Options are separated by 3-space gaps.  The whole line is indented 2 chars from
+/// the inner-left edge (`area.x + 1`).
+///
+/// Clicking an option highlights AND confirms it in one gesture (button semantics).
+fn handle_approval_mouse(state: &mut AppState, mouse: MouseEvent) {
+    let frame_area = Rect::new(0, 0, state.last_area.width, state.last_area.height);
+    let root = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
+        .split(frame_area);
+    let left = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(5),
+            Constraint::Length(3),
+        ])
+        .split(root[0]);
+
+    let selector_area = left[1];
+    // Options are on row index 1 of the widget (index 0 = top border).
+    let options_row = selector_area.y.saturating_add(1);
+    if mouse.row != options_row || !contains(selector_area, mouse.column, mouse.row) {
+        return;
+    }
+
+    let Some(pending_ref) = state.pending_approval.as_ref() else {
+        return;
+    };
+    let perm = pending_ref.request.permission.to_lowercase();
+    let is_edit = perm == "write" || perm == "edit";
+    let is_cmd = perm == "exec";
+
+    // Option labels and their widths (label_len + 4).
+    // Positions in inner content space (after border at area.x + 1):
+    //   2 leading spaces, then option boxes separated by 3-space gaps.
+    let widths: &[usize] = if is_edit {
+        &[14, 19, 8] // "Allow once"(10+4), "Allow all edits"(15+4), "Deny"(4+4)
+    } else if is_cmd {
+        &[14, 18, 8] // "Allow once"(10+4), "Allow all cmds"(14+4), "Deny"(4+4)
+    } else {
+        &[11, 8] // "Approve"(7+4), "Deny"(4+4)
+    };
+
+    let inner_x = selector_area.x.saturating_add(1) as usize;
+    if (mouse.column as usize) < inner_x {
+        return;
+    }
+    let rel = (mouse.column as usize) - inner_x;
+
+    let mut cursor = 2usize; // 2 leading spaces
+    let mut clicked_idx: Option<usize> = None;
+    for (i, &w) in widths.iter().enumerate() {
+        if rel >= cursor && rel < cursor + w {
+            clicked_idx = Some(i);
+            break;
+        }
+        cursor += w + 3; // option width + 3-space separator
+    }
+
+    let Some(opt_idx) = clicked_idx else {
+        return;
+    };
+
+    let pending = state.pending_approval.take().unwrap();
+    let response = match opt_idx {
+        0 => ApprovalResponse::AllowOnce,
+        1 if is_edit => ApprovalResponse::AllowAllEdits,
+        1 if is_cmd => ApprovalResponse::AllowAllCommands,
+        _ => ApprovalResponse::Deny,
+    };
+    let label = match response {
+        ApprovalResponse::AllowOnce => "approved once",
+        ApprovalResponse::AllowAllEdits => "approved all edits",
+        ApprovalResponse::AllowAllCommands => "approved all commands",
+        ApprovalResponse::Deny => "denied",
+    };
+    push_toast(
+        state,
+        ToastVariant::Info,
+        format!("{}: {label}", pending.request.tool),
+        Duration::from_secs(2),
+    );
+    let _ = pending.reply.send(response);
+    state.approval_selection = 0;
 }
 
 pub(super) fn handle_paste(state: &mut AppState, text: &str) {
@@ -353,12 +482,7 @@ pub(super) fn drain_messages(state: &mut AppState) {
                             // Activity panel (Ctrl+E to expand).
                             let clean = clean_failure_message(&message);
                             state.status = Some(clean.clone());
-                            push_toast(
-                                state,
-                                ToastVariant::Error,
-                                clean,
-                                Duration::from_secs(6),
-                            );
+                            push_toast(state, ToastVariant::Error, clean, Duration::from_secs(6));
                             refresh = true;
                             chat.live_assistant.clear();
                             Some(ActivityItem::Failure {
@@ -376,6 +500,24 @@ pub(super) fn drain_messages(state: &mut AppState) {
                                 Duration::from_secs(2),
                             );
                             Some(ActivityItem::Completed)
+                        }
+                        EventPayload::UsageUpdate {
+                            input_tokens,
+                            output_tokens,
+                            total_tokens,
+                            context_limit,
+                            ..
+                        } => {
+                            chat.total_input_tokens += input_tokens;
+                            chat.total_output_tokens += output_tokens;
+                            chat.last_total_tokens = *total_tokens;
+                            chat.context_limit = *context_limit;
+                            // Estimate cost: ~$3/Mtok input, ~$15/Mtok output (avg across providers)
+                            let step_cost = (*input_tokens as f64 * 3.0
+                                + *output_tokens as f64 * 15.0)
+                                / 1_000_000.0;
+                            chat.cost_usd += step_cost;
+                            None
                         }
                         EventPayload::ServeRequest { .. } => None,
                     };
@@ -408,6 +550,7 @@ pub(super) fn drain_messages(state: &mut AppState) {
             }
             InteractiveMsg::ApprovalRequest { request, reply } => {
                 state.pending_approval = Some(PendingApproval { request, reply });
+                state.approval_selection = 0;
             }
             InteractiveMsg::RunEnded { ok, message } => {
                 if let Screen::Chat(chat) = &mut screen {
@@ -427,6 +570,38 @@ pub(super) fn drain_messages(state: &mut AppState) {
                         Ok(messages) => {
                             chat.messages = messages;
                             chat.scroll = 0;
+
+                            // Auto-rename untitled sessions from the first user message.
+                            if ok && chat.session.title.is_none() {
+                                if let Some(first_user_msg) = chat
+                                    .messages
+                                    .iter()
+                                    .find(|m| m.role == MessageRole::User)
+                                {
+                                    if let Some(text) = first_user_msg.content.as_str() {
+                                        let clean = text.trim().replace('\n', " ");
+                                        if !clean.is_empty() {
+                                            let title = if clean.chars().count() > 50 {
+                                                // Truncate at word boundary
+                                                let short: String = clean.chars().take(50).collect();
+                                                if let Some(pos) = short.rfind(' ') {
+                                                    format!("{}…", &short[..pos])
+                                                } else {
+                                                    format!("{short}…")
+                                                }
+                                            } else {
+                                                clean
+                                            };
+                                            if let Ok(info) = state.backend.update_session_title(
+                                                &chat.session.id,
+                                                Some(title),
+                                            ) {
+                                                chat.session = info;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                         Err(err) => {
                             state.status = Some(format!("failed to load transcript: {err}"));
@@ -490,6 +665,7 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
         cancellation: cancellation.clone(),
     });
     chat.pending_prompt = Some(prompt.clone());
+    chat.scroll = 0; // auto-scroll to bottom on new prompt
     state.status = None;
     chat.live_assistant.clear();
 

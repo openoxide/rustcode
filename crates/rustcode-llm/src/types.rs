@@ -326,11 +326,14 @@ impl SwappableLlmClient {
     /// Returns the wrapper **and** the shared cell so the caller can swap the
     /// inner client later (e.g. after a model switch in the TUI).
     #[must_use]
-    pub fn new(
-        initial: Arc<dyn LlmClient>,
-    ) -> (Self, Arc<std::sync::RwLock<Arc<dyn LlmClient>>>) {
+    pub fn new(initial: Arc<dyn LlmClient>) -> (Self, Arc<std::sync::RwLock<Arc<dyn LlmClient>>>) {
         let cell = Arc::new(std::sync::RwLock::new(initial));
-        (Self { inner: cell.clone() }, cell)
+        (
+            Self {
+                inner: cell.clone(),
+            },
+            cell,
+        )
     }
 }
 

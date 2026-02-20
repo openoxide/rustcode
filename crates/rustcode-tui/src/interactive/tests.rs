@@ -48,10 +48,12 @@ fn sessions_screen_renders_title_and_help() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            provider: String::new(),
             skills: Vec::new(),
         },
 
         pending_approval: None,
+        approval_selection: 0,
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),
@@ -75,7 +77,11 @@ fn sessions_screen_renders_title_and_help() {
     let buf = terminal.backend().buffer();
     let text = buffer_to_string(buf);
     assert!(text.contains("Sessions"), "text={text}");
-    assert!(text.contains("Enter: open"), "text={text}");
+    // Footer shows key hints (filter mode = false, so shows command-palette hints)
+    assert!(
+        text.contains("Ctrl+P") || text.contains("filter"),
+        "text={text}"
+    );
     assert!(text.contains("s-1"), "text={text}");
 }
 
@@ -138,12 +144,18 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
             activity: Vec::new(),
             activity_selected: 0,
             details_open: false,
+            activity_hidden: true,
             tool_details: false,
             find: None,
             running: None,
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                last_total_tokens: 0,
+                context_limit: 0,
+                cost_usd: 0.0,
         }),
         status: None,
         toasts: Vec::new(),
@@ -152,10 +164,12 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            provider: String::new(),
             skills: Vec::new(),
         },
 
         pending_approval: None,
+        approval_selection: 0,
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),
@@ -177,12 +191,14 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
-    assert!(text.contains("Tool: read"), "text={text}");
-    assert!(text.contains("ok=true"), "text={text}");
+    // Tool results are now rendered as "  ✓ read" (no "Tool:" role header)
+    assert!(text.contains("read"), "text={text}");
     assert!(text.contains("tool output"), "text={text}");
     assert!(text.contains("focus:composer"), "text={text}");
     assert!(text.contains("model:null"), "text={text}");
     assert!(text.contains("mode:agent"), "text={text}");
+    // "ok=true" and "Output:" were removed in the new compact rendering
+    assert!(!text.contains("ok=true"), "text={text}");
     assert!(!text.contains("Output:"), "text={text}");
 
     let mut state = state;
@@ -191,7 +207,7 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
     }
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
-    assert!(text.contains("Output:"), "text={text}");
+    // Expanded: full output still shown (but no "Output:" header in new rendering)
     assert!(text.contains("tool output"), "text={text}");
 }
 
@@ -252,12 +268,18 @@ fn chat_screen_hides_system_messages() {
             activity: Vec::new(),
             activity_selected: 0,
             details_open: false,
+            activity_hidden: true,
             tool_details: false,
             find: None,
             running: None,
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                last_total_tokens: 0,
+                context_limit: 0,
+                cost_usd: 0.0,
         }),
         status: None,
         toasts: Vec::new(),
@@ -266,9 +288,11 @@ fn chat_screen_hides_system_messages() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            provider: String::new(),
             skills: Vec::new(),
         },
         pending_approval: None,
+        approval_selection: 0,
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),
@@ -299,23 +323,50 @@ fn approval_modal_renders_tool_name() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).expect("terminal");
 
+    let session = SessionInfo {
+        id: "s-1".to_string(),
+        title: Some("t1".to_string()),
+        created_at_unix_ms: 0,
+        updated_at_unix_ms: 0,
+        parent_id: None,
+        cwd: "/tmp".to_string(),
+        workspace_root: "/tmp".to_string(),
+        model: "null".to_string(),
+    };
     let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
     let state = AppState {
-        sessions: vec![SessionInfo {
-            id: "s-1".to_string(),
-            title: Some("t1".to_string()),
-            created_at_unix_ms: 0,
-            updated_at_unix_ms: 0,
-            parent_id: None,
-            cwd: "/tmp".to_string(),
-            workspace_root: "/tmp".to_string(),
-            model: "null".to_string(),
-        }],
+        sessions: vec![session.clone()],
         sessions_view: vec![0],
         selected: 0,
         sessions_filter: String::new(),
         sessions_filter_active: false,
-        screen: Screen::Sessions,
+        screen: Screen::Chat(ChatState {
+            session,
+            messages: Vec::new(),
+            scroll: 0,
+            live_assistant: String::new(),
+            composer: String::new(),
+            composer_cursor: 0,
+            prompt_history: Vec::new(),
+            history_cursor: None,
+            history_draft: String::new(),
+            focus: ChatFocus::Composer,
+            activity: Vec::new(),
+            activity_selected: 0,
+            details_open: false,
+            activity_hidden: true,
+            tool_details: false,
+            find: None,
+            running: None,
+            pending_prompt: None,
+            composer_cleared_by_ctrl_c: false,
+            last_typing_time: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                last_total_tokens: 0,
+                context_limit: 0,
+                cost_usd: 0.0,
+        }),
         status: None,
         toasts: Vec::new(),
         help_open: false,
@@ -323,6 +374,7 @@ fn approval_modal_renders_tool_name() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            provider: String::new(),
             skills: Vec::new(),
         },
 
@@ -336,6 +388,7 @@ fn approval_modal_renders_tool_name() {
             },
             reply: reply_tx,
         }),
+        approval_selection: 0,
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),
@@ -357,10 +410,11 @@ fn approval_modal_renders_tool_name() {
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
-    assert!(text.contains("Tool approval required"), "text={text}");
-    assert!(text.contains("tool: read"), "text={text}");
-    assert!(text.contains("target: README.md"), "text={text}");
-    assert!(text.contains("Approve once"), "text={text}");
+    // Inline approval: "Approval" in selector title, tool name in transcript, "Approve" option
+    assert!(text.contains("Approval"), "text={text}");
+    assert!(text.contains("read"), "text={text}"); // tool name in transcript
+    assert!(text.contains("test"), "text={text}"); // reason in transcript
+    assert!(text.contains("Approve"), "text={text}"); // option in selector
 }
 
 #[test]
@@ -368,23 +422,50 @@ fn approval_modal_shows_allow_all_edits_for_write() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).expect("terminal");
 
+    let session = SessionInfo {
+        id: "s-1".to_string(),
+        title: Some("t1".to_string()),
+        created_at_unix_ms: 0,
+        updated_at_unix_ms: 0,
+        parent_id: None,
+        cwd: "/tmp".to_string(),
+        workspace_root: "/tmp".to_string(),
+        model: "null".to_string(),
+    };
     let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
     let state = AppState {
-        sessions: vec![SessionInfo {
-            id: "s-1".to_string(),
-            title: Some("t1".to_string()),
-            created_at_unix_ms: 0,
-            updated_at_unix_ms: 0,
-            parent_id: None,
-            cwd: "/tmp".to_string(),
-            workspace_root: "/tmp".to_string(),
-            model: "null".to_string(),
-        }],
+        sessions: vec![session.clone()],
         sessions_view: vec![0],
         selected: 0,
         sessions_filter: String::new(),
         sessions_filter_active: false,
-        screen: Screen::Sessions,
+        screen: Screen::Chat(ChatState {
+            session,
+            messages: Vec::new(),
+            scroll: 0,
+            live_assistant: String::new(),
+            composer: String::new(),
+            composer_cursor: 0,
+            prompt_history: Vec::new(),
+            history_cursor: None,
+            history_draft: String::new(),
+            focus: ChatFocus::Composer,
+            activity: Vec::new(),
+            activity_selected: 0,
+            details_open: false,
+            activity_hidden: true,
+            tool_details: false,
+            find: None,
+            running: None,
+            pending_prompt: None,
+            composer_cleared_by_ctrl_c: false,
+            last_typing_time: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                last_total_tokens: 0,
+                context_limit: 0,
+                cost_usd: 0.0,
+        }),
         status: None,
         toasts: Vec::new(),
         help_open: false,
@@ -392,6 +473,7 @@ fn approval_modal_shows_allow_all_edits_for_write() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            provider: String::new(),
             skills: Vec::new(),
         },
         pending_approval: Some(PendingApproval {
@@ -404,6 +486,7 @@ fn approval_modal_shows_allow_all_edits_for_write() {
             },
             reply: reply_tx,
         }),
+        approval_selection: 0,
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),
@@ -425,7 +508,8 @@ fn approval_modal_shows_allow_all_edits_for_write() {
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
-    assert!(text.contains("Approve all edits"), "text={text}");
+    // Inline approval selector for write: "Allow all edits" option must be visible
+    assert!(text.contains("Allow all edits"), "text={text}");
 }
 
 #[test]
@@ -434,23 +518,50 @@ fn approval_modal_keeps_actions_visible_with_long_arguments() {
     let mut terminal = Terminal::new(backend).expect("terminal");
 
     let long_contents = "x".repeat(4000);
+    let session = SessionInfo {
+        id: "s-1".to_string(),
+        title: Some("t1".to_string()),
+        created_at_unix_ms: 0,
+        updated_at_unix_ms: 0,
+        parent_id: None,
+        cwd: "/tmp".to_string(),
+        workspace_root: "/tmp".to_string(),
+        model: "null".to_string(),
+    };
     let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
     let state = AppState {
-        sessions: vec![SessionInfo {
-            id: "s-1".to_string(),
-            title: Some("t1".to_string()),
-            created_at_unix_ms: 0,
-            updated_at_unix_ms: 0,
-            parent_id: None,
-            cwd: "/tmp".to_string(),
-            workspace_root: "/tmp".to_string(),
-            model: "null".to_string(),
-        }],
+        sessions: vec![session.clone()],
         sessions_view: vec![0],
         selected: 0,
         sessions_filter: String::new(),
         sessions_filter_active: false,
-        screen: Screen::Sessions,
+        screen: Screen::Chat(ChatState {
+            session,
+            messages: Vec::new(),
+            scroll: 0,
+            live_assistant: String::new(),
+            composer: String::new(),
+            composer_cursor: 0,
+            prompt_history: Vec::new(),
+            history_cursor: None,
+            history_draft: String::new(),
+            focus: ChatFocus::Composer,
+            activity: Vec::new(),
+            activity_selected: 0,
+            details_open: false,
+            activity_hidden: true,
+            tool_details: false,
+            find: None,
+            running: None,
+            pending_prompt: None,
+            composer_cleared_by_ctrl_c: false,
+            last_typing_time: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                last_total_tokens: 0,
+                context_limit: 0,
+                cost_usd: 0.0,
+        }),
         status: None,
         toasts: Vec::new(),
         help_open: false,
@@ -458,6 +569,7 @@ fn approval_modal_keeps_actions_visible_with_long_arguments() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            provider: String::new(),
             skills: Vec::new(),
         },
         pending_approval: Some(PendingApproval {
@@ -470,6 +582,7 @@ fn approval_modal_keeps_actions_visible_with_long_arguments() {
             },
             reply: reply_tx,
         }),
+        approval_selection: 0,
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),
@@ -491,8 +604,10 @@ fn approval_modal_keeps_actions_visible_with_long_arguments() {
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
-    assert!(text.contains("Approve once"), "text={text}");
-    assert!(text.contains("Approve all edits"), "text={text}");
+    // Inline selector: both options always visible regardless of content preview length
+    // (selector is in a fixed-height composer area, not inline with preview)
+    assert!(text.contains("Allow once"), "text={text}");
+    assert!(text.contains("Allow all edits"), "text={text}");
 }
 
 #[test]
@@ -535,12 +650,18 @@ fn alt_tab_cycles_focus_in_chat() {
             activity: Vec::new(),
             activity_selected: 0,
             details_open: false,
+            activity_hidden: true,
             tool_details: false,
             find: None,
             running: None,
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                last_total_tokens: 0,
+                context_limit: 0,
+                cost_usd: 0.0,
         }),
         status: None,
         toasts: Vec::new(),
@@ -549,9 +670,11 @@ fn alt_tab_cycles_focus_in_chat() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            provider: String::new(),
             skills: Vec::new(),
         },
         pending_approval: None,
+        approval_selection: 0,
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),
@@ -620,12 +743,18 @@ fn tab_does_not_change_focus_in_chat() {
             activity: Vec::new(),
             activity_selected: 0,
             details_open: false,
+            activity_hidden: true,
             tool_details: false,
             find: None,
             running: None,
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                last_total_tokens: 0,
+                context_limit: 0,
+                cost_usd: 0.0,
         }),
         status: None,
         toasts: Vec::new(),
@@ -634,9 +763,11 @@ fn tab_does_not_change_focus_in_chat() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            provider: String::new(),
             skills: Vec::new(),
         },
         pending_approval: None,
+        approval_selection: 0,
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),
@@ -705,12 +836,18 @@ fn mouse_click_changes_chat_focus() {
             activity: Vec::new(),
             activity_selected: 0,
             details_open: false,
+            activity_hidden: true,
             tool_details: false,
             find: None,
             running: None,
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                last_total_tokens: 0,
+                context_limit: 0,
+                cost_usd: 0.0,
         }),
         status: None,
         toasts: Vec::new(),
@@ -719,9 +856,11 @@ fn mouse_click_changes_chat_focus() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            provider: String::new(),
             skills: Vec::new(),
         },
         pending_approval: None,
+        approval_selection: 0,
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),
@@ -810,12 +949,18 @@ fn activity_details_modal_renders_tool_arguments() {
             }],
             activity_selected: 0,
             details_open: true,
+            activity_hidden: true,
             tool_details: false,
             find: None,
             running: None,
             pending_prompt: None,
             composer_cleared_by_ctrl_c: false,
             last_typing_time: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                last_total_tokens: 0,
+                context_limit: 0,
+                cost_usd: 0.0,
         }),
         status: None,
         toasts: Vec::new(),
@@ -824,10 +969,12 @@ fn activity_details_modal_renders_tool_arguments() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            provider: String::new(),
             skills: Vec::new(),
         },
 
         pending_approval: None,
+        approval_selection: 0,
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),
@@ -882,9 +1029,11 @@ fn command_palette_renders_actions_and_search() {
         defaults: InteractiveDefaults {
             workspace_root: std::path::PathBuf::from("/tmp"),
             model: "null".to_string(),
+            provider: String::new(),
             skills: Vec::new(),
         },
         pending_approval: None,
+        approval_selection: 0,
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),

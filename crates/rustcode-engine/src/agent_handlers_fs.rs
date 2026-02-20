@@ -3,6 +3,57 @@ use super::{
     PathOperation, Regex,
 };
 
+/// Compute a compact diff between `old` and `new`.
+///
+/// Returns a string with a summary line (`+N -M`) followed by `@@diff` marker
+/// and coloured diff lines.  Returns an empty string when `old == new` or
+/// both are empty.
+///
+/// At most `max_diff_lines` `+`/`-` lines are included; excess are summarised
+/// with a `...[N more]` note.
+fn diff_output(old: &str, new: &str, max_diff_lines: usize) -> String {
+    use similar::{ChangeTag, TextDiff};
+    let diff = TextDiff::from_lines(old, new);
+    let mut added = 0usize;
+    let mut removed = 0usize;
+    let mut diff_lines: Vec<String> = Vec::new();
+    for change in diff.iter_all_changes() {
+        match change.tag() {
+            ChangeTag::Insert => {
+                added += 1;
+                if diff_lines.len() < max_diff_lines {
+                    let line = change.value().trim_end_matches('\n');
+                    diff_lines.push(format!("+{line}"));
+                }
+            }
+            ChangeTag::Delete => {
+                removed += 1;
+                if diff_lines.len() < max_diff_lines {
+                    let line = change.value().trim_end_matches('\n');
+                    diff_lines.push(format!("-{line}"));
+                }
+            }
+            ChangeTag::Equal => {}
+        }
+    }
+    if added == 0 && removed == 0 {
+        return String::new();
+    }
+    let truncated = if added + removed > max_diff_lines {
+        format!(
+            "\n...[{} more diff lines]",
+            (added + removed).saturating_sub(diff_lines.len())
+        )
+    } else {
+        String::new()
+    };
+    format!(
+        "+{added} -{removed}\n@@diff\n{}{}",
+        diff_lines.join("\n"),
+        truncated
+    )
+}
+
 impl Engine {
     pub(crate) async fn agent_tool_exec(
         &self,
@@ -105,13 +156,12 @@ impl Engine {
         // Auto-snapshot before the first mutation this session
         self.auto_snapshot_before_mutation(state, context).await;
         let resolved = self.resolve_workspace_path(context, path, PathOperation::Write)?;
-        if !state.read_paths.contains(&resolved)
-            && self
-                .fs
-                .exists(&resolved)
-                .await
-                .map_err(|err| ExecutionError::Executor(err.to_string()))?
-        {
+        let file_exists = self
+            .fs
+            .exists(&resolved)
+            .await
+            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+        if !state.read_paths.contains(&resolved) && file_exists {
             return Err(ExecutionError::Dispatch(
                 "write requires reading the target file first (refusing to overwrite unread file)"
                     .to_string(),
@@ -124,15 +174,34 @@ impl Engine {
                 options.max_write_bytes
             )));
         }
+        // Capture old content for diff (only if file was previously read)
+        let old_content = if state.read_paths.contains(&resolved) && file_exists {
+            self.fs
+                .read_to_string_limited(&resolved, options.max_read_bytes)
+                .await
+                .ok()
+        } else {
+            None
+        };
         self.fs
             .write_string(&resolved, contents)
             .await
             .map_err(|err| ExecutionError::Executor(err.to_string()))?;
-        Ok(format!(
-            "wrote {} bytes to {}",
-            contents.len(),
-            resolved.display()
-        ))
+        let base_msg = format!("wrote {} bytes to {}", contents.len(), resolved.display());
+        if let Some(old) = old_content {
+            // Existing file was modified — show changed lines.
+            let diff = diff_output(&old, contents, 40);
+            if !diff.is_empty() {
+                return Ok(format!("{base_msg}\n{diff}"));
+            }
+        } else if !file_exists {
+            // New file — show content as all-addition diff (GitHub green in TUI).
+            let diff = diff_output("", contents, 40);
+            if !diff.is_empty() {
+                return Ok(format!("{base_msg}\n{diff}"));
+            }
+        }
+        Ok(base_msg)
     }
 
     pub(crate) async fn agent_tool_edit(
@@ -170,10 +239,16 @@ impl Engine {
             .await
             .map_err(|err| ExecutionError::Executor(err.to_string()))?;
 
-        Ok(format!(
+        let base_msg = format!(
             "edit applied ({replacements} replacements) to {}",
             resolved.display()
-        ))
+        );
+        let diff = diff_output(&original, &updated, 40);
+        if diff.is_empty() {
+            Ok(base_msg)
+        } else {
+            Ok(format!("{base_msg}\n{diff}"))
+        }
     }
 
     pub(crate) async fn agent_tool_glob(

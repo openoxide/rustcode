@@ -143,6 +143,13 @@ pub(super) fn build_command_items(state: &AppState) -> Vec<CommandItem> {
         enabled: in_chat,
         disabled_reason: (!in_chat).then_some("Open a session first".to_string()),
     });
+    items.push(CommandItem {
+        id: CommandId::ToggleActivity,
+        title: "Toggle activity panel".to_string(),
+        detail: "Show/hide the activity panel (Ctrl+W)".to_string(),
+        enabled: in_chat,
+        disabled_reason: (!in_chat).then_some("Open a session first".to_string()),
+    });
 
     items.push(CommandItem {
         id: CommandId::CancelRun,
@@ -339,12 +346,18 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
                         activity: Vec::new(),
                         activity_selected: 0,
                         details_open: false,
+                        activity_hidden: true,
                         tool_details: false,
                         find: None,
                         running: None,
                         pending_prompt: None,
                         composer_cleared_by_ctrl_c: false,
                         last_typing_time: None,
+                        total_input_tokens: 0,
+                        total_output_tokens: 0,
+                        last_total_tokens: 0,
+                        context_limit: 0,
+                        cost_usd: 0.0,
                     });
                     push_toast(
                         state,
