@@ -952,7 +952,7 @@ fn command_palette_renders_actions_and_search() {
         llm_cell: None,
     };
 
-    open_command_palette(&mut state);
+    open_command_palette(&mut state, None);
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
     assert!(text.contains("Commands"), "text={text}");

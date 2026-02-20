@@ -4,8 +4,8 @@ use super::{
     CommandItem, Duration, InteractiveSubmitMode, Modal, Screen, ToastVariant,
 };
 
-pub(super) fn open_command_palette(state: &mut AppState) {
-    let items = build_command_items(state);
+pub(super) fn open_command_palette(state: &mut AppState, current_chat: Option<&ChatState>) {
+    let items = build_command_items(state, current_chat);
     let view = compute_palette_view(&items, "");
     state.modal = Some(Modal::CommandPalette {
         query: String::new(),
@@ -15,20 +15,31 @@ pub(super) fn open_command_palette(state: &mut AppState) {
     });
 }
 
-pub(super) fn build_command_items(state: &AppState) -> Vec<CommandItem> {
+pub(super) fn build_command_items(
+    state: &AppState,
+    current_chat: Option<&ChatState>,
+) -> Vec<CommandItem> {
     let mut items = Vec::new();
 
-    let (in_chat, chat_running, attach_mode) = match &state.screen {
-        Screen::Chat(chat) => (
+    let (in_chat, chat_running, attach_mode) = if let Some(chat) = current_chat {
+        (
             true,
             chat.running.is_some(),
             state.submit_mode == InteractiveSubmitMode::Run,
-        ),
-        Screen::Sessions => (
-            false,
-            false,
-            state.submit_mode == InteractiveSubmitMode::Run,
-        ),
+        )
+    } else {
+        match &state.screen {
+            Screen::Chat(chat) => (
+                true,
+                chat.running.is_some(),
+                state.submit_mode == InteractiveSubmitMode::Run,
+            ),
+            Screen::Sessions => (
+                false,
+                false,
+                state.submit_mode == InteractiveSubmitMode::Run,
+            ),
+        }
     };
 
     let can_fork = !attach_mode;

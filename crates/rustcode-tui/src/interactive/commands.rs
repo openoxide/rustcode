@@ -461,7 +461,7 @@ pub(super) fn handle_slash_command(
     match cmd {
         // Empty "/" → open command palette so user can discover commands
         "" => {
-            open_command_palette(state);
+            open_command_palette(state, Some(chat));
             ChatNav::Stay
         }
         "help" | "?" => {

@@ -46,7 +46,7 @@ pub(super) fn handle_chat_key(
                 return ChatNav::Exit;
             }
             KeyCode::Char('p' | 'P') => {
-                open_command_palette(state);
+                open_command_palette(state, Some(chat));
                 return ChatNav::Stay;
             }
             KeyCode::Char('n' | 'N') => {

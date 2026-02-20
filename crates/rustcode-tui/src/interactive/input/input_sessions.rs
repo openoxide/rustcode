@@ -98,7 +98,7 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
     let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
     match key.code {
         KeyCode::Char('p' | 'P') if ctrl => {
-            open_command_palette(state);
+            open_command_palette(state, None);
         }
         KeyCode::Char('n' | 'N') if ctrl => {
             execute_command(state, CommandId::NewSession);
