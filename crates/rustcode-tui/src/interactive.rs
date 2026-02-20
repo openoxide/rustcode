@@ -3,8 +3,8 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event as CEvent, KeyCode, KeyEvent,
-    KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+    self, Event as CEvent, KeyCode, KeyEvent,
+    KeyEventKind, KeyModifiers,
 };
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -64,7 +64,7 @@ use provider_manager::{
     build_provider_entries, filter_provider_entries, provider_connect_methods,
     provider_display_name, provider_env_hint,
 };
-use render_activity::{render_activity, render_activity_details_modal, render_settings};
+use render_activity::{render_activity, render_activity_details_modal};
 use render_approval::{render_approval_inline, render_approval_selector};
 use render_main::render;
 use render_modals::{centered_rect, render_help_modal, render_modal};

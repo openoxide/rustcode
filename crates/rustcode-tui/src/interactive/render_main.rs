@@ -1,7 +1,7 @@
 use super::{
     apply_find_highlight, build_transcript_lines, composer_cursor_visual, format_age,
     render_activity, render_activity_details_modal, render_approval_inline,
-    render_approval_selector, render_help_modal, render_modal, render_settings, AppState, Block,
+    render_approval_selector, render_help_modal, render_modal, AppState, Block,
     Borders, ChatFocus, ChatState, Color, Constraint, Direction, Layout, Line, List, ListItem,
     Modifier, Paragraph, Screen, Span, Style, ToastVariant, Wrap,
 };
@@ -190,9 +190,14 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
 }
 
 pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState) {
+    let h_constraints: Vec<Constraint> = if chat.activity_hidden {
+        vec![Constraint::Percentage(100)]
+    } else {
+        vec![Constraint::Percentage(72), Constraint::Percentage(28)]
+    };
     let root = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
+        .constraints(h_constraints)
         .split(frame.area());
 
     // Dynamic composer height: expands with newlines (min 5 = 3 content + 2 borders,
@@ -325,11 +330,6 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         lines.extend(render_approval_inline(&pending.request, inner_w, &ws_root));
     }
 
-    let transcript_border = if chat.focus == ChatFocus::Transcript {
-        Style::default().fg(Color::Cyan)
-    } else {
-        Style::default()
-    };
     let transcript_inner_h = left[0].height.saturating_sub(2).max(1) as usize;
     let inner_w = left[0].width.saturating_sub(2).max(1) as usize;
     // Account for line wrapping: each logical line may span multiple visual rows.
@@ -344,22 +344,37 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     let from_bottom = chat.scroll.min(max_scroll);
     let scroll_top = max_scroll.saturating_sub(from_bottom);
 
+    // Build workspace + version footer for transcript bottom-right.
+    let version = env!("CARGO_PKG_VERSION");
+    let workspace_path = &app.defaults.workspace_root;
+    let workspace_display = if let Ok(home) = std::env::var("HOME") {
+        if workspace_path.starts_with(&home) {
+            let suffix = workspace_path.strip_prefix(&home).unwrap_or(workspace_path);
+            format!("~/{}", suffix.display())
+        } else {
+            workspace_path.display().to_string()
+        }
+    } else {
+        workspace_path.display().to_string()
+    };
+    let workspace_display = workspace_display.replace("//", "/");
+    let transcript_bottom = Line::from(Span::styled(
+        format!("{workspace_display}  v{version}"),
+        Style::default().fg(Color::DarkGray),
+    ))
+    .right_aligned();
+
     let transcript = Paragraph::new(lines)
         .block(
             Block::default()
                 .title(Line::from(transcript_title_spans))
-                .borders(Borders::ALL)
-                .border_style(transcript_border),
+                .title_bottom(transcript_bottom)
+                .borders(Borders::ALL),
         )
         .wrap(Wrap { trim: false })
         .scroll((scroll_top, 0));
     frame.render_widget(transcript, left[0]);
 
-    let focus_label = match chat.focus {
-        ChatFocus::Composer => "composer",
-        ChatFocus::Transcript => "transcript",
-        ChatFocus::Activity => "activity",
-    };
     let mode_label = match app.submit_mode {
         super::InteractiveSubmitMode::Agent => "agent",
         super::InteractiveSubmitMode::Run => "run",
@@ -382,13 +397,6 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     };
     let mut composer_title_spans = vec![
         Span::styled(prompt_label, Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw("  "),
-        Span::styled(
-            format!("[focus:{focus_label}]"),
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
         Span::raw("  "),
         Span::styled(
             format!("[model:{model_label}]"),
@@ -421,7 +429,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         Style::default()
     };
     let composer_text = if chat.composer.is_empty() {
-        "Type a prompt... (Enter to submit, Alt+Enter for newline)"
+        "Type a prompt... (Enter to submit, Shift+Enter for newline)"
     } else {
         chat.composer.as_str()
     };
@@ -532,7 +540,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     let composer_starts_with_query = chat.composer.starts_with('?');
     let hints_line = if composer_starts_with_query {
         // Expanded bindings visible when user types '?' first
-        Line::from(vec![
+        let mut spans = vec![
             Span::styled(" ", Style::default()),
             Span::styled(
                 "Ctrl+P",
@@ -562,31 +570,41 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(":cancel  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
+        ];
+        if !chat.activity_hidden {
+            spans.push(Span::styled(
                 "Alt+Tab",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":focus  ", Style::default().fg(Color::DarkGray)),
-            Span::styled(
-                "/",
+            ));
+            spans.push(Span::styled(":switch focus  ", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                "Ctrl+W",
                 Style::default()
                     .fg(Color::Cyan)
                     .add_modifier(Modifier::BOLD),
-            ),
-            if has_error {
-                Span::styled(":cmd  Ctrl+E:error", Style::default().fg(Color::DarkGray))
-            } else {
-                Span::styled(":cmd", Style::default().fg(Color::DarkGray))
-            },
-            Span::styled(
-                "  /tools:toggle tool details",
-                Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
-            ),
-        ])
+            ));
+            spans.push(Span::styled(":toggle activity  ", Style::default().fg(Color::DarkGray)));
+        }
+        spans.push(Span::styled(
+            "/",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(if has_error {
+            Span::styled(":cmd  Ctrl+E:error", Style::default().fg(Color::DarkGray))
+        } else {
+            Span::styled(":cmd", Style::default().fg(Color::DarkGray))
+        });
+        spans.push(Span::styled(
+            "  /tools:toggle tool details",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ));
+        Line::from(spans)
     } else {
         // Compact hint — just enough to orient a new user
         let error_part = if has_error {
@@ -599,7 +617,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         } else {
             Span::raw("")
         };
-        Line::from(vec![
+        let mut spans = vec![
             Span::styled(" Ctrl+P", Style::default().fg(Color::DarkGray)),
             Span::styled(" cmds", Style::default().fg(Color::DarkGray)),
             Span::styled("   /", Style::default().fg(Color::DarkGray)),
@@ -610,8 +628,21 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::DIM),
             ),
-            error_part,
-        ])
+        ];
+        if !chat.activity_hidden {
+            spans.push(Span::styled(
+                "   Alt+Tab",
+                Style::default().fg(Color::DarkGray),
+            ));
+            spans.push(Span::styled(" switch focus", Style::default().fg(Color::DarkGray)));
+            spans.push(Span::styled(
+                "   Ctrl+W",
+                Style::default().fg(Color::DarkGray),
+            ));
+            spans.push(Span::styled(" toggle activity", Style::default().fg(Color::DarkGray)));
+        }
+        spans.push(error_part);
+        Line::from(spans)
     };
 
     let help = Paragraph::new(vec![status_line, hints_line]).block(
@@ -621,17 +652,9 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     );
     frame.render_widget(help, left[2]);
 
-    // Right panel: split to match left panel structure
-    let right = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),    // Activity panel (matches transcript + composer)
-            Constraint::Length(3), // Settings panel (matches footer)
-        ])
-        .split(root[1]);
-
-    render_activity(frame, right[0], chat);
-    render_settings(frame, right[1], app);
+    if !chat.activity_hidden {
+        render_activity(frame, root[1], chat);
+    }
     if chat.details_open {
         render_activity_details_modal(frame, chat);
     }

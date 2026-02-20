@@ -194,7 +194,6 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
     // Tool results are now rendered as "  ✓ read" (no "Tool:" role header)
     assert!(text.contains("read"), "text={text}");
     assert!(text.contains("tool output"), "text={text}");
-    assert!(text.contains("focus:composer"), "text={text}");
     assert!(text.contains("model:null"), "text={text}");
     assert!(text.contains("mode:agent"), "text={text}");
     // "ok=true" and "Output:" were removed in the new compact rendering
@@ -694,13 +693,26 @@ fn alt_tab_cycles_focus_in_chat() {
         llm_cell: None,
     };
 
+    // Alt+Tab with activity_hidden=true: focus stays at Composer (no-op)
+    let key = KeyEvent::new(KeyCode::Tab, KeyModifiers::ALT);
+    assert!(!handle_key(&mut state, key));
+
+    let Screen::Chat(chat) = &state.screen else {
+        panic!("expected chat screen")
+    };
+    assert_eq!(chat.focus, ChatFocus::Composer);
+
+    // Alt+Tab with activity visible: should move to Activity
+    if let Screen::Chat(chat) = &mut state.screen {
+        chat.activity_hidden = false;
+    }
     let key = KeyEvent::new(KeyCode::Tab, KeyModifiers::ALT);
     assert!(!handle_key(&mut state, key));
 
     let Screen::Chat(chat) = state.screen else {
         panic!("expected chat screen")
     };
-    assert_eq!(chat.focus, ChatFocus::Transcript);
+    assert_eq!(chat.focus, ChatFocus::Activity);
 }
 
 #[test]
@@ -794,119 +806,6 @@ fn tab_does_not_change_focus_in_chat() {
         panic!("expected chat screen")
     };
     assert_eq!(chat.focus, ChatFocus::Composer);
-}
-
-#[test]
-fn mouse_click_changes_chat_focus() {
-    let mut state = AppState {
-        sessions: vec![SessionInfo {
-            id: "s-1".to_string(),
-            title: Some("t1".to_string()),
-            created_at_unix_ms: 0,
-            updated_at_unix_ms: 0,
-            parent_id: None,
-            cwd: "/tmp".to_string(),
-            workspace_root: "/tmp".to_string(),
-            model: "null".to_string(),
-        }],
-        sessions_view: vec![0],
-        selected: 0,
-        sessions_filter: String::new(),
-        sessions_filter_active: false,
-        screen: Screen::Chat(ChatState {
-            session: SessionInfo {
-                id: "s-1".to_string(),
-                title: Some("t1".to_string()),
-                created_at_unix_ms: 0,
-                updated_at_unix_ms: 0,
-                parent_id: None,
-                cwd: "/tmp".to_string(),
-                workspace_root: "/tmp".to_string(),
-                model: "null".to_string(),
-            },
-            messages: Vec::new(),
-            scroll: 0,
-            live_assistant: String::new(),
-            composer: String::new(),
-            composer_cursor: 0,
-            prompt_history: Vec::new(),
-            history_cursor: None,
-            history_draft: String::new(),
-            focus: ChatFocus::Composer,
-            activity: Vec::new(),
-            activity_selected: 0,
-            details_open: false,
-            activity_hidden: true,
-            tool_details: false,
-            find: None,
-            running: None,
-            pending_prompt: None,
-            composer_cleared_by_ctrl_c: false,
-            last_typing_time: None,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                last_total_tokens: 0,
-                context_limit: 0,
-                cost_usd: 0.0,
-        }),
-        status: None,
-        toasts: Vec::new(),
-        help_open: false,
-        modal: None,
-        defaults: InteractiveDefaults {
-            workspace_root: std::path::PathBuf::from("/tmp"),
-            model: "null".to_string(),
-            provider: String::new(),
-            skills: Vec::new(),
-        },
-        pending_approval: None,
-        approval_selection: 0,
-        submit_mode: InteractiveSubmitMode::Agent,
-        backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
-            std::path::PathBuf::from("/tmp"),
-        ))),
-        config: None,
-        executor: None,
-        runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
-        tx: tokio::sync::mpsc::unbounded_channel().0,
-        rx: tokio::sync::mpsc::unbounded_channel().1,
-        request_seq: 0,
-        last_area: Size {
-            width: 120,
-            height: 30,
-        },
-        provider_oauth_start_rx: None,
-        provider_oauth_done_rx: None,
-        llm_cell: None,
-    };
-
-    runtime::handle_mouse(
-        &mut state,
-        MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: 110,
-            row: 5,
-            modifiers: KeyModifiers::NONE,
-        },
-    );
-    let Screen::Chat(chat) = &state.screen else {
-        panic!("expected chat screen")
-    };
-    assert_eq!(chat.focus, ChatFocus::Activity);
-
-    runtime::handle_mouse(
-        &mut state,
-        MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: 4,
-            row: 3,
-            modifiers: KeyModifiers::NONE,
-        },
-    );
-    let Screen::Chat(chat) = &state.screen else {
-        panic!("expected chat screen")
-    };
-    assert_eq!(chat.focus, ChatFocus::Transcript);
 }
 
 #[test]

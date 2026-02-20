@@ -1,5 +1,5 @@
 use super::{
-    centered_rect, ActivityItem, AppState, Block, Borders, ChatFocus, ChatState, Clear, Color,
+    centered_rect, ActivityItem, Block, Borders, ChatFocus, ChatState, Clear, Color,
     Duration, Line, List, ListItem, Modifier, Paragraph, Rect, Span, Style, SystemTime, Wrap,
 };
 
@@ -105,11 +105,7 @@ pub(super) fn render_activity_details_modal(frame: &mut ratatui::Frame<'_>, chat
 
     let mut lines = item.details_lines();
     lines.push(Line::raw(""));
-    lines.push(Line::from(vec![
-        Span::raw("Enter/Esc: close"),
-        Span::raw("  "),
-        Span::raw("Alt+Tab/click: focus"),
-    ]));
+    lines.push(Line::raw("Enter/Esc: close"));
 
     let modal = Paragraph::new(lines)
         .block(block)
@@ -117,54 +113,3 @@ pub(super) fn render_activity_details_modal(frame: &mut ratatui::Frame<'_>, chat
     frame.render_widget(modal, area);
 }
 
-/// Render the settings panel showing directory and version info.
-/// This panel aligns with the footer on the left side.
-pub(super) fn render_settings(frame: &mut ratatui::Frame<'_>, area: Rect, app: &AppState) {
-    let version = env!("CARGO_PKG_VERSION");
-
-    // Convert workspace path to ~-relative if under home directory.
-    let workspace_path = &app.defaults.workspace_root;
-    let workspace_display = if let Ok(home) = std::env::var("HOME") {
-        if workspace_path.starts_with(&home) {
-            let suffix = workspace_path.strip_prefix(&home).unwrap_or(workspace_path);
-            format!("~/{}", suffix.display())
-        } else {
-            workspace_path.display().to_string()
-        }
-    } else {
-        workspace_path.display().to_string()
-    };
-    // Strip double slashes that appear on some paths (e.g. home is "/Users/x", path is "/")
-    let workspace_display = workspace_display.replace("//", "/");
-
-    // Line 1: branded product name — bold cyan so it reads as a header, not metadata
-    let title_line = Line::from(vec![
-        Span::styled(
-            "Rust",
-            Style::default()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            "Code",
-            Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-        ),
-    ]);
-
-    let info_line = Line::from(vec![
-        Span::styled(workspace_display, Style::default().fg(Color::Yellow)),
-        Span::raw("  "),
-        Span::styled("v", Style::default().fg(Color::DarkGray)),
-        Span::styled(version, Style::default().fg(Color::DarkGray)),
-    ]);
-
-    let settings = Paragraph::new(vec![title_line, info_line]).block(
-        Block::default()
-            .borders(Borders::TOP)
-            .border_style(Style::default().fg(Color::DarkGray)),
-    );
-
-    frame.render_widget(settings, area);
-}

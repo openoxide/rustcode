@@ -123,30 +123,9 @@ pub(super) fn build_command_items(state: &AppState) -> Vec<CommandItem> {
     });
 
     items.push(CommandItem {
-        id: CommandId::FocusComposer,
-        title: "Focus composer".to_string(),
-        detail: "Move focus to prompt input".to_string(),
-        enabled: in_chat,
-        disabled_reason: (!in_chat).then_some("Open a session first".to_string()),
-    });
-    items.push(CommandItem {
-        id: CommandId::FocusTranscript,
-        title: "Focus transcript".to_string(),
-        detail: "Move focus to transcript".to_string(),
-        enabled: in_chat,
-        disabled_reason: (!in_chat).then_some("Open a session first".to_string()),
-    });
-    items.push(CommandItem {
-        id: CommandId::FocusActivity,
-        title: "Focus activity".to_string(),
-        detail: "Move focus to activity panel".to_string(),
-        enabled: in_chat,
-        disabled_reason: (!in_chat).then_some("Open a session first".to_string()),
-    });
-    items.push(CommandItem {
         id: CommandId::ToggleActivity,
         title: "Toggle activity panel".to_string(),
-        detail: "Show/hide the activity panel (Ctrl+W)".to_string(),
+        detail: "Toggle activity panel (Ctrl+W)".to_string(),
         enabled: in_chat,
         disabled_reason: (!in_chat).then_some("Open a session first".to_string()),
     });
@@ -278,7 +257,6 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
                 );
                 return true;
             };
-            chat.focus = ChatFocus::Transcript;
             let viewport_h = transcript_area_height(state);
             set_find(state, &mut chat, rest.to_string(), true, viewport_h);
             let query = chat
@@ -295,20 +273,6 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
                 current,
                 matches,
             });
-            true
-        }
-        "focus" => {
-            match rest.to_ascii_lowercase().as_str() {
-                "composer" | "prompt" => execute_command(state, CommandId::FocusComposer),
-                "transcript" | "chat" => execute_command(state, CommandId::FocusTranscript),
-                "activity" => execute_command(state, CommandId::FocusActivity),
-                _ => push_toast(
-                    state,
-                    ToastVariant::Warning,
-                    "focus: composer|transcript|activity",
-                    Duration::from_secs(3),
-                ),
-            }
             true
         }
         "open" | "session" => {
@@ -346,7 +310,7 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
                         activity: Vec::new(),
                         activity_selected: 0,
                         details_open: false,
-                        activity_hidden: true,
+                        activity_hidden: false,
                         tool_details: false,
                         find: None,
                         running: None,

@@ -1,13 +1,12 @@
 use super::{
-    build_prompt_history, centered_rect, composer_insert_str, compute_sessions_view,
+    build_prompt_history, composer_insert_str, compute_sessions_view,
     disable_raw_mode, drain_toasts, enable_raw_mode, event, execute, handle_key, io, push_toast,
-    render, sort_sessions, ActivityItem, AgentOptions, AppState, ApprovalResponse, Arc, CEvent,
-    CancellationToken, ChatFocus, ChatState, Command, CommandContext, Constraint, CrosstermBackend,
-    Direction, DisableMouseCapture, Duration, EnableMouseCapture, EnterAlternateScreen,
+    render, sort_sessions, ActivityItem, AgentOptions, AppState, Arc, CEvent,
+    CancellationToken, ChatFocus, ChatState, Command, CommandContext, CrosstermBackend,
+    Duration, EnterAlternateScreen,
     EventPayload, EventPublisher, ExecutableCommand, InteractiveMsg, InteractiveServices,
-    InteractiveStart, InteractiveSubmitMode, KeyEventKind, Layout, LeaveAlternateScreen,
-    MessageRole, Modal,
-    MouseButton, MouseEvent, MouseEventKind, PendingApproval, ProviderManagerStep, Rect,
+    InteractiveStart, InteractiveSubmitMode, KeyEventKind, LeaveAlternateScreen,
+    MessageRole, Modal, PendingApproval, ProviderManagerStep,
     RunningCommand, Screen, SessionMeta, SystemTime, Terminal, ToastVariant, TuiError,
     TuiPublisher,
 };
@@ -34,14 +33,13 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
         let mut stdout = io::stdout();
-        let _ = stdout.execute(DisableMouseCapture);
         let _ = stdout.execute(LeaveAlternateScreen);
         prev_panic_hook(info);
     }));
 
     let mut stdout = io::stdout();
     enable_raw_mode().map_err(|err| TuiError::Io(err.to_string()))?;
-    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+    execute!(stdout, EnterAlternateScreen)
         .map_err(|err| TuiError::Io(err.to_string()))?;
     let _cleanup = TerminalCleanup;
 
@@ -94,7 +92,7 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                 activity: Vec::new(),
                 activity_selected: 0,
                 details_open: false,
-                activity_hidden: true,
+                activity_hidden: false,
                 tool_details: false,
                 find: None,
                 running: None,
@@ -169,228 +167,11 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                         return Ok(());
                     }
                 }
-                CEvent::Mouse(mouse) => handle_mouse(&mut state, mouse),
                 CEvent::Paste(text) => handle_paste(&mut state, &text),
                 _ => {}
             }
         }
     }
-}
-
-pub(super) fn handle_mouse(state: &mut AppState, mouse: MouseEvent) {
-    // ── Mouse scroll: scroll the transcript when wheel is used ───────
-    if matches!(
-        mouse.kind,
-        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown
-    ) {
-        if let Screen::Chat(chat) = &mut state.screen {
-            match mouse.kind {
-                MouseEventKind::ScrollUp => {
-                    chat.scroll = chat.scroll.saturating_add(3);
-                }
-                MouseEventKind::ScrollDown => {
-                    chat.scroll = chat.scroll.saturating_sub(3);
-                }
-                _ => {}
-            }
-        }
-        return;
-    }
-
-    if !matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
-        return;
-    }
-
-    // Allow clicks inside the Feedback modal to select rating buttons
-    if matches!(&state.modal, Some(Modal::Feedback { .. })) {
-        handle_feedback_mouse(state, mouse);
-        return;
-    }
-
-    // Allow clicks on the inline approval selector buttons
-    if state.pending_approval.is_some() {
-        handle_approval_mouse(state, mouse);
-        return;
-    }
-
-    if state.modal.is_some() || state.help_open {
-        return;
-    }
-
-    let Screen::Chat(mut chat) = std::mem::replace(&mut state.screen, Screen::Sessions) else {
-        return;
-    };
-    if chat.details_open {
-        state.screen = Screen::Chat(chat);
-        return;
-    }
-
-    let frame_area = Rect::new(0, 0, state.last_area.width, state.last_area.height);
-    let root = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
-        .split(frame_area);
-    let left = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(5),
-            Constraint::Length(3),
-        ])
-        .split(root[0]);
-
-    let col = mouse.column;
-    let row = mouse.row;
-    if contains(left[0], col, row) {
-        chat.focus = ChatFocus::Transcript;
-    } else if contains(left[1], col, row) {
-        chat.focus = ChatFocus::Composer;
-    } else if contains(root[1], col, row) {
-        chat.focus = ChatFocus::Activity;
-    }
-
-    state.screen = Screen::Chat(chat);
-}
-
-fn contains(area: Rect, col: u16, row: u16) -> bool {
-    let max_x = area.x.saturating_add(area.width);
-    let max_y = area.y.saturating_add(area.height);
-    col >= area.x && col < max_x && row >= area.y && row < max_y
-}
-
-/// Handle a left-click inside the Feedback modal.
-///
-/// The rating block layout (after the outer modal border and rating block border):
-/// - Line 0: "How useful was this session?"
-/// - Line 1: (empty)
-/// - Line 2: " [+] thumbs up " (16 chars)  "   " (3)  " [-] thumbs down " (18 chars)
-///
-/// Button row y = modal.y + 1 (outer border) + 1 (rating block top border) + 2 (line index)
-///             = modal.y + 4
-/// Up button   x = modal.x + 1 (outer) + 1 (rating border) = modal.x + 2, width 16
-/// Down button x = modal.x + 2 + 16 + 3 = modal.x + 21, width 18
-fn handle_feedback_mouse(state: &mut AppState, mouse: MouseEvent) {
-    let screen_rect = Rect::new(0, 0, state.last_area.width, state.last_area.height);
-    let modal_rect = centered_rect(68, 52, screen_rect);
-
-    let button_row = modal_rect.y.saturating_add(4);
-    let up_x_start = modal_rect.x.saturating_add(2);
-    let up_x_end = up_x_start.saturating_add(16);
-    let down_x_start = up_x_end.saturating_add(3);
-    let down_x_end = down_x_start.saturating_add(18);
-
-    let col = mouse.column;
-    let row = mouse.row;
-
-    if row != button_row {
-        return;
-    }
-
-    let clicked_up = col >= up_x_start && col < up_x_end;
-    let clicked_down = col >= down_x_start && col < down_x_end;
-
-    if !clicked_up && !clicked_down {
-        return;
-    }
-
-    if let Some(Modal::Feedback { ref mut rating, .. }) = state.modal {
-        *rating = Some(clicked_up);
-    }
-}
-
-/// Handle a left-click when an approval request is pending.
-///
-/// The approval selector is rendered in `left[1]` (the composer area, height 5).
-/// Layout (content row 0 = `area.y + 1` after the top border):
-///
-///   `  ❯ Allow once    Allow all edits    Deny  ` (or equivalent options)
-///
-/// All option boxes have width = label_len + 4 (2 leading spaces + label + 2 trailing).
-/// Options are separated by 3-space gaps.  The whole line is indented 2 chars from
-/// the inner-left edge (`area.x + 1`).
-///
-/// Clicking an option highlights AND confirms it in one gesture (button semantics).
-fn handle_approval_mouse(state: &mut AppState, mouse: MouseEvent) {
-    let frame_area = Rect::new(0, 0, state.last_area.width, state.last_area.height);
-    let root = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(72), Constraint::Percentage(28)])
-        .split(frame_area);
-    let left = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Min(1),
-            Constraint::Length(5),
-            Constraint::Length(3),
-        ])
-        .split(root[0]);
-
-    let selector_area = left[1];
-    // Options are on row index 1 of the widget (index 0 = top border).
-    let options_row = selector_area.y.saturating_add(1);
-    if mouse.row != options_row || !contains(selector_area, mouse.column, mouse.row) {
-        return;
-    }
-
-    let Some(pending_ref) = state.pending_approval.as_ref() else {
-        return;
-    };
-    let perm = pending_ref.request.permission.to_lowercase();
-    let is_edit = perm == "write" || perm == "edit";
-    let is_cmd = perm == "exec";
-
-    // Option labels and their widths (label_len + 4).
-    // Positions in inner content space (after border at area.x + 1):
-    //   2 leading spaces, then option boxes separated by 3-space gaps.
-    let widths: &[usize] = if is_edit {
-        &[14, 19, 8] // "Allow once"(10+4), "Allow all edits"(15+4), "Deny"(4+4)
-    } else if is_cmd {
-        &[14, 18, 8] // "Allow once"(10+4), "Allow all cmds"(14+4), "Deny"(4+4)
-    } else {
-        &[11, 8] // "Approve"(7+4), "Deny"(4+4)
-    };
-
-    let inner_x = selector_area.x.saturating_add(1) as usize;
-    if (mouse.column as usize) < inner_x {
-        return;
-    }
-    let rel = (mouse.column as usize) - inner_x;
-
-    let mut cursor = 2usize; // 2 leading spaces
-    let mut clicked_idx: Option<usize> = None;
-    for (i, &w) in widths.iter().enumerate() {
-        if rel >= cursor && rel < cursor + w {
-            clicked_idx = Some(i);
-            break;
-        }
-        cursor += w + 3; // option width + 3-space separator
-    }
-
-    let Some(opt_idx) = clicked_idx else {
-        return;
-    };
-
-    let pending = state.pending_approval.take().unwrap();
-    let response = match opt_idx {
-        0 => ApprovalResponse::AllowOnce,
-        1 if is_edit => ApprovalResponse::AllowAllEdits,
-        1 if is_cmd => ApprovalResponse::AllowAllCommands,
-        _ => ApprovalResponse::Deny,
-    };
-    let label = match response {
-        ApprovalResponse::AllowOnce => "approved once",
-        ApprovalResponse::AllowAllEdits => "approved all edits",
-        ApprovalResponse::AllowAllCommands => "approved all commands",
-        ApprovalResponse::Deny => "denied",
-    };
-    push_toast(
-        state,
-        ToastVariant::Info,
-        format!("{}: {label}", pending.request.tool),
-        Duration::from_secs(2),
-    );
-    let _ = pending.reply.send(response);
-    state.approval_selection = 0;
 }
 
 pub(super) fn handle_paste(state: &mut AppState, text: &str) {
@@ -683,7 +464,7 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
     }
     chat.history_cursor = None;
     chat.history_draft.clear();
-    chat.focus = ChatFocus::Transcript;
+    chat.focus = ChatFocus::Composer;
 
     state.request_seq = state.request_seq.saturating_add(1);
     let seq = state.request_seq;
@@ -917,7 +698,6 @@ impl Drop for TerminalCleanup {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let mut stdout = io::stdout();
-        let _ = stdout.execute(DisableMouseCapture);
         let _ = stdout.execute(LeaveAlternateScreen);
     }
 }

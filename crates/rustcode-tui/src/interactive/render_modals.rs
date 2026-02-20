@@ -659,24 +659,25 @@ pub(super) fn render_help_modal(frame: &mut ratatui::Frame<'_>, state: &AppState
         Style::default().add_modifier(Modifier::BOLD),
     )]));
     lines.push(Line::raw(
-        "  Alt+Tab / click: focus panels (composer ↔ transcript ↔ activity)",
+        "  Alt+Tab: switch focus (Composer ↔ Activity, only when panel is visible)",
     ));
     lines.push(Line::raw(
         "  Esc: focus back to composer / clear composer / back to sessions",
     ));
     lines.push(Line::raw(
-        "  Enter: submit prompt (composer) / next match (transcript) / details (activity)",
+        "  Enter: submit prompt (composer) / open details (activity)",
     ));
-    lines.push(Line::raw(
-        "  Alt+Enter / Shift+Enter: insert newline in composer",
-    ));
+    lines.push(Line::raw("  Shift+Enter: insert newline in composer"));
     lines.push(Line::raw("  Alt+Up/Down: browse prompt history"));
     lines.push(Line::raw(
         "  Ctrl+K: kill to end of line  Ctrl+U: kill to start of line",
     ));
     lines.push(Line::raw("  Ctrl+Left/Right: jump word in composer"));
     lines.push(Line::raw(
-        "  Arrow keys: edit text (composer) / scroll (transcript) / select (activity)",
+        "  Up/Down: edit text (composer) / select item (activity)",
+    ));
+    lines.push(Line::raw(
+        "  PgUp/PgDn: scroll transcript",
     ));
     lines.push(Line::raw(
         "  / (any focus): move to composer and insert / for slash commands",
@@ -694,6 +695,7 @@ pub(super) fn render_help_modal(frame: &mut ratatui::Frame<'_>, state: &AppState
     lines.push(Line::raw("  Ctrl+A: manage providers (connect/disconnect)"));
     lines.push(Line::raw("  Ctrl+S: skill toggle overlay"));
     lines.push(Line::raw("  Ctrl+B: give feedback (thumbs up/down)"));
+    lines.push(Line::raw("  Ctrl+W: toggle activity panel (show/hide)"));
     lines.push(Line::raw(""));
     lines.push(Line::raw(
         "  Slash commands (type in composer, press Enter):",

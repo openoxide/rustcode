@@ -193,9 +193,6 @@ pub(super) enum CommandId {
     ToggleTools,
     Search,
     FileSearch,
-    FocusComposer,
-    FocusTranscript,
-    FocusActivity,
     /// Toggle activity panel visibility.
     ToggleActivity,
     CancelRun,
@@ -222,7 +219,6 @@ pub(super) struct CommandItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ChatFocus {
     Composer,
-    Transcript,
     Activity,
 }
 

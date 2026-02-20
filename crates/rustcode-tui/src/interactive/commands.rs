@@ -80,7 +80,7 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                         activity: Vec::new(),
                         activity_selected: 0,
                         details_open: false,
-                        activity_hidden: true,
+                        activity_hidden: false,
                         tool_details: false,
                         find: None,
                         running: None,
@@ -274,7 +274,7 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
             });
         }
         CommandId::Search => {
-            let Screen::Chat(mut chat) = std::mem::replace(&mut state.screen, Screen::Sessions)
+            let Screen::Chat(chat) = std::mem::replace(&mut state.screen, Screen::Sessions)
             else {
                 push_toast(
                     state,
@@ -284,7 +284,6 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                 );
                 return;
             };
-            chat.focus = ChatFocus::Transcript;
             let query = chat
                 .find
                 .as_ref()
@@ -299,22 +298,6 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                 current,
                 matches,
             });
-        }
-        CommandId::FocusComposer => {
-            if let Screen::Chat(chat) = &mut state.screen {
-                chat.focus = ChatFocus::Composer;
-            }
-        }
-        CommandId::FocusTranscript => {
-            if let Screen::Chat(chat) = &mut state.screen {
-                chat.focus = ChatFocus::Transcript;
-            }
-        }
-        CommandId::FocusActivity => {
-            if let Screen::Chat(chat) = &mut state.screen {
-                chat.activity_hidden = false; // reveal panel before focusing
-                chat.focus = ChatFocus::Activity;
-            }
         }
         CommandId::ToggleActivity => {
             if let Screen::Chat(chat) = &mut state.screen {
@@ -527,7 +510,6 @@ pub(super) fn handle_slash_command(
                 current: chat.find.as_ref().map_or(0, |f| f.current),
                 matches,
             });
-            chat.focus = ChatFocus::Transcript;
             ChatNav::Stay
         }
         "model" => {

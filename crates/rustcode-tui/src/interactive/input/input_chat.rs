@@ -2,9 +2,9 @@ use super::{
     build_prompt_history, composer_backspace, composer_clear, composer_delete, composer_insert_str,
     composer_kill_line_backward, composer_kill_line_forward, composer_move_down, composer_move_end,
     composer_move_home, composer_move_left, composer_move_right, composer_move_up,
-    composer_word_left, composer_word_right, execute_command, find_next, handle_slash_command,
+    composer_word_left, composer_word_right, execute_command, handle_slash_command,
     history_next, history_prev, open_command_palette, push_toast, refresh_chat_messages,
-    submit_prompt, transcript_area_height, AppState, ChatFocus, ChatNav, ChatState, CommandId,
+    submit_prompt, AppState, ChatFocus, ChatNav, ChatState, CommandId,
     CreateSessionOptions, Duration, KeyCode, KeyEvent, KeyModifiers, Modal, ToastVariant,
 };
 
@@ -17,7 +17,7 @@ pub(super) fn handle_chat_key(
     let alt = key.modifiers.contains(KeyModifiers::ALT);
 
     if alt && matches!(key.code, KeyCode::Tab) {
-        chat.focus = next_focus(chat.focus);
+        chat.focus = next_focus(chat.focus, chat.activity_hidden);
         return ChatNav::Stay;
     }
 
@@ -220,6 +220,13 @@ pub(super) fn handle_chat_key(
             KeyCode::Char('q' | 'Q') => {
                 return ChatNav::ToSessions;
             }
+            KeyCode::Char('w' | 'W') => {
+                chat.activity_hidden = !chat.activity_hidden;
+                if chat.activity_hidden && chat.focus == ChatFocus::Activity {
+                    chat.focus = ChatFocus::Composer;
+                }
+                return ChatNav::Stay;
+            }
             _ => {}
         }
     }
@@ -248,7 +255,7 @@ pub(super) fn handle_chat_key(
         }
     }
 
-    // ── Shift+Enter: insert newline (alias for Alt+Enter) ────────────
+    // ── Shift+Enter: insert newline ────────────────────────────────────
     if chat.focus == ChatFocus::Composer
         && key.code == KeyCode::Enter
         && key.modifiers.contains(KeyModifiers::SHIFT)
@@ -302,19 +309,10 @@ pub(super) fn handle_chat_key(
         }
         // Scroll / selection
         KeyCode::PageUp => {
-            if chat.focus == ChatFocus::Activity {
-                chat.activity_selected = chat.activity_selected.saturating_sub(10);
-            } else if chat.focus == ChatFocus::Transcript {
-                chat.scroll = chat.scroll.saturating_add(5);
-            }
+            chat.scroll = chat.scroll.saturating_add(5);
         }
         KeyCode::PageDown => {
-            if chat.focus == ChatFocus::Activity {
-                chat.activity_selected =
-                    (chat.activity_selected + 10).min(chat.activity.len().saturating_sub(1));
-            } else if chat.focus == ChatFocus::Transcript {
-                chat.scroll = chat.scroll.saturating_sub(5);
-            }
+            chat.scroll = chat.scroll.saturating_sub(5);
         }
         KeyCode::Down => {
             if chat.focus == ChatFocus::Activity {
@@ -324,8 +322,6 @@ pub(super) fn handle_chat_key(
                 }
             } else if chat.focus == ChatFocus::Composer {
                 composer_move_down(chat);
-            } else {
-                chat.scroll = chat.scroll.saturating_sub(1);
             }
         }
         KeyCode::Up => {
@@ -333,8 +329,6 @@ pub(super) fn handle_chat_key(
                 chat.activity_selected = chat.activity_selected.saturating_sub(1);
             } else if chat.focus == ChatFocus::Composer {
                 composer_move_up(chat);
-            } else {
-                chat.scroll = chat.scroll.saturating_add(1);
             }
         }
         KeyCode::Backspace => {
@@ -360,15 +354,11 @@ pub(super) fn handle_chat_key(
         KeyCode::Home => {
             if chat.focus == ChatFocus::Composer {
                 composer_move_home(chat);
-            } else if chat.focus == ChatFocus::Transcript {
-                chat.scroll = u16::MAX;
             }
         }
         KeyCode::End => {
             if chat.focus == ChatFocus::Composer {
                 composer_move_end(chat);
-            } else if chat.focus == ChatFocus::Transcript {
-                chat.scroll = 0;
             }
         }
         KeyCode::Enter => {
@@ -379,23 +369,6 @@ pub(super) fn handle_chat_key(
                 return ChatNav::Stay;
             }
 
-            if chat.focus == ChatFocus::Composer && alt {
-                composer_insert_str(chat, "\n");
-                return ChatNav::Stay;
-            }
-
-            if chat.focus == ChatFocus::Transcript {
-                // If there's a search active, navigate; otherwise show error detail if any
-                let has_search = chat.find.as_ref().is_some_and(|f| !f.query.is_empty());
-                if !has_search {
-                    if let Some(msg) = state.status.clone() {
-                        state.modal = Some(Modal::ErrorDetail { message: msg });
-                        return ChatNav::Stay;
-                    }
-                }
-                find_next(state, chat, transcript_area_height(state));
-                return ChatNav::Stay;
-            }
 
             if chat.running.is_some() {
                 return ChatNav::Stay;
@@ -421,10 +394,15 @@ pub(super) fn handle_chat_key(
     ChatNav::Stay
 }
 
-fn next_focus(focus: ChatFocus) -> ChatFocus {
+fn next_focus(focus: ChatFocus, activity_hidden: bool) -> ChatFocus {
     match focus {
-        ChatFocus::Composer => ChatFocus::Transcript,
-        ChatFocus::Transcript => ChatFocus::Activity,
+        ChatFocus::Composer => {
+            if activity_hidden {
+                ChatFocus::Composer // no-op when activity panel is hidden
+            } else {
+                ChatFocus::Activity
+            }
+        }
         ChatFocus::Activity => ChatFocus::Composer,
     }
 }
