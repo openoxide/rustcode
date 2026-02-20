@@ -73,6 +73,9 @@ impl SessionStore {
             cwd: cwd.display().to_string(),
             workspace_root: workspace_root.display().to_string(),
             model: model.to_string(),
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            cost_usd: 0.0,
         };
 
         let dir = self.session_dir(&id);
@@ -242,6 +245,30 @@ impl SessionStore {
         Ok(info)
     }
 
+    /// Persist accumulated token usage and cost for a session.
+    ///
+    /// Called when a run completes successfully so that the data is available
+    /// when the session is reopened later.
+    pub fn update_session_usage(
+        &self,
+        session_id: &str,
+        total_input_tokens: u64,
+        total_output_tokens: u64,
+        cost_usd: f64,
+    ) -> Result<SessionInfo, StateError> {
+        let dir = self.session_dir(session_id);
+        if !dir.exists() {
+            return Err(StateError::NotFound(session_id.to_string()));
+        }
+        let mut info = self.get_session(session_id)?;
+        info.total_input_tokens = total_input_tokens;
+        info.total_output_tokens = total_output_tokens;
+        info.cost_usd = cost_usd;
+        info.updated_at_unix_ms = now_unix_ms()?;
+        write_json_atomic(&dir.join("meta.json"), &info)?;
+        Ok(info)
+    }
+
     pub fn delete_session(&self, session_id: &str) -> Result<(), StateError> {
         let dir = self.session_dir(session_id);
         if !dir.exists() {
@@ -357,17 +384,15 @@ fn now_unix_ms() -> Result<i64, StateError> {
 }
 
 fn new_session_id() -> SessionId {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis())
-        .unwrap_or(0);
-    let mut bytes = [0u8; 8];
+    const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
+    let mut bytes = [0u8; 7];
     rand::rng().fill_bytes(&mut bytes);
-    let mut rand_hex = String::with_capacity(16);
-    for b in &bytes {
-        let _ = write!(rand_hex, "{b:02x}");
+    let mut out = String::with_capacity(10);
+    out.push_str("rc-");
+    for b in bytes {
+        out.push(ALPHABET[(b as usize) % ALPHABET.len()] as char);
     }
-    format!("s-{now}-{rand_hex}")
+    out
 }
 
 fn new_message_id() -> MessageId {
@@ -554,5 +579,20 @@ mod tests {
             .load_messages(&session.id)
             .expect_err("load must fail");
         assert!(matches!(err, StateError::NotFound(_)));
+    }
+
+    #[test]
+    fn session_ids_use_rc_prefix_with_7_chars() {
+        let root = temp_dir("id-format");
+        let store = SessionStore::with_root(root.join("sessions"));
+        let session = store
+            .create_session(None, None, Path::new("/tmp"), Path::new("/tmp"), "m")
+            .expect("create");
+
+        assert!(session.id.starts_with("rc-"));
+        assert_eq!(session.id.len(), 10);
+        assert!(session.id["rc-".len()..]
+            .chars()
+            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit()));
     }
 }

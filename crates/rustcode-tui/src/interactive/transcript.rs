@@ -36,12 +36,12 @@ fn append_message_lines(
                     } else {
                         rendered
                     };
-                    // Prefix the first non-empty rendered line with ▶  (distinct from ◆).
+                    // Prefix the first non-empty rendered line with `</>`.
                     if !truncated.is_empty() {
                         let idx = truncated.iter().position(|l| l.width() > 0).unwrap_or(0);
                         if idx < truncated.len() {
                             let mut spans = vec![Span::styled(
-                                "▶  ",
+                                "</> ",
                                 Style::default().fg(Color::Rgb(120, 200, 200)),
                             )];
                             spans.extend(truncated[idx].spans.iter().cloned());

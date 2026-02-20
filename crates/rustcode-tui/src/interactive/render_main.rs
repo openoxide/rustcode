@@ -47,16 +47,17 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
                 } else {
                     "  "
                 };
-                // Show title if set; otherwise show "(new session)" for untitled ones
-                let title = session.title.as_deref().unwrap_or("(new session)");
                 let id_short = &session.id;
-                ListItem::new(Line::from(vec![
-                    Span::styled(fork_marker, Style::default().fg(Color::Cyan)),
-                    Span::styled(
+                let title = session.title.as_deref().unwrap_or("").trim();
+                let mut spans = vec![Span::styled(fork_marker, Style::default().fg(Color::Cyan))];
+                if !title.is_empty() {
+                    spans.push(Span::styled(
                         title.to_string(),
                         Style::default().add_modifier(Modifier::BOLD),
-                    ),
-                    Span::raw("  "),
+                    ));
+                    spans.push(Span::raw("  "));
+                }
+                spans.extend([
                     Span::styled(
                         id_short.clone(),
                         Style::default()
@@ -65,7 +66,8 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
                     ),
                     Span::raw("  "),
                     Span::styled(age, Style::default().add_modifier(Modifier::DIM)),
-                ]))
+                ]);
+                ListItem::new(Line::from(spans))
             })
             .collect::<Vec<_>>()
     };
@@ -232,13 +234,6 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         ])
         .split(root[0]);
 
-    // Show title if renamed, otherwise just show "(new session)"
-    let session_title = chat
-        .session
-        .title
-        .as_deref()
-        .unwrap_or("(new session)")
-        .to_string();
     // Extract provider name from config or model string (e.g., "openrouter" or "opencode/gpt-4o")
     let provider_label = {
         let mut provider_str = app.defaults.provider.as_str();
@@ -264,9 +259,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     };
     // Build transcript title spans with distinct colors per metric.
     let mut transcript_title_spans = vec![
-        Span::styled(session_title, Style::default().add_modifier(Modifier::BOLD)),
-        Span::raw("  "),
-        // App brand — purple
+        // App brand
         Span::styled(
             "RustCode",
             Style::default()
@@ -347,7 +340,9 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             }
         })
         .sum();
-    let max_scroll = wrapped_count.saturating_sub(transcript_inner_h) as u16;
+    let max_scroll = wrapped_count
+        .saturating_sub(transcript_inner_h)
+        .min(u16::MAX as usize) as u16;
     // Update Cell so the scroll event handler can clamp immediately.
     chat.last_max_scroll.set(max_scroll);
     let from_bottom = chat.scroll.min(max_scroll);
@@ -405,11 +400,11 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         .last_typing_time
         .is_some_and(|t| t.elapsed().as_millis() < TYPING_TIMEOUT_MS);
     let prompt_label = if chat.running.is_some() {
-        "Prompt (running)"
+        "</> Prompt (running)"
     } else if is_typing {
-        "Prompt (typing...)"
+        "</> Prompt (typing...)"
     } else {
-        "Prompt"
+        "</> Prompt"
     };
     let mut composer_title_spans = vec![
         Span::styled(prompt_label, Style::default().add_modifier(Modifier::BOLD)),
@@ -505,8 +500,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                     ));
                 }
                 git_spans.push(Span::raw(" ")); // trailing padding inside border
-                composer_block =
-                    composer_block.title(Line::from(git_spans).right_aligned());
+                composer_block = composer_block.title(Line::from(git_spans).right_aligned());
             }
         }
 
