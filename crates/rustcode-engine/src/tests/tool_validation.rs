@@ -152,6 +152,11 @@ async fn tool_rejects_wrong_argument_types() {
         Arc::new(ResolvedConfig {
             workspace_root: PathBuf::from("/tmp/rustcode-bad-types"),
             allow_network: true,
+            permission_rules: vec![rustcode_core::PermissionRule {
+                permission: "webfetch".to_string(),
+                action: PermissionAction::Allow,
+                pattern: "*".to_string(),
+            }],
             ..ResolvedConfig::default()
         }),
         SessionMeta {
@@ -194,6 +199,11 @@ async fn todowrite_accepts_and_normalizes_todos() {
     let context = CommandContext::new(
         Arc::new(ResolvedConfig {
             workspace_root: PathBuf::from("/tmp/rustcode-todo"),
+            permission_rules: vec![rustcode_core::PermissionRule {
+                permission: "todowrite".to_string(),
+                action: PermissionAction::Allow,
+                pattern: "*".to_string(),
+            }],
             ..ResolvedConfig::default()
         }),
         SessionMeta {

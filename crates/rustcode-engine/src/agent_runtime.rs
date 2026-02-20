@@ -474,7 +474,7 @@ impl Engine {
             ExecutionError::Dispatch(format!("tool arguments are not valid JSON: {err}"))
         })?;
 
-        if is_mutating_tool(name) {
+        if is_mutating_tool(name, &args) {
             self.check_tool_permission(name, &args, context).await?;
         }
 

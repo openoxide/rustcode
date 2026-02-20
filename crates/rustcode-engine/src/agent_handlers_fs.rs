@@ -16,42 +16,92 @@ fn diff_output(old: &str, new: &str, max_diff_lines: usize) -> String {
     let diff = TextDiff::from_lines(old, new);
     let mut added = 0usize;
     let mut removed = 0usize;
-    let mut diff_lines: Vec<String> = Vec::new();
     for change in diff.iter_all_changes() {
         match change.tag() {
-            ChangeTag::Insert => {
-                added += 1;
-                if diff_lines.len() < max_diff_lines {
-                    let line = change.value().trim_end_matches('\n');
-                    diff_lines.push(format!("+{line}"));
-                }
-            }
-            ChangeTag::Delete => {
-                removed += 1;
-                if diff_lines.len() < max_diff_lines {
-                    let line = change.value().trim_end_matches('\n');
-                    diff_lines.push(format!("-{line}"));
-                }
-            }
+            ChangeTag::Insert => added += 1,
+            ChangeTag::Delete => removed += 1,
             ChangeTag::Equal => {}
         }
     }
     if added == 0 && removed == 0 {
         return String::new();
     }
-    let truncated = if added + removed > max_diff_lines {
-        format!(
-            "\n...[{} more diff lines]",
-            (added + removed).saturating_sub(diff_lines.len())
-        )
-    } else {
-        String::new()
-    };
-    format!(
-        "+{added} -{removed}\n@@diff\n{}{}",
-        diff_lines.join("\n"),
-        truncated
-    )
+
+    // Render grouped hunks with 2 lines of context above/below each change.
+    let mut lines: Vec<String> = Vec::new();
+    let mut emitted_changes = 0usize;
+    let mut omitted_changes = 0usize;
+    for group in diff.grouped_ops(2) {
+        if group.is_empty() {
+            continue;
+        }
+        if emitted_changes >= max_diff_lines {
+            omitted_changes += changed_lines_in_group(&diff, &group);
+            continue;
+        }
+
+        let old_start = group[0].old_range().start + 1;
+        let old_end = group[group.len() - 1].old_range().end;
+        let new_start = group[0].new_range().start + 1;
+        let new_end = group[group.len() - 1].new_range().end;
+        lines.push(format!(
+            "@@ -{},{} +{},{} @@",
+            old_start,
+            old_end.saturating_sub(group[0].old_range().start),
+            new_start,
+            new_end.saturating_sub(group[0].new_range().start)
+        ));
+
+        for op in group {
+            for change in diff.iter_changes(&op) {
+                let line = change.value().trim_end_matches('\n');
+                match change.tag() {
+                    ChangeTag::Insert => {
+                        if emitted_changes < max_diff_lines {
+                            lines.push(format!("+{line}"));
+                            emitted_changes += 1;
+                        } else {
+                            omitted_changes += 1;
+                        }
+                    }
+                    ChangeTag::Delete => {
+                        if emitted_changes < max_diff_lines {
+                            lines.push(format!("-{line}"));
+                            emitted_changes += 1;
+                        } else {
+                            omitted_changes += 1;
+                        }
+                    }
+                    ChangeTag::Equal => {
+                        if emitted_changes < max_diff_lines {
+                            lines.push(format!(" {line}"));
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if omitted_changes > 0 {
+        lines.push(format!("...[{omitted_changes} more diff lines]"));
+    }
+
+    format!("+{added} -{removed}\n@@diff\n{}", lines.join("\n"))
+}
+
+fn changed_lines_in_group(
+    diff: &similar::TextDiff<'_, '_, '_, str>,
+    group: &[similar::DiffOp],
+) -> usize {
+    let mut count = 0usize;
+    for op in group {
+        for change in diff.iter_changes(op) {
+            if !matches!(change.tag(), similar::ChangeTag::Equal) {
+                count += 1;
+            }
+        }
+    }
+    count
 }
 
 impl Engine {
@@ -383,5 +433,35 @@ impl Engine {
         }
 
         Ok(rendered)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::diff_output;
+
+    #[test]
+    fn diff_output_includes_two_lines_of_context_for_single_line_change() {
+        let old = "line1\nline2\nline3\nline4\nline5\nline6\n";
+        let new = "line1\nline2\nCHANGED\nline4\nline5\nline6\n";
+        let out = diff_output(old, new, 40);
+
+        assert!(out.contains("@@ -1,5 +1,5 @@"), "out={out}");
+        assert!(out.contains(" line1"), "out={out}");
+        assert!(out.contains(" line2"), "out={out}");
+        assert!(out.contains("-line3"), "out={out}");
+        assert!(out.contains("+CHANGED"), "out={out}");
+        assert!(out.contains(" line4"), "out={out}");
+        assert!(out.contains(" line5"), "out={out}");
+    }
+
+    #[test]
+    fn diff_output_truncates_changed_lines_budget_only() {
+        let old = "a\nb\nc\nd\ne\nf\n";
+        let new = "A\nB\nC\nD\ne\nf\n";
+        let out = diff_output(old, new, 2);
+
+        assert!(out.contains("+4 -4"), "out={out}");
+        assert!(out.contains("...[6 more diff lines]"), "out={out}");
     }
 }

@@ -4,9 +4,27 @@ use serde_json::Value;
 use rustcode_core::error::ExecutionError;
 use rustcode_core::permissions::PermissionAction;
 
-/// Determine whether a tool is mutating (requires approval).
-pub(crate) fn is_mutating_tool(name: &str) -> bool {
-    matches!(name, "write" | "edit" | "exec") || name.starts_with("mcp:")
+/// Determine whether a tool call requires user approval.
+///
+/// Allowlisted (no approval): lsp, question, plan, task, codesearch.
+/// `list`, `read`, `glob`, and `grep` are allowlisted only when scoped to the
+/// current dir (`path` omitted/`.` for list|glob|grep, and a direct file in `.`
+/// for read).
+/// All other tools require approval.
+pub(crate) fn is_mutating_tool(name: &str, args: &Value) -> bool {
+    if name.starts_with("mcp:") {
+        return true;
+    }
+    if matches!(name, "lsp" | "question" | "plan" | "task" | "codesearch") {
+        return false;
+    }
+    if matches!(name, "list" | "glob" | "grep") {
+        return !tool_targets_current_dir(args);
+    }
+    if name == "read" {
+        return !read_targets_current_dir(args);
+    }
+    true
 }
 
 /// Determine whether a tool can safely execute in parallel with other tools.
@@ -94,9 +112,96 @@ pub(crate) fn approval_fields(tool: &str, args: &Value) -> (String, String, Stri
                 format!("agent requests permission to execute {rendered}"),
             )
         }
+        "bash" | "pty_exec" => {
+            let command = args
+                .get("command")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            (
+                command.to_string(),
+                format!("agent requests permission to execute shell command {command}"),
+            )
+        }
+        "multiedit" => {
+            let path = args
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            (
+                path.to_string(),
+                format!("agent requests permission to apply multiple edits to {path}"),
+            )
+        }
+        "apply_patch" => {
+            let patch = args.get("patch_text").and_then(Value::as_str).unwrap_or("");
+            let target = extract_first_patch_target(patch).unwrap_or_else(|| "<patch>".to_string());
+            (
+                target.clone(),
+                format!("agent requests permission to apply patch ({target})"),
+            )
+        }
+        "webfetch" => {
+            let url = args
+                .get("url")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            (
+                url.to_string(),
+                format!("agent requests permission to fetch {url}"),
+            )
+        }
+        "websearch" => {
+            let query = args
+                .get("query")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            (
+                query.to_string(),
+                format!("agent requests permission to web-search for {query}"),
+            )
+        }
+        "glob" => {
+            let path = args.get("path").and_then(Value::as_str).unwrap_or(".");
+            let pattern = args.get("pattern").and_then(Value::as_str).unwrap_or("*");
+            (
+                path.to_string(),
+                format!("agent requests permission to glob in {path} with pattern {pattern}"),
+            )
+        }
+        "worktree_create" => {
+            let branch = args
+                .get("branch")
+                .and_then(Value::as_str)
+                .or_else(|| args.get("name").and_then(Value::as_str))
+                .unwrap_or("<auto>");
+            (
+                branch.to_string(),
+                format!("agent requests permission to create worktree {branch}"),
+            )
+        }
+        "worktree_remove" | "worktree_reset" => {
+            let path = args
+                .get("path")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            (
+                path.to_string(),
+                format!("agent requests permission to run {tool} on {path}"),
+            )
+        }
+        "snapshot_restore" => {
+            let hash = args
+                .get("hash")
+                .and_then(Value::as_str)
+                .unwrap_or("<unknown>");
+            (
+                hash.to_string(),
+                format!("agent requests permission to restore snapshot {hash}"),
+            )
+        }
         _ => (
             tool.to_string(),
-            format!("agent requests permission to call MCP tool {tool}"),
+            format!("agent requests permission to call tool {tool}"),
         ),
     };
 
@@ -108,12 +213,49 @@ pub(crate) fn approval_match_targets(tool: &str, args: &Value) -> Vec<String> {
     match tool {
         _ if tool.starts_with("mcp:") => vec![tool.to_string()],
         "exec" => exec_match_targets(args),
-        "write" | "edit" => vec![args
+        "bash" | "pty_exec" => args
+            .get("command")
+            .and_then(Value::as_str)
+            .map(|command| vec![command.to_string()])
+            .unwrap_or_else(|| vec![String::new()]),
+        "write" | "edit" | "multiedit" | "worktree_remove" | "worktree_reset" => vec![args
             .get("path")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string()],
-        _ => vec!["*".to_string()],
+        "apply_patch" => args
+            .get("patch_text")
+            .and_then(Value::as_str)
+            .and_then(extract_first_patch_target)
+            .map(|target| vec![target])
+            .unwrap_or_else(|| vec!["*".to_string()]),
+        "glob" | "grep" | "list" | "read" => vec![args
+            .get("path")
+            .and_then(Value::as_str)
+            .unwrap_or(".")
+            .to_string()],
+        "webfetch" => vec![args
+            .get("url")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()],
+        "websearch" | "codesearch" => vec![args
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()],
+        "worktree_create" => vec![args
+            .get("branch")
+            .and_then(Value::as_str)
+            .or_else(|| args.get("name").and_then(Value::as_str))
+            .unwrap_or("")
+            .to_string()],
+        "snapshot_restore" => vec![args
+            .get("hash")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()],
+        _ => vec![tool.to_string()],
     }
 }
 
@@ -143,6 +285,44 @@ fn exec_match_targets(args: &Value) -> Vec<String> {
         targets.push(String::new());
     }
     targets
+}
+
+fn tool_targets_current_dir(args: &Value) -> bool {
+    let path = args.get("path").and_then(Value::as_str).unwrap_or(".");
+    let normalized = normalize_path(path);
+    let trimmed = normalized.trim_end_matches('/');
+    trimmed.is_empty() || trimmed == "."
+}
+
+fn read_targets_current_dir(args: &Value) -> bool {
+    let Some(path) = args.get("path").and_then(Value::as_str) else {
+        return false;
+    };
+    let normalized = normalize_path(path);
+    if normalized.is_empty() || normalized == "." {
+        return false;
+    }
+    !normalized.contains('/')
+}
+
+fn normalize_path(path: &str) -> String {
+    let mut normalized = path.trim().replace('\\', "/");
+    while normalized.starts_with("./") {
+        normalized = normalized[2..].to_string();
+    }
+    normalized
+}
+
+fn extract_first_patch_target(patch_text: &str) -> Option<String> {
+    for line in patch_text.lines() {
+        if let Some(path) = line.strip_prefix("+++ ") {
+            let trimmed = path.trim().trim_start_matches("b/");
+            if !trimmed.is_empty() && trimmed != "/dev/null" {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
 }
 
 /// Truncate a string to fit within `max_bytes` on a UTF-8 char boundary.
@@ -221,4 +401,67 @@ pub(crate) fn stored_messages_to_chat(
                 .collect(),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn allowlisted_tools_do_not_require_approval() {
+        let args = serde_json::json!({});
+        for tool in ["lsp", "question", "plan", "task", "codesearch"] {
+            assert!(!is_mutating_tool(tool, &args), "tool={tool}");
+        }
+    }
+
+    #[test]
+    fn glob_requires_approval_only_outside_current_dir() {
+        assert!(!is_mutating_tool(
+            "glob",
+            &serde_json::json!({"pattern":"*.rs"})
+        ));
+        assert!(!is_mutating_tool(
+            "glob",
+            &serde_json::json!({"pattern":"*.rs","path":"."})
+        ));
+        assert!(!is_mutating_tool(
+            "glob",
+            &serde_json::json!({"pattern":"*.rs","path":"./"})
+        ));
+        assert!(is_mutating_tool(
+            "glob",
+            &serde_json::json!({"pattern":"*.rs","path":"src"})
+        ));
+    }
+
+    #[test]
+    fn list_and_grep_require_approval_outside_current_dir() {
+        assert!(!is_mutating_tool("list", &serde_json::json!({})));
+        assert!(!is_mutating_tool(
+            "grep",
+            &serde_json::json!({"pattern":"todo"})
+        ));
+        assert!(is_mutating_tool("list", &serde_json::json!({"path":"src"})));
+        assert!(is_mutating_tool(
+            "grep",
+            &serde_json::json!({"pattern":"todo","path":"src"})
+        ));
+    }
+
+    #[test]
+    fn read_requires_approval_for_nested_paths() {
+        assert!(!is_mutating_tool(
+            "read",
+            &serde_json::json!({"path":"main.rs"})
+        ));
+        assert!(!is_mutating_tool(
+            "read",
+            &serde_json::json!({"path":"./main.rs"})
+        ));
+        assert!(is_mutating_tool(
+            "read",
+            &serde_json::json!({"path":"src/main.rs"})
+        ));
+    }
 }

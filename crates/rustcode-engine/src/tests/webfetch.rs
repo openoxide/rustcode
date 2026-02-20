@@ -15,6 +15,11 @@ async fn webfetch_rejects_when_network_disabled() {
     let context = CommandContext::new(
         Arc::new(ResolvedConfig {
             allow_network: false,
+            permission_rules: vec![rustcode_core::PermissionRule {
+                permission: "webfetch".to_string(),
+                action: PermissionAction::Allow,
+                pattern: "*".to_string(),
+            }],
             ..ResolvedConfig::default()
         }),
         SessionMeta {
@@ -82,6 +87,11 @@ async fn webfetch_fetches_local_http_and_simplifies_html_by_default() {
     let context = CommandContext::new(
         Arc::new(ResolvedConfig {
             allow_network: true,
+            permission_rules: vec![rustcode_core::PermissionRule {
+                permission: "webfetch".to_string(),
+                action: PermissionAction::Allow,
+                pattern: "*".to_string(),
+            }],
             ..ResolvedConfig::default()
         }),
         SessionMeta {
@@ -149,6 +159,11 @@ async fn webfetch_format_html_returns_raw_html() {
     let context = CommandContext::new(
         Arc::new(ResolvedConfig {
             allow_network: true,
+            permission_rules: vec![rustcode_core::PermissionRule {
+                permission: "webfetch".to_string(),
+                action: PermissionAction::Allow,
+                pattern: "*".to_string(),
+            }],
             ..ResolvedConfig::default()
         }),
         SessionMeta {
