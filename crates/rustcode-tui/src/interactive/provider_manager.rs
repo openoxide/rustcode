@@ -146,8 +146,10 @@ pub(super) fn provider_display_name(provider_id: &str) -> String {
     PROVIDER_CATALOG
         .iter()
         .find(|info| info.id == provider_id)
-        .map(|info| info.display_name.to_string())
-        .unwrap_or_else(|| provider_id.to_string())
+        .map_or_else(
+            || provider_id.to_string(),
+            |info| info.display_name.to_string(),
+        )
 }
 
 /// Return the primary environment variable hint for a provider's API key, if any.

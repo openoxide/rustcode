@@ -1,0 +1,222 @@
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Modifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
+
+use crate::InteractiveSubmitMode;
+
+use super::AppState;
+use super::SLASH_COMMANDS;
+
+/// Render the full keyboard-shortcut help overlay.
+pub(crate) fn render_help_modal(frame: &mut ratatui::Frame<'_>, state: &AppState) {
+    let area = centered_rect(80, 70, frame.area());
+    frame.render_widget(Clear, area);
+    let mut lines: Vec<Line<'static>> = vec![
+        Line::from(vec![Span::styled(
+            "Help",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]),
+        Line::raw(""),
+    ];
+
+    lines.push(Line::from(vec![Span::styled(
+        "Global",
+        Style::default().add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::raw("  ?: toggle help"));
+    lines.push(Line::raw("  Ctrl+P: command palette"));
+    lines.push(Line::raw(
+        "    - try: session <id>, rename <title>, search <text>",
+    ));
+    lines.push(Line::raw("  q: quit / back"));
+    lines.push(Line::raw("  Esc: close modal / clear / back"));
+    lines.push(Line::raw(""));
+
+    lines.push(Line::from(vec![Span::styled(
+        "Sessions",
+        Style::default().add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::raw(
+        "  Up/Down/PgUp/PgDn: select  Home/End: first/last",
+    ));
+    lines.push(Line::raw("  Enter: open session"));
+    lines.push(Line::raw("  /: search/filter sessions"));
+    lines.push(Line::raw("  Ctrl+N: new session"));
+    lines.push(Line::raw("  Ctrl+E: rename session"));
+    lines.push(Line::raw("  Ctrl+D: delete session"));
+    lines.push(Line::raw("  Ctrl+R: refresh list"));
+    lines.push(Line::raw("  Esc / Q: quit"));
+    lines.push(Line::raw(""));
+
+    lines.push(Line::from(vec![Span::styled(
+        "Chat",
+        Style::default().add_modifier(Modifier::BOLD),
+    )]));
+    lines.push(Line::raw(
+        "  Alt+Tab: switch focus (Composer ↔ Activity, only when panel is visible)",
+    ));
+    lines.push(Line::raw(
+        "  Esc: focus back to composer / clear composer / back to sessions",
+    ));
+    lines.push(Line::raw(
+        "  Enter: submit prompt (composer) / open details (activity)",
+    ));
+    lines.push(Line::raw("  Shift+Enter: insert newline in composer"));
+    lines.push(Line::raw("  Alt+Up/Down: browse prompt history"));
+    lines.push(Line::raw(
+        "  Ctrl+K: kill to end of line  Ctrl+U: kill to start of line",
+    ));
+    lines.push(Line::raw("  Ctrl+Left/Right: jump word in composer"));
+    lines.push(Line::raw(
+        "  Up/Down: edit text (composer) / select item (activity)",
+    ));
+    lines.push(Line::raw("  PgUp/PgDn: scroll transcript"));
+    lines.push(Line::raw(
+        "  / (any focus): move to composer and insert / for slash commands",
+    ));
+    lines.push(Line::raw("  Ctrl+C: cancel running agent"));
+    lines.push(Line::raw("  Ctrl+N: new session"));
+    lines.push(Line::raw("  Ctrl+F: fork current session"));
+    lines.push(Line::raw("  Ctrl+R: refresh transcript"));
+    lines.push(Line::raw(
+        "  Ctrl+T: file search (inserts @path into composer)",
+    ));
+    lines.push(Line::raw("  Ctrl+Q: go to sessions list"));
+    lines.push(Line::raw("  Ctrl+P: open command palette"));
+    lines.push(Line::raw("  Ctrl+M: switch model (pick a different LLM)"));
+    lines.push(Line::raw("  Ctrl+A: manage providers (connect/disconnect)"));
+    lines.push(Line::raw("  Ctrl+S: skill toggle overlay"));
+    lines.push(Line::raw("  Ctrl+B: give feedback (thumbs up/down)"));
+    lines.push(Line::raw("  Ctrl+W: toggle activity panel (show/hide)"));
+    lines.push(Line::raw("  Ctrl+O: expand/collapse tool details"));
+    lines.push(Line::raw(""));
+    lines.push(Line::raw(
+        "  Slash commands (type in composer, press Enter):",
+    ));
+    lines.push(Line::raw(
+        "  /help  /sessions  /new  /fork  /reload  /find  /model  /providers  /clear  /skill  /memory",
+    ));
+
+    if state.submit_mode == InteractiveSubmitMode::Run {
+        lines.push(Line::raw(""));
+        lines.push(Line::from(vec![Span::styled(
+            "Attach mode",
+            Style::default().add_modifier(Modifier::BOLD),
+        )]));
+        lines.push(Line::raw("  This TUI is attached to a remote server."));
+        lines.push(Line::raw("  Tool approvals may not be supported."));
+    }
+
+    let dialog = Paragraph::new(lines)
+        .block(
+            Block::default()
+                .title("Help")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(Color::Cyan)),
+        )
+        .wrap(Wrap { trim: false });
+    frame.render_widget(dialog, area);
+}
+
+/// Render the slash-command autocomplete popup.
+pub(super) fn render_slash_help(frame: &mut ratatui::Frame<'_>, query: &str, selected: usize) {
+    let filtered: Vec<(&str, &str)> = if query.is_empty() {
+        SLASH_COMMANDS.to_vec()
+    } else {
+        let needle = query.to_ascii_lowercase();
+        SLASH_COMMANDS
+            .iter()
+            .filter(|(cmd, _)| {
+                let stem = cmd
+                    .trim_start_matches('/')
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("");
+                stem.to_ascii_lowercase().contains(&needle)
+            })
+            .copied()
+            .collect()
+    };
+
+    let area = slash_popup_rect(frame.area(), filtered.len());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title("/ commands  (Tab: complete  Esc: close)")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Cyan));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    if filtered.is_empty() {
+        let msg =
+            Paragraph::new("(no matches)").style(Style::default().add_modifier(Modifier::DIM));
+        frame.render_widget(msg, inner);
+        return;
+    }
+
+    let clamped = selected.min(filtered.len().saturating_sub(1));
+    let items: Vec<ListItem<'_>> = filtered
+        .iter()
+        .enumerate()
+        .map(|(i, (cmd, desc))| {
+            let style = if i == clamped {
+                Style::default().add_modifier(Modifier::REVERSED)
+            } else {
+                Style::default()
+            };
+            ListItem::new(Line::from(vec![
+                Span::styled(*cmd, style.fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled("  ", style),
+                Span::styled(*desc, style.fg(Color::DarkGray)),
+            ]))
+        })
+        .collect();
+
+    let mut list_state = ratatui::widgets::ListState::default();
+    list_state.select(Some(clamped));
+    let list = List::new(items).highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+    frame.render_stateful_widget(list, inner, &mut list_state);
+}
+
+/// Compute the popup rect for the slash-help popup.
+///
+/// Anchored to the lower-left of the terminal, just above the composer+footer
+/// (~8 rows from the bottom).  Width is half the terminal; height grows with
+/// the number of matches up to 10 rows.
+fn slash_popup_rect(r: Rect, item_count: usize) -> Rect {
+    let content_h = (item_count as u16).clamp(1, 10);
+    // +2 for borders
+    let h = content_h + 2;
+    let w = r.width / 2;
+    // Position above the composer+footer (~8 rows from bottom)
+    let y = r.y + r.height.saturating_sub(h + 8);
+    Rect {
+        x: r.x + 1,
+        y,
+        width: w,
+        height: h,
+    }
+}
+
+/// Compute a centered rectangle within `r` using percentage dimensions.
+pub(crate) fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Percentage((100 - percent_y) / 2),
+            Constraint::Percentage(percent_y),
+            Constraint::Percentage((100 - percent_y) / 2),
+        ])
+        .split(r);
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage((100 - percent_x) / 2),
+            Constraint::Percentage(percent_x),
+            Constraint::Percentage((100 - percent_x) / 2),
+        ])
+        .split(popup_layout[1])[1]
+}

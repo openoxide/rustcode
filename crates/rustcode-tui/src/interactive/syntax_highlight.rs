@@ -44,14 +44,11 @@ pub(super) fn highlight_code_line(text: &str, state: &mut HighlightState) -> Vec
     // passed to `highlight_line` MUST end with `\n` — otherwise single-line
     // scopes (like Python `#` comments) never close and bleed into later lines.
     let with_nl = format!("{text}\n");
-    let ranges = match state.highlighter.highlight_line(&with_nl, &SYNTAX_SET) {
-        Ok(r) => r,
-        Err(_) => {
-            return vec![Span::styled(
-                text.to_string(),
-                Style::default().fg(Color::White),
-            )]
-        }
+    let Ok(ranges) = state.highlighter.highlight_line(&with_nl, &SYNTAX_SET) else {
+        return vec![Span::styled(
+            text.to_string(),
+            Style::default().fg(Color::White),
+        )];
     };
 
     if ranges.is_empty() {
@@ -80,10 +77,10 @@ fn syntect_to_ratatui_color(c: syntect::highlighting::Color) -> Color {
     let max_ch = c.r.max(c.g).max(c.b);
     if max_ch < 100 {
         // Too dim — lift all channels proportionally.
-        let scale = 140.0 / (max_ch as f32).max(1.0);
-        let r = ((c.r as f32) * scale).min(255.0) as u8;
-        let g = ((c.g as f32) * scale).min(255.0) as u8;
-        let b = ((c.b as f32) * scale).min(255.0) as u8;
+        let scale = 140.0 / f32::from(max_ch).max(1.0);
+        let r = (f32::from(c.r) * scale).min(255.0) as u8;
+        let g = (f32::from(c.g) * scale).min(255.0) as u8;
+        let b = (f32::from(c.b) * scale).min(255.0) as u8;
         Color::Rgb(r, g, b)
     } else {
         Color::Rgb(c.r, c.g, c.b)

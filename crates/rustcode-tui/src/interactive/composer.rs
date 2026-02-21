@@ -212,18 +212,11 @@ pub(super) fn composer_word_left(chat: &mut ChatState) {
     let before = &chat.composer[..idx];
     // skip trailing whitespace, then find the last whitespace boundary
     let trimmed = before.trim_end();
-    let new_idx = trimmed
-        .rfind(|c: char| c.is_whitespace())
-        .map(|p| {
-            // p is the byte index of the whitespace char; we want the next char start
-            let ch = trimmed[p..]
-                .chars()
-                .next()
-                .map(|c| c.len_utf8())
-                .unwrap_or(1);
-            p + ch
-        })
-        .unwrap_or(0);
+    let new_idx = trimmed.rfind(|c: char| c.is_whitespace()).map_or(0, |p| {
+        // p is the byte index of the whitespace char; we want the next char start
+        let ch = trimmed[p..].chars().next().map_or(1, |c| c.len_utf8());
+        p + ch
+    });
     chat.composer_cursor = new_idx;
 }
 
@@ -243,8 +236,7 @@ pub(super) fn composer_kill_line_forward(chat: &mut ChatState) {
     let idx = chat.composer_cursor.min(chat.composer.len());
     let end = chat.composer[idx..]
         .find('\n')
-        .map(|p| idx + p)
-        .unwrap_or(chat.composer.len());
+        .map_or(chat.composer.len(), |p| idx + p);
     if end > idx {
         chat.composer.replace_range(idx..end, "");
     }
@@ -254,7 +246,7 @@ pub(super) fn composer_kill_line_forward(chat: &mut ChatState) {
 /// Delete from the start of the current line to the cursor.
 pub(super) fn composer_kill_line_backward(chat: &mut ChatState) {
     let idx = chat.composer_cursor.min(chat.composer.len());
-    let start = chat.composer[..idx].rfind('\n').map(|p| p + 1).unwrap_or(0);
+    let start = chat.composer[..idx].rfind('\n').map_or(0, |p| p + 1);
     if idx > start {
         chat.composer.replace_range(start..idx, "");
         chat.composer_cursor = start;

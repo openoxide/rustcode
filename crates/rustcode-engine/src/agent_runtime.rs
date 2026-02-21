@@ -76,13 +76,13 @@ impl Engine {
             let retry_policy = crate::retry::RetryPolicy::default();
             let retry_publisher = publisher.clone();
             let on_retry = move |msg: &str| {
-                let _ = retry_publisher.publish(rustcode_core::event::Event::new(
+                std::mem::drop(retry_publisher.publish(rustcode_core::event::Event::new(
                     0,
                     rustcode_core::event::EventScope::Command,
                     rustcode_core::event::EventPayload::Warning {
                         message: msg.to_string(),
                     },
-                ));
+                )));
             };
             let response = crate::retry::retry_llm_call(
                 &retry_policy,

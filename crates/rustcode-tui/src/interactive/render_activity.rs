@@ -3,6 +3,8 @@ use super::{
     Line, List, ListItem, Modifier, Paragraph, Rect, Span, Style, SystemTime, Wrap,
 };
 
+const ACTIVITY_SPIN: &[char] = &['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
+
 pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: &ChatState) {
     frame.render_widget(Clear, area);
 
@@ -17,9 +19,7 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_else(|_| Duration::from_secs(0))
             .as_millis();
-        // Heavy-braille circle spinner: ⣾⣽⣻⢿⡿⣟⣯⣷ (8 frames × 80 ms)
-        const SPIN: &[char] = &['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
-        SPIN[(ms / 80 % 8) as usize]
+        ACTIVITY_SPIN[(ms / 80 % 8) as usize]
     } else {
         ' '
     };

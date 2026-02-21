@@ -60,13 +60,13 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
             let mut code_line_spans = vec![Span::raw("  ".to_string())];
             if let Some(ref mut hl) = code_hl {
                 let hl_spans = highlight_code_line(stripped, hl);
-                if !hl_spans.is_empty() {
-                    code_line_spans.extend(hl_spans);
-                } else {
+                if hl_spans.is_empty() {
                     code_line_spans.push(Span::styled(
                         stripped.to_string(),
                         Style::default().fg(Color::Yellow),
                     ));
+                } else {
+                    code_line_spans.extend(hl_spans);
                 }
             } else {
                 code_line_spans.push(Span::styled(
