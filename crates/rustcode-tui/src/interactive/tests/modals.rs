@@ -118,7 +118,7 @@ fn activity_details_modal_renders_tool_arguments() {
 
 #[test]
 fn command_palette_renders_actions_and_search() {
-    let backend = TestBackend::new(100, 24);
+    let backend = TestBackend::new(100, 40);
     let mut terminal = Terminal::new(backend).expect("terminal");
 
     let mut state = AppState {
@@ -152,7 +152,7 @@ fn command_palette_renders_actions_and_search() {
         request_seq: 0,
         last_area: Size {
             width: 100,
-            height: 24,
+            height: 40,
         },
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,

@@ -6,6 +6,7 @@ use super::super::{
 };
 use super::filter_models;
 use super::session_ops::refresh_chat_messages;
+use super::slash::open_memory_viewer;
 
 const MODEL_PICKER_PROVIDER_PRIORITY: &[&str] = &[
     "anthropic",
@@ -419,6 +420,9 @@ pub(crate) fn execute_command(state: &mut AppState, id: CommandId) {
                     selected: 0,
                 },
             });
+        }
+        CommandId::ViewMemory => {
+            open_memory_viewer(state);
         }
     }
 }

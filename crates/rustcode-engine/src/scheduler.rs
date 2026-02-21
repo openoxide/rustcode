@@ -84,6 +84,10 @@ async fn memory_consolidation_loop(
                 break;
             }
             _ = interval.tick() => {
+                if storage.is_disabled() {
+                    debug!("scheduler: memory consolidation skipped (disabled)");
+                    continue;
+                }
                 debug!("scheduler: running memory consolidation");
                 match consolidate_memories(llm.clone(), &storage, &model).await {
                     Ok(()) => debug!("scheduler: memory consolidation complete"),

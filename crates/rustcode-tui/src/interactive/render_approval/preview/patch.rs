@@ -1,9 +1,10 @@
 use std::path::Path;
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::{code_spans, padded_line};
+use crate::interactive::theme;
 
 const PATCH_MAX_LINES: usize = 120;
 
@@ -56,11 +57,11 @@ pub(super) fn render_patch_text_preview(
             add_no = 0;
             del_no = 0;
             out.push(Line::from(vec![
-                Span::styled("  file: ", Style::default().fg(Color::DarkGray)),
+                Span::styled("  file: ", Style::default().fg(theme::MUTED)),
                 Span::styled(
                     path,
                     Style::default()
-                        .fg(Color::White)
+                        .fg(theme::TEXT)
                         .add_modifier(Modifier::BOLD),
                 ),
             ]));
@@ -80,11 +81,11 @@ pub(super) fn render_patch_text_preview(
             add_no = 0;
             del_no = 0;
             out.push(Line::from(vec![
-                Span::styled("  file: ", Style::default().fg(Color::DarkGray)),
+                Span::styled("  file: ", Style::default().fg(theme::MUTED)),
                 Span::styled(
                     path.to_string(),
                     Style::default()
-                        .fg(Color::White)
+                        .fg(theme::TEXT)
                         .add_modifier(Modifier::BOLD),
                 ),
             ]));
@@ -110,7 +111,7 @@ pub(super) fn render_patch_text_preview(
                     out.push(Line::from(Span::styled(
                         format!("     … line {}", offset + 1),
                         Style::default()
-                            .fg(Color::DarkGray)
+                            .fg(theme::MUTED)
                             .add_modifier(Modifier::DIM),
                     )));
                     rendered += 1;
@@ -126,7 +127,7 @@ pub(super) fn render_patch_text_preview(
             out.push(Line::from(Span::styled(
                 format!("     … line {new_start}"),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme::MUTED)
                     .add_modifier(Modifier::DIM),
             )));
             rendered += 1;
@@ -143,16 +144,13 @@ pub(super) fn render_patch_text_preview(
             let n = add_no;
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(
-                    format!("{n:>3} "),
-                    Style::default().fg(Color::Rgb(80, 200, 80)),
-                ),
-                Span::styled("+ ", Style::default().fg(Color::Rgb(80, 200, 80))),
+                Span::styled(format!("{n:>3} "), Style::default().fg(theme::DIFF_ADD_FG)),
+                Span::styled("+ ", Style::default().fg(theme::DIFF_ADD_FG)),
             ];
             spans.extend(code_spans(code_text, &mut hl));
             out.push(padded_line(
                 spans,
-                Style::default().bg(Color::Rgb(3, 40, 0)),
+                Style::default().bg(theme::DIFF_ADD_BG),
                 width,
             ));
             rendered += 1;
@@ -165,16 +163,13 @@ pub(super) fn render_patch_text_preview(
             let n = del_no;
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(
-                    format!("{n:>3} "),
-                    Style::default().fg(Color::Rgb(200, 80, 80)),
-                ),
-                Span::styled("- ", Style::default().fg(Color::Rgb(200, 80, 80))),
+                Span::styled(format!("{n:>3} "), Style::default().fg(theme::DIFF_DEL_FG)),
+                Span::styled("- ", Style::default().fg(theme::DIFF_DEL_FG)),
             ];
             spans.extend(code_spans(code_text, &mut hl));
             out.push(padded_line(
                 spans,
-                Style::default().bg(Color::Rgb(61, 1, 0)),
+                Style::default().bg(theme::DIFF_DEL_BG),
                 width,
             ));
             rendered += 1;
@@ -187,7 +182,7 @@ pub(super) fn render_patch_text_preview(
             let n = add_no;
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(format!("{n:>3} "), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{n:>3} "), Style::default().fg(theme::MUTED)),
                 Span::styled("  ", Style::default()),
             ];
             spans.extend(code_spans(code_text, &mut hl));
@@ -203,7 +198,7 @@ pub(super) fn render_patch_text_preview(
                 patch_text.lines().count().saturating_sub(rendered)
             ),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::MUTED)
                 .add_modifier(Modifier::DIM),
         )));
     }
@@ -235,9 +230,7 @@ fn find_codex_hunk_offset(
         {
             break;
         }
-        if raw.starts_with('-') {
-            search_lines.push(raw.get(1..).unwrap_or(""));
-        } else if raw.starts_with(' ') {
+        if raw.starts_with('-') || raw.starts_with(' ') {
             search_lines.push(raw.get(1..).unwrap_or(""));
         }
         // Skip '+' lines — they are new content, not in the file yet.

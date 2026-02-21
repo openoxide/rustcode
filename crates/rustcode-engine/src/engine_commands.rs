@@ -316,7 +316,7 @@ impl CommandExecutor for Engine {
 
                 // Trigger Phase 1 memory extraction in the background after a successful run
                 if result.is_ok() {
-                    if let Some(mem_storage) = self.memories.clone() {
+                    if let Some(mem_storage) = self.memories.clone().filter(|m| !m.is_disabled()) {
                         let session_id = context.session.session_id.clone();
                         let model = context.config.model.clone();
                         let llm = self.llm.clone();

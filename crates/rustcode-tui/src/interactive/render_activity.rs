@@ -1,7 +1,8 @@
 use super::{
-    centered_rect, ActivityItem, Block, Borders, ChatFocus, ChatState, Clear, Color, Duration,
-    Line, List, ListItem, Modifier, Paragraph, Rect, Span, Style, SystemTime, Wrap,
+    centered_rect, ActivityItem, Block, Borders, ChatFocus, ChatState, Clear, Duration, Line, List,
+    ListItem, Modifier, Paragraph, Rect, Span, Style, SystemTime, Wrap,
 };
+use crate::interactive::theme;
 
 const ACTIVITY_SPIN: &[char] = &['⣾', '⣽', '⣻', '⢿', '⡿', '⣟', '⣯', '⣷'];
 
@@ -9,7 +10,7 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
     frame.render_widget(Clear, area);
 
     let border = if chat.focus == ChatFocus::Activity {
-        Style::default().fg(Color::Cyan)
+        Style::default().fg(theme::ACCENT)
     } else {
         Style::default()
     };
@@ -63,13 +64,13 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
         .iter()
         .map(|item| {
             let (tag, style) = match item {
-                ActivityItem::CommandAccepted { .. } => ("cmd", Style::default().fg(Color::Cyan)),
-                ActivityItem::ToolCall { .. } => ("tool", Style::default().fg(Color::Magenta)),
+                ActivityItem::CommandAccepted { .. } => ("cmd", Style::default().fg(theme::ACCENT)),
+                ActivityItem::ToolCall { .. } => ("tool", Style::default().fg(theme::SECONDARY)),
                 ActivityItem::ToolResult { ok, .. } => {
                     if *ok {
-                        ("ok", Style::default().fg(Color::Green))
+                        ("ok", Style::default().fg(theme::SUCCESS))
                     } else {
-                        ("fail", Style::default().fg(Color::Red))
+                        ("fail", Style::default().fg(theme::ERROR))
                     }
                 }
                 ActivityItem::OutputChunk { .. } => {
@@ -77,11 +78,11 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
                 }
                 ActivityItem::ReasoningChunk { .. } => (
                     "think",
-                    Style::default().fg(Color::Blue).add_modifier(Modifier::DIM),
+                    Style::default().fg(theme::INFO).add_modifier(Modifier::DIM),
                 ),
-                ActivityItem::Warning { .. } => ("warn", Style::default().fg(Color::Magenta)),
-                ActivityItem::Failure { .. } => ("error", Style::default().fg(Color::Red)),
-                ActivityItem::Completed => ("done", Style::default().fg(Color::Green)),
+                ActivityItem::Warning { .. } => ("warn", Style::default().fg(theme::SECONDARY)),
+                ActivityItem::Failure { .. } => ("error", Style::default().fg(theme::ERROR)),
+                ActivityItem::Completed => ("done", Style::default().fg(theme::SUCCESS)),
             };
             ListItem::new(Line::from(vec![
                 Span::styled(format!("[{tag}] "), style.add_modifier(Modifier::BOLD)),
@@ -113,7 +114,7 @@ pub(super) fn render_activity_details_modal(frame: &mut ratatui::Frame<'_>, chat
     let block = Block::default()
         .title("Details")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Magenta));
+        .border_style(Style::default().fg(theme::SECONDARY));
 
     let mut lines = item.details_lines();
     lines.push(Line::raw(""));

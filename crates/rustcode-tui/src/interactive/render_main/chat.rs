@@ -1,11 +1,12 @@
 use super::super::{
     apply_find_highlight, approval_options_count, build_transcript_lines, composer_cursor_visual,
     render_activity, render_activity_details_modal, render_approval_inline,
-    render_approval_selector, AppState, Block, Borders, ChatFocus, ChatState, Clear, Color,
-    Constraint, Direction, Duration, InteractiveSubmitMode, Layout, Line, Modal, Modifier,
-    Paragraph, Span, Style, SystemTime, ToastVariant, Wrap,
+    render_approval_selector, AppState, Block, Borders, ChatFocus, ChatState, Clear, Constraint,
+    Direction, Duration, Layout, Line, Modal, Modifier, Paragraph, Span, Style, SystemTime,
+    ToastVariant, Wrap,
 };
 use super::{format_tokens, truncate_with_ellipsis};
+use crate::interactive::theme;
 
 const RUNNING_FRAMES: &[char] = &['◐', '◓', '◑', '◒'];
 const RUNNING_DOTS: &[&str] = &["   ", ".  ", ".. ", "..."];
@@ -60,15 +61,19 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             }
         }
 
-        // Title-case the provider name
-        let mut chars = provider_str.chars();
-        match chars.next() {
-            Some(first) => {
-                let mut s = first.to_uppercase().to_string();
-                s.extend(chars);
-                s
+        if provider_str.eq_ignore_ascii_case("openai") {
+            "OpenAI".to_string()
+        } else {
+            // Title-case the provider name
+            let mut chars = provider_str.chars();
+            match chars.next() {
+                Some(first) => {
+                    let mut s = first.to_uppercase().to_string();
+                    s.extend(chars);
+                    s
+                }
+                None => app.defaults.model.clone(),
             }
-            None => app.defaults.model.clone(),
         }
     };
     // Build transcript title spans with distinct colors per metric.
@@ -77,7 +82,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         Span::styled(
             "RustCode",
             Style::default()
-                .fg(Color::Rgb(180, 120, 240))
+                .fg(theme::SECONDARY)
                 .add_modifier(Modifier::BOLD),
         ),
     ];
@@ -86,17 +91,17 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         transcript_title_spans.push(Span::raw("  "));
         transcript_title_spans.push(Span::styled(
             format!("{tokens} tokens"),
-            Style::default().fg(Color::Rgb(160, 210, 160)),
+            Style::default().fg(theme::TOKENS),
         ));
     }
     if chat.context_limit > 0 && chat.last_total_tokens > 0 {
         let pct = ((chat.last_total_tokens as f64 / chat.context_limit as f64) * 100.0).min(100.0);
         let pct_color = if pct < 50.0 {
-            Color::Rgb(80, 200, 80)
+            theme::CTX_LOW
         } else if pct < 75.0 {
-            Color::Rgb(220, 200, 60)
+            theme::CTX_MED
         } else {
-            Color::Rgb(220, 110, 60)
+            theme::CTX_HIGH
         };
         transcript_title_spans.push(Span::raw("  "));
         transcript_title_spans.push(Span::styled(
@@ -193,7 +198,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     let workspace_display = workspace_display.replace("//", "/");
     let transcript_bottom = Line::from(Span::styled(
         format!("{workspace_display}  v{version}"),
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(theme::MUTED),
     ))
     .right_aligned();
 
@@ -208,10 +213,6 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     frame.render_widget(Clear, left[0]);
     frame.render_widget(transcript, left[0]);
 
-    let mode_label = match app.submit_mode {
-        InteractiveSubmitMode::Agent => "agent",
-        InteractiveSubmitMode::Run => "run",
-    };
     let model_label = if chat.session.model.trim().is_empty() {
         app.defaults.model.as_str()
     } else {
@@ -226,21 +227,14 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         Span::styled(
             format!("[model:{model_label_display}]"),
             Style::default()
-                .fg(Color::Rgb(60, 210, 120))
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw("  "),
-        Span::styled(
-            format!("[mode:{mode_label}]"),
-            Style::default()
-                .fg(Color::Rgb(240, 190, 55))
+                .fg(theme::SUCCESS)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw("  "),
         Span::styled(
             format!("[{provider_label_display}]"),
             Style::default()
-                .fg(Color::Rgb(100, 160, 220))
+                .fg(theme::INFO)
                 .add_modifier(Modifier::BOLD),
         ),
     ];
@@ -250,16 +244,16 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         composer_title_spans.push(Span::styled(
             format!("[{}c]", chat.composer.chars().count()),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::MUTED)
                 .add_modifier(Modifier::DIM),
         ));
     }
     let composer_title = Line::from(composer_title_spans);
     let composer_title_width = composer_title.width();
     let composer_border = if chat.focus == ChatFocus::Composer {
-        Style::default().fg(Color::Rgb(80, 220, 220))
+        Style::default().fg(theme::BORDER_FOCUS)
     } else {
-        Style::default().fg(Color::Rgb(60, 70, 85))
+        Style::default().fg(theme::BORDER)
     };
     let composer_text = if chat.composer.is_empty() {
         "Type a prompt... (Enter to submit, Shift+Enter for newline)"
@@ -298,20 +292,20 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                 let mut git_spans = Vec::new();
                 git_spans.push(Span::styled(
                     format!("{} files", stat.files),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::MUTED),
                 ));
                 if stat.insertions > 0 {
                     git_spans.push(Span::raw(" "));
                     git_spans.push(Span::styled(
                         format!("+{}", stat.insertions),
-                        Style::default().fg(Color::Rgb(80, 210, 80)),
+                        Style::default().fg(theme::SUCCESS),
                     ));
                 }
                 if stat.deletions > 0 {
                     git_spans.push(Span::raw(" "));
                     git_spans.push(Span::styled(
                         format!("-{}", stat.deletions),
-                        Style::default().fg(Color::Rgb(210, 80, 80)),
+                        Style::default().fg(theme::ERROR),
                     ));
                 }
                 git_spans.push(Span::raw(" ")); // trailing padding inside border
@@ -353,10 +347,10 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     // Line 1: running/toast status only (errors are shown in transcript).
     let (status_text, status_style, has_error) = if let Some(toast) = app.toasts.last() {
         let style = match toast.variant {
-            ToastVariant::Info => Style::default().fg(Color::Cyan),
-            ToastVariant::Success => Style::default().fg(Color::Green),
-            ToastVariant::Warning => Style::default().fg(Color::Magenta),
-            ToastVariant::Error => Style::default().fg(Color::Red),
+            ToastVariant::Info => Style::default().fg(theme::ACCENT),
+            ToastVariant::Success => Style::default().fg(theme::SUCCESS),
+            ToastVariant::Warning => Style::default().fg(theme::SECONDARY),
+            ToastVariant::Error => Style::default().fg(theme::ERROR),
         };
         (toast.message.clone(), style, false)
     } else {
@@ -367,7 +361,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         Span::styled(
             "  Ctrl+E:details",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme::WARNING)
                 .add_modifier(Modifier::BOLD),
         )
     } else {
@@ -384,7 +378,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         status_spans.push(Span::styled(
             format!(" {frame_char} running{dots}"),
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::ACCENT)
                 .add_modifier(Modifier::BOLD),
         ));
     }
@@ -401,69 +395,69 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             Span::styled(
                 "Ctrl+P",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(":cmds  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(":cmds  ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 "Ctrl+N",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(":new  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(":new  ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 "Ctrl+Q",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(":sessions  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(":sessions  ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 "Ctrl+C",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(":cancel  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(":cancel  ", Style::default().fg(theme::MUTED)),
         ];
         if !chat.activity_hidden {
             spans.push(Span::styled(
                 "Alt+Tab",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::styled(
                 ":switch focus  ",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::MUTED),
             ));
             spans.push(Span::styled(
                 "Ctrl+W",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ));
             spans.push(Span::styled(
                 ":toggle activity  ",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::MUTED),
             ));
         }
         spans.push(Span::styled(
             "/",
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::ACCENT)
                 .add_modifier(Modifier::BOLD),
         ));
         spans.push(if has_error {
-            Span::styled(":cmd  Ctrl+E:error", Style::default().fg(Color::DarkGray))
+            Span::styled(":cmd  Ctrl+E:error", Style::default().fg(theme::MUTED))
         } else {
-            Span::styled(":cmd", Style::default().fg(Color::DarkGray))
+            Span::styled(":cmd", Style::default().fg(theme::MUTED))
         });
         spans.push(Span::styled(
             "  Ctrl+O:toggle tools",
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::MUTED)
                 .add_modifier(Modifier::DIM),
         ));
         Line::from(spans)
@@ -473,40 +467,37 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             Span::styled(
                 "  Ctrl+E:error",
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme::WARNING)
                     .add_modifier(Modifier::BOLD),
             )
         } else {
             Span::raw("")
         };
         let mut spans = vec![
-            Span::styled(" Ctrl+P", Style::default().fg(Color::DarkGray)),
-            Span::styled(" cmds", Style::default().fg(Color::DarkGray)),
-            Span::styled("   /", Style::default().fg(Color::DarkGray)),
-            Span::styled(" cmd", Style::default().fg(Color::DarkGray)),
+            Span::styled(" Ctrl+P", Style::default().fg(theme::MUTED)),
+            Span::styled(" cmds", Style::default().fg(theme::MUTED)),
+            Span::styled("   /", Style::default().fg(theme::MUTED)),
+            Span::styled(" cmd", Style::default().fg(theme::MUTED)),
             Span::styled(
                 "   ? bindings",
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme::MUTED)
                     .add_modifier(Modifier::DIM),
             ),
         ];
         if !chat.activity_hidden {
             spans.push(Span::styled(
                 "   Alt+Tab",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::MUTED),
             ));
             spans.push(Span::styled(
                 " switch focus",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::MUTED),
             ));
-            spans.push(Span::styled(
-                "   Ctrl+W",
-                Style::default().fg(Color::DarkGray),
-            ));
+            spans.push(Span::styled("   Ctrl+W", Style::default().fg(theme::MUTED)));
             spans.push(Span::styled(
                 " toggle activity",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::MUTED),
             ));
         }
         spans.push(error_part);
@@ -516,7 +507,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     let help = Paragraph::new(vec![status_line, hints_line]).block(
         Block::default()
             .borders(Borders::TOP)
-            .border_style(Style::default().fg(Color::DarkGray)),
+            .border_style(Style::default().fg(theme::MUTED)),
     );
     frame.render_widget(help, left[2]);
 

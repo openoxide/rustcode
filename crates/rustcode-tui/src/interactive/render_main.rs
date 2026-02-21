@@ -1,8 +1,9 @@
 use super::{
-    format_age, render_help_modal, render_modal, AppState, Block, Borders, Clear, Color,
-    Constraint, Direction, Layout, Line, List, ListItem, Modifier, Paragraph, Screen, Span, Style,
+    format_age, render_help_modal, render_modal, AppState, Block, Borders, Clear, Constraint,
+    Direction, Layout, Line, List, ListItem, Modifier, Paragraph, Screen, Span, Style,
     ToastVariant,
 };
+use crate::interactive::theme;
 
 mod chat;
 use self::chat::render_chat;
@@ -49,7 +50,10 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
                 };
                 let id_short = &session.id;
                 let title = session.title.as_deref().unwrap_or("").trim();
-                let mut spans = vec![Span::styled(fork_marker, Style::default().fg(Color::Cyan))];
+                let mut spans = vec![Span::styled(
+                    fork_marker,
+                    Style::default().fg(theme::ACCENT),
+                )];
                 if !title.is_empty() {
                     spans.push(Span::styled(
                         title.to_string(),
@@ -61,7 +65,7 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
                     Span::styled(
                         id_short.clone(),
                         Style::default()
-                            .fg(Color::DarkGray)
+                            .fg(theme::MUTED)
                             .add_modifier(Modifier::DIM),
                     ),
                     Span::raw("  "),
@@ -102,20 +106,20 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
         (
             text,
             Style::default()
-                .fg(Color::Cyan)
+                .fg(theme::ACCENT)
                 .add_modifier(Modifier::BOLD),
         )
     } else if !state.sessions_filter.is_empty() {
         (
             format!(" filter:{}", state.sessions_filter),
-            Style::default().fg(Color::Cyan),
+            Style::default().fg(theme::ACCENT),
         )
     } else if let Some(toast) = state.toasts.last() {
         let style = match toast.variant {
-            ToastVariant::Info => Style::default().fg(Color::Cyan),
-            ToastVariant::Success => Style::default().fg(Color::Green),
-            ToastVariant::Warning => Style::default().fg(Color::Magenta),
-            ToastVariant::Error => Style::default().fg(Color::Red),
+            ToastVariant::Info => Style::default().fg(theme::ACCENT),
+            ToastVariant::Success => Style::default().fg(theme::SUCCESS),
+            ToastVariant::Warning => Style::default().fg(theme::SECONDARY),
+            ToastVariant::Error => Style::default().fg(theme::ERROR),
         };
         (format!(" {}", toast.message), style)
     } else {
@@ -126,7 +130,7 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
         Span::styled(
             format!("  [{model_label}]"),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::MUTED)
                 .add_modifier(Modifier::DIM),
         ),
     ]);
@@ -137,41 +141,41 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
             Span::styled(
                 " Enter",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(":open  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(":open  ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 "Esc",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(":clear  ", Style::default().fg(Color::DarkGray)),
+            Span::styled(":clear  ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 "↑↓",
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             ),
-            Span::styled(":select", Style::default().fg(Color::DarkGray)),
+            Span::styled(":select", Style::default().fg(theme::MUTED)),
         ])
     } else {
         Line::from(vec![
-            Span::styled(" Ctrl+P", Style::default().fg(Color::DarkGray)),
-            Span::styled(" cmds", Style::default().fg(Color::DarkGray)),
-            Span::styled("   /", Style::default().fg(Color::DarkGray)),
-            Span::styled(" filter", Style::default().fg(Color::DarkGray)),
-            Span::styled("   N", Style::default().fg(Color::DarkGray)),
-            Span::styled(" new", Style::default().fg(Color::DarkGray)),
-            Span::styled("   E", Style::default().fg(Color::DarkGray)),
-            Span::styled(" rename", Style::default().fg(Color::DarkGray)),
-            Span::styled("   D", Style::default().fg(Color::DarkGray)),
-            Span::styled(" delete", Style::default().fg(Color::DarkGray)),
+            Span::styled(" Ctrl+P", Style::default().fg(theme::MUTED)),
+            Span::styled(" cmds", Style::default().fg(theme::MUTED)),
+            Span::styled("   /", Style::default().fg(theme::MUTED)),
+            Span::styled(" filter", Style::default().fg(theme::MUTED)),
+            Span::styled("   N", Style::default().fg(theme::MUTED)),
+            Span::styled(" new", Style::default().fg(theme::MUTED)),
+            Span::styled("   E", Style::default().fg(theme::MUTED)),
+            Span::styled(" rename", Style::default().fg(theme::MUTED)),
+            Span::styled("   D", Style::default().fg(theme::MUTED)),
+            Span::styled(" delete", Style::default().fg(theme::MUTED)),
             Span::styled(
                 "   ? help",
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme::MUTED)
                     .add_modifier(Modifier::DIM),
             ),
         ])
@@ -180,7 +184,7 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
     let footer = Paragraph::new(vec![status_line, hints_line]).block(
         Block::default()
             .borders(Borders::TOP)
-            .border_style(Style::default().fg(Color::DarkGray)),
+            .border_style(Style::default().fg(theme::BORDER)),
     );
     frame.render_widget(footer, chunks[1]);
 }

@@ -1,10 +1,11 @@
 use std::path::Path;
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use rustcode_core::ToolApprovalRequest;
 
 use super::super::syntax_highlight::{highlight_code_line, HighlightState};
+use crate::interactive::theme;
 mod patch;
 use patch::render_patch_text_preview;
 
@@ -88,7 +89,7 @@ pub(super) fn render_approval_preview(
             out.push(Line::from(Span::styled(
                 format!("     … {ctx_before_start} unchanged lines above"),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme::MUTED)
                     .add_modifier(Modifier::DIM),
             )));
             displayed += 1;
@@ -105,7 +106,7 @@ pub(super) fn render_approval_preview(
             let n = start_line + i;
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(format!("{n:>3} "), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{n:>3} "), Style::default().fg(theme::MUTED)),
                 Span::styled("  ", Style::default()),
             ];
             spans.extend(code_spans(line, &mut hl));
@@ -121,16 +122,13 @@ pub(super) fn render_approval_preview(
             let n = start_line + old_changed_start + i;
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(
-                    format!("{n:>3} "),
-                    Style::default().fg(Color::Rgb(200, 80, 80)),
-                ),
-                Span::styled("- ", Style::default().fg(Color::Rgb(200, 80, 80))),
+                Span::styled(format!("{n:>3} "), Style::default().fg(theme::DIFF_DEL_FG)),
+                Span::styled("- ", Style::default().fg(theme::DIFF_DEL_FG)),
             ];
             spans.extend(code_spans(old_lines[old_changed_start + i], &mut hl_del));
             out.push(padded_line(
                 spans,
-                Style::default().bg(Color::Rgb(61, 1, 0)),
+                Style::default().bg(theme::DIFF_DEL_BG),
                 w,
             ));
             displayed += 1;
@@ -139,7 +137,7 @@ pub(super) fn render_approval_preview(
             out.push(Line::from(Span::styled(
                 format!("     … {} more deleted lines", del_count - del_show),
                 Style::default()
-                    .fg(Color::Rgb(200, 80, 80))
+                    .fg(theme::DIFF_DEL_FG)
                     .add_modifier(Modifier::DIM),
             )));
             displayed += 1;
@@ -153,16 +151,13 @@ pub(super) fn render_approval_preview(
             let n = start_line + new_changed_start + i;
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(
-                    format!("{n:>3} "),
-                    Style::default().fg(Color::Rgb(80, 200, 80)),
-                ),
-                Span::styled("+ ", Style::default().fg(Color::Rgb(80, 200, 80))),
+                Span::styled(format!("{n:>3} "), Style::default().fg(theme::DIFF_ADD_FG)),
+                Span::styled("+ ", Style::default().fg(theme::DIFF_ADD_FG)),
             ];
             spans.extend(code_spans(new_lines[new_changed_start + i], &mut hl_add));
             out.push(padded_line(
                 spans,
-                Style::default().bg(Color::Rgb(3, 40, 0)),
+                Style::default().bg(theme::DIFF_ADD_BG),
                 w,
             ));
             displayed += 1;
@@ -171,7 +166,7 @@ pub(super) fn render_approval_preview(
             out.push(Line::from(Span::styled(
                 format!("     … {} more added lines", add_count - add_show),
                 Style::default()
-                    .fg(Color::Rgb(80, 200, 80))
+                    .fg(theme::DIFF_ADD_FG)
                     .add_modifier(Modifier::DIM),
             )));
             displayed += 1;
@@ -186,7 +181,7 @@ pub(super) fn render_approval_preview(
             let n = start_line + old_idx;
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(format!("{n:>3} "), Style::default().fg(Color::DarkGray)),
+                Span::styled(format!("{n:>3} "), Style::default().fg(theme::MUTED)),
                 Span::styled("  ", Style::default()),
             ];
             spans.extend(code_spans(old_lines[old_idx], &mut hl));
@@ -200,7 +195,7 @@ pub(super) fn render_approval_preview(
                     common_suffix - ctx_after_count
                 ),
                 Style::default()
-                    .fg(Color::DarkGray)
+                    .fg(theme::MUTED)
                     .add_modifier(Modifier::DIM),
             )));
         }
@@ -216,16 +211,16 @@ pub(super) fn render_approval_preview(
             .unwrap_or("new file");
         let display_path = tilde_path(raw_path);
         out.push(Line::from(vec![
-            Span::styled("  new file: ", Style::default().fg(Color::DarkGray)),
+            Span::styled("  new file: ", Style::default().fg(theme::MUTED)),
             Span::styled(
                 display_path,
                 Style::default()
-                    .fg(Color::White)
+                    .fg(theme::TEXT)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!("  (+{total_lines})"),
-                Style::default().fg(Color::Rgb(80, 200, 80)),
+                Style::default().fg(theme::DIFF_ADD_FG),
             ),
         ]));
 
@@ -234,16 +229,13 @@ pub(super) fn render_approval_preview(
             let n = i + 1;
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
-                Span::styled(
-                    format!("{n:>3} "),
-                    Style::default().fg(Color::Rgb(80, 200, 80)),
-                ),
-                Span::styled("+ ", Style::default().fg(Color::Rgb(80, 200, 80))),
+                Span::styled(format!("{n:>3} "), Style::default().fg(theme::DIFF_ADD_FG)),
+                Span::styled("+ ", Style::default().fg(theme::DIFF_ADD_FG)),
             ];
             spans.extend(code_spans(raw, &mut hl_write));
             out.push(padded_line(
                 spans,
-                Style::default().bg(Color::Rgb(3, 40, 0)),
+                Style::default().bg(theme::DIFF_ADD_BG),
                 w,
             ));
         }
@@ -251,7 +243,7 @@ pub(super) fn render_approval_preview(
             out.push(Line::from(Span::styled(
                 format!("     … {} more lines", total_lines - show_lines),
                 Style::default()
-                    .fg(Color::Rgb(80, 200, 80))
+                    .fg(theme::DIFF_ADD_FG)
                     .add_modifier(Modifier::DIM),
             )));
         }
@@ -259,7 +251,7 @@ pub(super) fn render_approval_preview(
         let cmd = get_arg_str(args, &["command", "cmd"]);
         if !cmd.is_empty() {
             let short: String = cmd.chars().take(80).collect();
-            let mut cmd_spans = vec![Span::styled("  $ ", Style::default().fg(Color::Yellow))];
+            let mut cmd_spans = vec![Span::styled("  $ ", Style::default().fg(theme::WARNING))];
             // Apply bash syntax highlighting to the command.
             let mut hl_bash = HighlightState::new("sh");
             cmd_spans.extend(code_spans(&short, &mut hl_bash));
@@ -280,11 +272,11 @@ pub(super) fn render_multiedit_preview(
         .and_then(|v| v.as_str())
         .unwrap_or("<unknown>");
     out.push(Line::from(vec![
-        Span::styled("  file: ", Style::default().fg(Color::DarkGray)),
+        Span::styled("  file: ", Style::default().fg(theme::MUTED)),
         Span::styled(
             tilde_path(raw_path),
             Style::default()
-                .fg(Color::White)
+                .fg(theme::TEXT)
                 .add_modifier(Modifier::BOLD),
         ),
     ]));
@@ -319,19 +311,19 @@ pub(super) fn render_multiedit_preview(
                 idx + 1,
                 if replace_all { " (replace_all)" } else { "" }
             ),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::MUTED),
         )));
 
         let mut hl_del = HighlightState::new(ext);
         for raw in old.lines().take(MULTIEDIT_MAX_LINES_PER_SIDE) {
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
-                Span::styled("- ", Style::default().fg(Color::Rgb(200, 80, 80))),
+                Span::styled("- ", Style::default().fg(theme::DIFF_DEL_FG)),
             ];
             spans.extend(code_spans(raw, &mut hl_del));
             out.push(padded_line(
                 spans,
-                Style::default().bg(Color::Rgb(61, 1, 0)),
+                Style::default().bg(theme::DIFF_DEL_BG),
                 width,
             ));
         }
@@ -342,7 +334,7 @@ pub(super) fn render_multiedit_preview(
                     old.lines().count() - MULTIEDIT_MAX_LINES_PER_SIDE
                 ),
                 Style::default()
-                    .fg(Color::Rgb(200, 80, 80))
+                    .fg(theme::DIFF_DEL_FG)
                     .add_modifier(Modifier::DIM),
             )));
         }
@@ -351,12 +343,12 @@ pub(super) fn render_multiedit_preview(
         for raw in new.lines().take(MULTIEDIT_MAX_LINES_PER_SIDE) {
             let mut spans = vec![
                 Span::styled("  ", Style::default()),
-                Span::styled("+ ", Style::default().fg(Color::Rgb(80, 200, 80))),
+                Span::styled("+ ", Style::default().fg(theme::DIFF_ADD_FG)),
             ];
             spans.extend(code_spans(raw, &mut hl_add));
             out.push(padded_line(
                 spans,
-                Style::default().bg(Color::Rgb(3, 40, 0)),
+                Style::default().bg(theme::DIFF_ADD_BG),
                 width,
             ));
         }
@@ -367,7 +359,7 @@ pub(super) fn render_multiedit_preview(
                     new.lines().count() - MULTIEDIT_MAX_LINES_PER_SIDE
                 ),
                 Style::default()
-                    .fg(Color::Rgb(80, 200, 80))
+                    .fg(theme::DIFF_ADD_FG)
                     .add_modifier(Modifier::DIM),
             )));
         }
@@ -379,7 +371,7 @@ pub(super) fn render_multiedit_preview(
                 edits.len() - MULTIEDIT_MAX_EDITS
             ),
             Style::default()
-                .fg(Color::DarkGray)
+                .fg(theme::MUTED)
                 .add_modifier(Modifier::DIM),
         )));
     }
@@ -395,7 +387,7 @@ pub(super) fn code_spans(text: &str, hl: &mut Option<HighlightState>) -> Vec<Spa
     }
     vec![Span::styled(
         text.to_string(),
-        Style::default().fg(Color::White),
+        Style::default().fg(theme::TEXT),
     )]
 }
 

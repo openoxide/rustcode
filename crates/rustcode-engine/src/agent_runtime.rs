@@ -36,10 +36,11 @@ impl Engine {
 
         let mut state = AgentState::default();
 
-        // Load memory summary if available
+        // Load memory summary if available (skip when memory is disabled)
         let memory_summary = self
             .memories
             .as_ref()
+            .filter(|m| !m.is_disabled())
             .and_then(|m| m.load_summary())
             .map(|s| s.content);
 

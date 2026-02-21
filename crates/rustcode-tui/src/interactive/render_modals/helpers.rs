@@ -1,5 +1,6 @@
+use crate::interactive::theme;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 
@@ -113,7 +114,7 @@ pub(crate) fn render_help_modal(frame: &mut ratatui::Frame<'_>, state: &AppState
             Block::default()
                 .title("Help")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
+                .border_style(Style::default().fg(theme::ACCENT)),
         )
         .wrap(Wrap { trim: false });
     frame.render_widget(dialog, area);
@@ -145,7 +146,7 @@ pub(super) fn render_slash_help(frame: &mut ratatui::Frame<'_>, query: &str, sel
     let block = Block::default()
         .title("/ commands  (Tab: complete  Esc: close)")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Cyan));
+        .border_style(Style::default().fg(theme::ACCENT));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -167,9 +168,9 @@ pub(super) fn render_slash_help(frame: &mut ratatui::Frame<'_>, query: &str, sel
                 Style::default()
             };
             ListItem::new(Line::from(vec![
-                Span::styled(*cmd, style.fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+                Span::styled(*cmd, style.fg(theme::ACCENT).add_modifier(Modifier::BOLD)),
                 Span::styled("  ", style),
-                Span::styled(*desc, style.fg(Color::DarkGray)),
+                Span::styled(*desc, style.fg(theme::MUTED)),
             ]))
         })
         .collect();

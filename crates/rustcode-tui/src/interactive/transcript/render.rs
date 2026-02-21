@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use super::super::syntax_highlight::{highlight_code_line, HighlightState};
@@ -11,6 +11,7 @@ use super::helpers::{
     extract_filename, extract_key_arg, extract_tool_output_text, is_stat_line, parse_exit_code,
     parse_hunk_header, sanitize_output_line, tilde_path_in_line,
 };
+use crate::interactive::theme;
 
 const LIVE_ACTIVITY_TRI: &[char] = &['▶', '▸', '▹', '▻'];
 
@@ -111,30 +112,30 @@ pub(super) fn render_tool_output(
         let filename = extract_filename(&desc_line);
 
         let mut header_spans: Vec<Span<'static>> =
-            vec![Span::styled(" ┌─ ", Style::default().fg(Color::DarkGray))];
+            vec![Span::styled(" ┌─ ", Style::default().fg(theme::MUTED))];
         header_spans.push(Span::styled(
             filename,
             Style::default()
-                .fg(Color::White)
+                .fg(theme::TEXT)
                 .add_modifier(Modifier::BOLD),
         ));
         if !stat_line.is_empty() {
             header_spans.push(Span::raw("  "));
-            header_spans.push(Span::styled("(", Style::default().fg(Color::DarkGray)));
+            header_spans.push(Span::styled("(", Style::default().fg(theme::MUTED)));
             for (i, word) in stat_line.split_whitespace().enumerate() {
                 if i > 0 {
                     header_spans.push(Span::raw(" "));
                 }
                 let style = if word.starts_with('+') {
-                    Style::default().fg(Color::Green)
+                    Style::default().fg(theme::SUCCESS)
                 } else if word.starts_with('-') {
-                    Style::default().fg(Color::Red)
+                    Style::default().fg(theme::ERROR)
                 } else {
-                    Style::default().fg(Color::DarkGray)
+                    Style::default().fg(theme::MUTED)
                 };
                 header_spans.push(Span::styled(word.to_string(), style));
             }
-            header_spans.push(Span::styled(")", Style::default().fg(Color::DarkGray)));
+            header_spans.push(Span::styled(")", Style::default().fg(theme::MUTED)));
         }
         lines.push(Line::from(header_spans));
 
@@ -158,7 +159,7 @@ pub(super) fn render_tool_output(
                     }
                     lines.push(Line::from(Span::styled(
                         " │ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄".to_string(),
-                        Style::default().fg(Color::Rgb(40, 50, 65)),
+                        Style::default().fg(theme::SURFACE),
                     )));
                     continue;
                 }
@@ -175,26 +176,26 @@ pub(super) fn render_tool_output(
                     (
                         format!("{add_no:>2} "),
                         Style::default()
-                            .fg(Color::Rgb(80, 200, 80))
-                            .bg(Color::Rgb(3, 40, 0)),
-                        Color::Rgb(80, 200, 80),
+                            .fg(theme::DIFF_ADD_FG)
+                            .bg(theme::DIFF_ADD_BG),
+                        theme::DIFF_ADD_FG,
                     )
                 } else if is_del {
                     del_no += 1;
                     (
                         format!("{del_no:>2} "),
                         Style::default()
-                            .fg(Color::Rgb(200, 80, 80))
-                            .bg(Color::Rgb(61, 1, 0)),
-                        Color::Rgb(200, 80, 80),
+                            .fg(theme::DIFF_DEL_FG)
+                            .bg(theme::DIFF_DEL_BG),
+                        theme::DIFF_DEL_FG,
                     )
                 } else {
                     add_no += 1;
                     del_no += 1;
                     (
                         format!("{add_no:>2} "),
-                        Style::default().fg(Color::Rgb(160, 165, 178)),
-                        Color::DarkGray,
+                        Style::default().fg(theme::TEXT_DIM),
+                        theme::MUTED,
                     )
                 };
 
@@ -224,15 +225,15 @@ pub(super) fn render_tool_output(
                         line_spans.push(Span::styled(code_text.to_string(), content_style));
                     }
                     let bg = if is_add {
-                        Style::default().bg(Color::Rgb(3, 40, 0))
+                        Style::default().bg(theme::DIFF_ADD_BG)
                     } else {
-                        Style::default().bg(Color::Rgb(61, 1, 0))
+                        Style::default().bg(theme::DIFF_DEL_BG)
                     };
                     lines.push(Line::from(line_spans).style(bg));
                 } else {
                     let mut line_spans = vec![
                         Span::styled(" │ ", Style::default().fg(pipe_color)),
-                        Span::styled(gutter, Style::default().fg(Color::Rgb(90, 95, 110))),
+                        Span::styled(gutter, Style::default().fg(theme::MUTED)),
                     ];
                     if let Some(rest) = raw.strip_prefix(' ') {
                         line_spans.push(Span::styled(" ", Style::default()));
@@ -256,24 +257,24 @@ pub(super) fn render_tool_output(
 
         lines.push(Line::from(Span::styled(
             " └─",
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::MUTED),
         )));
     } else {
         let summary = summarize_tool_result(tool_name, output, ok);
         if !summary.is_empty() {
             let style = if ok {
                 Style::default()
-                    .fg(Color::Rgb(120, 125, 140))
+                    .fg(theme::MUTED)
                     .add_modifier(Modifier::DIM)
             } else {
-                Style::default().fg(Color::Rgb(200, 80, 80))
+                Style::default().fg(theme::DIFF_DEL_FG)
             };
             lines.push(Line::from(Span::styled(format!("  └  {summary}"), style)));
         }
         if expanded {
             lines.push(Line::from(Span::styled(
                 "  └─",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::MUTED),
             )));
         }
     }
@@ -318,7 +319,7 @@ pub(super) fn render_live_activity_summary(
     let tri = LIVE_ACTIVITY_TRI[(ms / 120 % LIVE_ACTIVITY_TRI.len() as u128) as usize];
     lines.push(Line::from(Span::styled(
         format!("  {tri} {latest}{more_part}  (ctrl+o to expand)"),
-        Style::default().fg(Color::Rgb(160, 165, 180)),
+        Style::default().fg(theme::ACTIVITY_DONE),
     )));
 }
 
@@ -353,7 +354,7 @@ pub(super) fn render_live_activity_lines(
     let show = &displayable[show_from..];
 
     let out_style = Style::default()
-        .fg(Color::Rgb(100, 105, 120))
+        .fg(theme::MUTED)
         .add_modifier(Modifier::DIM);
 
     for item in show {
@@ -383,26 +384,17 @@ pub(super) fn render_live_activity_lines(
                 };
 
                 let (bullet, bullet_style) = if is_pending {
-                    (
-                        format!("{spin_frame} "),
-                        Style::default().fg(Color::Rgb(90, 95, 115)),
-                    )
+                    (format!("{spin_frame} "), Style::default().fg(theme::MUTED))
                 } else if is_ok {
-                    (
-                        "● ".to_string(),
-                        Style::default().fg(Color::Rgb(60, 190, 80)),
-                    )
+                    ("● ".to_string(), Style::default().fg(theme::SUCCESS))
                 } else {
-                    (
-                        "● ".to_string(),
-                        Style::default().fg(Color::Rgb(200, 70, 70)),
-                    )
+                    ("● ".to_string(), Style::default().fg(theme::ERROR))
                 };
                 let header_style = if is_pending {
-                    Style::default().fg(Color::Rgb(120, 125, 145))
+                    Style::default().fg(theme::ACTIVITY_PENDING)
                 } else {
                     Style::default()
-                        .fg(Color::Rgb(160, 165, 180))
+                        .fg(theme::ACTIVITY_DONE)
                         .add_modifier(Modifier::DIM)
                 };
                 lines.push(Line::from(vec![
@@ -423,7 +415,7 @@ pub(super) fn render_live_activity_lines(
                 lines.push(Line::from(Span::styled(
                     format!("⚠ {capped}"),
                     Style::default()
-                        .fg(Color::Rgb(180, 150, 60))
+                        .fg(theme::ACTIVITY_WARN)
                         .add_modifier(Modifier::DIM),
                 )));
             }
@@ -432,7 +424,7 @@ pub(super) fn render_live_activity_lines(
                 lines.push(Line::from(Span::styled(
                     format!("✗ {capped}"),
                     Style::default()
-                        .fg(Color::Rgb(190, 70, 70))
+                        .fg(theme::ACTIVITY_FAIL)
                         .add_modifier(Modifier::DIM),
                 )));
             }

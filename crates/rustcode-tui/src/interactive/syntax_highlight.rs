@@ -1,5 +1,6 @@
 use std::sync::LazyLock;
 
+use super::theme;
 use ratatui::style::{Color, Style};
 use ratatui::text::Span;
 use syntect::easy::HighlightLines;
@@ -47,14 +48,14 @@ pub(super) fn highlight_code_line(text: &str, state: &mut HighlightState) -> Vec
     let Ok(ranges) = state.highlighter.highlight_line(&with_nl, &SYNTAX_SET) else {
         return vec![Span::styled(
             text.to_string(),
-            Style::default().fg(Color::White),
+            Style::default().fg(theme::TEXT),
         )];
     };
 
     if ranges.is_empty() {
         return vec![Span::styled(
             text.to_string(),
-            Style::default().fg(Color::White),
+            Style::default().fg(theme::TEXT),
         )];
     }
 

@@ -114,6 +114,23 @@ pub(super) enum Modal {
         /// Currently highlighted row index within the filtered list.
         selected: usize,
     },
+    /// Full-screen scrollable memory viewer.
+    MemoryViewer {
+        /// Full memory summary content (or placeholder text).
+        content: String,
+        /// Number of raw memory files on disk.
+        raw_count: usize,
+        /// Unix timestamp of last summary update (0 if none).
+        updated_at: u64,
+        /// Whether memory collection is currently enabled.
+        enabled: bool,
+        /// Current vertical scroll offset (line index).
+        scroll: usize,
+        /// Total content line count (computed once on open).
+        total_lines: usize,
+    },
+    /// Confirmation dialog before clearing all memories.
+    MemoryClearConfirm,
 }
 
 /// An entry in the provider manager list.
@@ -214,6 +231,8 @@ pub(super) enum CommandId {
     SwitchModel,
     /// Open provider connection manager overlay.
     ManageProviders,
+    /// Open memory viewer overlay.
+    ViewMemory,
 }
 
 #[derive(Debug, Clone)]
@@ -469,7 +488,7 @@ pub(super) struct ChatState {
     /// The prompt most recently submitted but not yet confirmed by backend reload.
     pub(super) pending_prompt: Option<String>,
     /// Tool approval requests that were approved but whose results are not yet
-    /// loaded into `messages`. Rendered in the transcript until RunEnded fires.
+    /// loaded into `messages`. Rendered in the transcript until `RunEnded` fires.
     pub(super) committed_approvals: Vec<ToolApprovalRequest>,
     /// Whether composer was just cleared by Ctrl+C (for "press again to exit" flow).
     pub(super) composer_cleared_by_ctrl_c: bool,

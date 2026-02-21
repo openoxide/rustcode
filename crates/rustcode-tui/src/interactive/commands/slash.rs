@@ -324,45 +324,22 @@ pub(crate) fn handle_slash_command(
         }
         // ── /memory ─────────────────────────────────────────────────────────
         "memory" => {
-            match rustcode_memories::MemoryStorage::new().and_then(|s| s.load_summary()) {
-                Some(summary) => {
-                    let excerpt: String = summary.content.chars().take(200).collect();
-                    let suffix = if summary.content.len() > 200 {
-                        "…"
-                    } else {
-                        ""
-                    };
-                    push_toast(
-                        state,
-                        ToastVariant::Info,
-                        format!("memory summary:\n{excerpt}{suffix}"),
-                        Duration::from_secs(7),
-                    );
-                }
-                None => {
-                    push_toast(
-                        state,
-                        ToastVariant::Info,
-                        "no memory summary yet — complete a session to build memories",
-                        Duration::from_secs(5),
-                    );
-                }
-            }
+            open_memory_viewer(state);
             ChatNav::Stay
         }
-        "memory clear" => {
+        "memory on" => {
             match rustcode_memories::MemoryStorage::new() {
-                Some(storage) => match storage.clear_raw() {
+                Some(storage) => match storage.set_enabled(true) {
                     Ok(()) => push_toast(
                         state,
                         ToastVariant::Success,
-                        "raw memories cleared",
+                        "memory: enabled",
                         Duration::from_secs(3),
                     ),
                     Err(err) => push_toast(
                         state,
                         ToastVariant::Error,
-                        format!("failed to clear memories: {err}"),
+                        format!("failed: {err}"),
                         Duration::from_secs(4),
                     ),
                 },
@@ -373,6 +350,35 @@ pub(crate) fn handle_slash_command(
                     Duration::from_secs(3),
                 ),
             }
+            ChatNav::Stay
+        }
+        "memory off" => {
+            match rustcode_memories::MemoryStorage::new() {
+                Some(storage) => match storage.set_enabled(false) {
+                    Ok(()) => push_toast(
+                        state,
+                        ToastVariant::Warning,
+                        "memory: disabled",
+                        Duration::from_secs(3),
+                    ),
+                    Err(err) => push_toast(
+                        state,
+                        ToastVariant::Error,
+                        format!("failed: {err}"),
+                        Duration::from_secs(4),
+                    ),
+                },
+                None => push_toast(
+                    state,
+                    ToastVariant::Warning,
+                    "memory storage unavailable",
+                    Duration::from_secs(3),
+                ),
+            }
+            ChatNav::Stay
+        }
+        "memory clear" => {
+            state.modal = Some(Modal::MemoryClearConfirm);
             ChatNav::Stay
         }
         // /sessions <id> or /resume <id> → open session by ID
@@ -394,4 +400,39 @@ pub(crate) fn handle_slash_command(
             ChatNav::Stay
         }
     }
+}
+
+/// Open the full memory viewer modal.
+pub(crate) fn open_memory_viewer(state: &mut AppState) {
+    let (content, raw_count, updated_at, enabled) = match rustcode_memories::MemoryStorage::new() {
+        Some(storage) => {
+            let enabled = !storage.is_disabled();
+            let raw_count = storage.raw_count();
+            match storage.load_summary() {
+                Some(summary) => (summary.content, raw_count, summary.updated_at, enabled),
+                None => (
+                    "No memory summary yet.\n\nComplete a session to start building memories."
+                        .to_string(),
+                    raw_count,
+                    0,
+                    enabled,
+                ),
+            }
+        }
+        None => (
+            "Memory storage unavailable (HOME not set).".to_string(),
+            0,
+            0,
+            false,
+        ),
+    };
+    let total_lines = content.lines().count();
+    state.modal = Some(Modal::MemoryViewer {
+        content,
+        raw_count,
+        updated_at,
+        enabled,
+        scroll: 0,
+        total_lines,
+    });
 }

@@ -8,8 +8,9 @@
 /// - Inline: `**bold**`, `*italic*`, `` `code` ``
 /// - Plain text passthrough
 use super::syntax_highlight::{highlight_code_line, HighlightState};
+use super::theme;
 use ratatui::{
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
 };
 
@@ -31,7 +32,7 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
                 code_hl = None;
                 lines.push(Line::from(vec![Span::styled(
                     "─".repeat(40),
-                    Style::default().fg(Color::DarkGray),
+                    Style::default().fg(theme::BORDER),
                 )]));
             } else {
                 in_code_block = true;
@@ -43,14 +44,14 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
                 };
                 code_hl = HighlightState::new(&code_lang);
                 lines.push(Line::from(vec![
-                    Span::styled("─── ", Style::default().fg(Color::DarkGray)),
+                    Span::styled("─── ", Style::default().fg(theme::BORDER)),
                     Span::styled(
                         label,
                         Style::default()
-                            .fg(Color::White)
+                            .fg(theme::TEXT)
                             .add_modifier(Modifier::BOLD),
                     ),
-                    Span::styled(" ───", Style::default().fg(Color::DarkGray)),
+                    Span::styled(" ───", Style::default().fg(theme::BORDER)),
                 ]));
             }
             continue;
@@ -63,7 +64,7 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
                 if hl_spans.is_empty() {
                     code_line_spans.push(Span::styled(
                         stripped.to_string(),
-                        Style::default().fg(Color::Yellow),
+                        Style::default().fg(theme::TEXT_DIM),
                     ));
                 } else {
                     code_line_spans.extend(hl_spans);
@@ -71,7 +72,7 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
             } else {
                 code_line_spans.push(Span::styled(
                     stripped.to_string(),
-                    Style::default().fg(Color::Yellow),
+                    Style::default().fg(theme::TEXT_DIM),
                 ));
             }
             lines.push(Line::from(code_line_spans));
@@ -84,7 +85,7 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
         {
             lines.push(Line::from(vec![Span::styled(
                 "─".repeat(stripped.len().min(80)),
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::BORDER),
             )]));
             continue;
         }
@@ -93,7 +94,9 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
         if let Some(rest) = stripped.strip_prefix("### ") {
             let spans = restyle_spans(
                 parse_inline(rest),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::DIM),
             );
             lines.push(Line::from(spans));
             continue;
@@ -102,7 +105,7 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
             let spans = restyle_spans(
                 parse_inline(rest),
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             );
             lines.push(Line::from(spans));
@@ -112,7 +115,7 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
             let spans = restyle_spans(
                 parse_inline_bold(rest),
                 Style::default()
-                    .fg(Color::Cyan)
+                    .fg(theme::ACCENT)
                     .add_modifier(Modifier::BOLD),
             );
             lines.push(Line::from(spans));
@@ -128,7 +131,7 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
         {
             let mut spans = vec![
                 Span::raw(indent_str.clone()),
-                Span::styled("• ", Style::default().fg(Color::Cyan)),
+                Span::styled("• ", Style::default().fg(theme::ACCENT)),
             ];
             spans.extend(parse_inline(item));
             lines.push(Line::from(spans));
@@ -142,7 +145,7 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
                 Span::styled(
                     format!("{num}. "),
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme::ACCENT)
                         .add_modifier(Modifier::BOLD),
                 ),
             ];
@@ -166,7 +169,7 @@ pub(super) fn render_markdown(text: &str) -> Vec<Line<'static>> {
     if in_code_block {
         lines.push(Line::from(vec![Span::styled(
             "─".repeat(40),
-            Style::default().fg(Color::DarkGray),
+            Style::default().fg(theme::BORDER),
         )]));
     }
 
@@ -203,7 +206,7 @@ fn parse_inline_with_base(text: &str, base: Style) -> Vec<Span<'static>> {
                     spans.push(Span::styled(
                         code,
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(theme::TEXT_DIM)
                             .add_modifier(Modifier::BOLD),
                     ));
                 }
@@ -349,8 +352,8 @@ mod tests {
     #[test]
     fn parse_inline_code() {
         let spans = parse_inline("use `cargo test`");
-        // has a code span
-        assert!(spans.iter().any(|s| s.style.fg == Some(Color::Yellow)));
+        // has a code span styled with TEXT_DIM
+        assert!(spans.iter().any(|s| s.style.fg == Some(theme::TEXT_DIM)));
     }
 
     #[test]

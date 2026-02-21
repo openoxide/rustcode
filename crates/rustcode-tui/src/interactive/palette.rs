@@ -180,6 +180,14 @@ pub(super) fn build_command_items(
     });
 
     items.push(CommandItem {
+        id: CommandId::ViewMemory,
+        title: "Memory".to_string(),
+        detail: "View and manage persistent memory  /memory".to_string(),
+        enabled: true,
+        disabled_reason: None,
+    });
+
+    items.push(CommandItem {
         id: CommandId::Quit,
         title: "Quit".to_string(),
         detail: "Exit the app  Ctrl+C twice".to_string(),

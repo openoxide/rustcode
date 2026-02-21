@@ -1,15 +1,18 @@
 use super::{
-    render_provider_manager_modal, AppState, Block, Borders, Clear, Color, Constraint, Direction,
-    Layout, Line, List, ListItem, Modal, Modifier, Paragraph, Span, Style, Wrap, SLASH_COMMANDS,
+    render_provider_manager_modal, AppState, Block, Borders, Clear, Constraint, Direction, Layout,
+    Line, List, ListItem, Modal, Modifier, Paragraph, Span, Style, Wrap, SLASH_COMMANDS,
 };
+use crate::interactive::theme;
 
 mod helpers;
+mod memory;
 mod model_select;
 
 pub(super) use helpers::centered_rect;
 pub(super) use helpers::render_help_modal;
 
 use helpers::render_slash_help;
+use memory::render_memory_modal;
 use model_select::render_model_select_modal;
 
 pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
@@ -26,7 +29,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
             let block = Block::default()
                 .title("Commands")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan));
+                .border_style(Style::default().fg(theme::ACCENT));
             let inner = block.inner(area);
             frame.render_widget(block, area);
 
@@ -43,7 +46,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                 Span::styled(
                     "> ",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme::ACCENT)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(query.clone()),
@@ -109,7 +112,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
             let block = Block::default()
                 .title("Search transcript")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan));
+                .border_style(Style::default().fg(theme::ACCENT));
             let inner = block.inner(area);
             frame.render_widget(block, area);
 
@@ -126,7 +129,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                 Span::styled(
                     "> ",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme::ACCENT)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(query.clone()),
@@ -177,7 +180,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
             let block = Block::default()
                 .title("File search")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan));
+                .border_style(Style::default().fg(theme::ACCENT));
             let inner = block.inner(area);
             frame.render_widget(block, area);
 
@@ -194,7 +197,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                 Span::styled(
                     "> ",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme::ACCENT)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(query.clone()),
@@ -249,7 +252,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
             let block = Block::default()
                 .title("Rename session")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Magenta));
+                .border_style(Style::default().fg(theme::SECONDARY));
             let inner = block.inner(area);
 
             let lines = vec![
@@ -281,7 +284,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
             let block = Block::default()
                 .title("Delete session")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Red));
+                .border_style(Style::default().fg(theme::ERROR));
             let lines = vec![
                 Line::raw("This will delete the session from disk."),
                 Line::raw(""),
@@ -299,7 +302,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
             let block = Block::default()
                 .title("Skills  (Enter: toggle  Esc: close)")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Magenta));
+                .border_style(Style::default().fg(theme::SECONDARY));
             let inner = block.inner(area);
             frame.render_widget(block, area);
 
@@ -362,7 +365,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
             let block = Block::default()
                 .title("Feedback")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan));
+                .border_style(Style::default().fg(theme::ACCENT));
             let inner = block.inner(area);
             frame.render_widget(block, area);
 
@@ -378,23 +381,25 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
             // Rating buttons
             let up_style = match rating {
                 Some(true) => Style::default()
-                    .fg(Color::Green)
+                    .fg(theme::SUCCESS)
                     .add_modifier(Modifier::BOLD),
                 _ => {
                     if *comment_active {
                         Style::default().add_modifier(Modifier::DIM)
                     } else {
-                        Style::default().fg(Color::DarkGray)
+                        Style::default().fg(theme::MUTED)
                     }
                 }
             };
             let down_style = match rating {
-                Some(false) => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+                Some(false) => Style::default()
+                    .fg(theme::ERROR)
+                    .add_modifier(Modifier::BOLD),
                 _ => {
                     if *comment_active {
                         Style::default().add_modifier(Modifier::DIM)
                     } else {
-                        Style::default().fg(Color::DarkGray)
+                        Style::default().fg(theme::MUTED)
                     }
                 }
             };
@@ -406,7 +411,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                         " [+] thumbs up ",
                         if matches!(rating, Some(true)) {
                             Style::default()
-                                .fg(Color::Green)
+                                .fg(theme::SUCCESS)
                                 .add_modifier(Modifier::REVERSED)
                         } else {
                             up_style
@@ -417,7 +422,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                         " [-] thumbs down ",
                         if matches!(rating, Some(false)) {
                             Style::default()
-                                .fg(Color::Red)
+                                .fg(theme::ERROR)
                                 .add_modifier(Modifier::REVERSED)
                         } else {
                             down_style
@@ -437,7 +442,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                     .border_style(if *comment_active {
                         Style::default()
                     } else {
-                        Style::default().fg(Color::Cyan)
+                        Style::default().fg(theme::ACCENT)
                     }),
             );
             frame.render_widget(rating_body, rows[0]);
@@ -447,7 +452,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                 .title("Comment (optional)")
                 .borders(Borders::ALL)
                 .border_style(if *comment_active {
-                    Style::default().fg(Color::Cyan)
+                    Style::default().fg(theme::ACCENT)
                 } else {
                     Style::default()
                 });
@@ -489,13 +494,16 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
         Modal::SlashHelp { query, selected } => {
             render_slash_help(frame, query, *selected);
         }
+        Modal::MemoryViewer { .. } | Modal::MemoryClearConfirm => {
+            render_memory_modal(frame, modal);
+        }
         Modal::ErrorDetail { message } => {
             let area = centered_rect(80, 60, frame.area());
             frame.render_widget(Clear, area);
             let block = Block::default()
                 .title("Error details")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Red));
+                .border_style(Style::default().fg(theme::ERROR));
             let inner = block.inner(area);
             frame.render_widget(block, area);
 
@@ -505,13 +513,13 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                 .split(inner);
 
             let body = Paragraph::new(message.clone())
-                .style(Style::default().fg(Color::Red))
+                .style(Style::default().fg(theme::ERROR))
                 .wrap(Wrap { trim: false });
             frame.render_widget(body, rows[0]);
 
             let hint = Paragraph::new(Line::from(vec![Span::styled(
                 "Esc / Enter: dismiss",
-                Style::default().fg(Color::DarkGray),
+                Style::default().fg(theme::MUTED),
             )]))
             .block(Block::default().borders(Borders::TOP));
             frame.render_widget(hint, rows[1]);

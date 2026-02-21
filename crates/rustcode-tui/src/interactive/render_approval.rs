@@ -1,8 +1,9 @@
 use std::path::Path;
 
 use super::{
-    Block, Borders, Color, Line, Modifier, Paragraph, Rect, Span, Style, ToolApprovalRequest, Wrap,
+    Block, Borders, Line, Modifier, Paragraph, Rect, Span, Style, ToolApprovalRequest, Wrap,
 };
+use crate::interactive::theme;
 
 mod preview;
 use preview::{render_approval_preview, tilde_path};
@@ -46,7 +47,7 @@ pub(super) fn render_approval_inline(
         Span::styled(
             "  Approval  ",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme::WARNING)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
@@ -75,7 +76,7 @@ pub(super) fn render_approval_selector(
             option_lines.push(Line::from(Span::styled(
                 format!("  ❯ {opt}"),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme::WARNING)
                     .add_modifier(Modifier::BOLD | Modifier::REVERSED),
             )));
         } else {
@@ -97,11 +98,11 @@ pub(super) fn render_approval_selector(
                     .title(Span::styled(
                         "Approval",
                         Style::default()
-                            .fg(Color::Yellow)
+                            .fg(theme::WARNING)
                             .add_modifier(Modifier::BOLD),
                     ))
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Yellow)),
+                    .border_style(Style::default().fg(theme::WARNING)),
             )
             .wrap(Wrap { trim: false }),
         area,

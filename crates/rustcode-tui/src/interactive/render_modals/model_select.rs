@@ -1,7 +1,8 @@
 use super::{
-    centered_rect, Block, Borders, Clear, Color, Constraint, Direction, Layout, Line, List,
-    ListItem, Modifier, Paragraph, Span, Style,
+    centered_rect, Block, Borders, Clear, Constraint, Direction, Layout, Line, List, ListItem,
+    Modifier, Paragraph, Span, Style,
 };
+use crate::interactive::theme;
 
 pub(super) fn render_model_select_modal(
     frame: &mut ratatui::Frame<'_>,
@@ -17,7 +18,7 @@ pub(super) fn render_model_select_modal(
     let block = Block::default()
         .title("Switch model  (Enter: select  Esc: cancel)")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Yellow));
+        .border_style(Style::default().fg(theme::WARNING));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -34,7 +35,7 @@ pub(super) fn render_model_select_modal(
         Span::styled(
             "> ",
             Style::default()
-                .fg(Color::Yellow)
+                .fg(theme::WARNING)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::raw(query.to_string()),
@@ -70,10 +71,10 @@ pub(super) fn render_model_select_modal(
                         format!("[{marker}] "),
                         if is_current {
                             Style::default()
-                                .fg(Color::Yellow)
+                                .fg(theme::WARNING)
                                 .add_modifier(Modifier::BOLD)
                         } else {
-                            Style::default().fg(Color::DarkGray)
+                            Style::default().fg(theme::MUTED)
                         },
                     ),
                     Span::styled(

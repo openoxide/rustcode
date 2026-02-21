@@ -15,6 +15,7 @@ use super::{
 };
 
 mod input_chat;
+mod input_memory;
 mod input_modals;
 mod input_pm;
 mod input_provider;
@@ -25,6 +26,22 @@ use self::input_modals::handle_modal_key;
 use self::input_sessions::handle_sessions_key;
 
 pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
+    // Modals take priority over everything — the user must dismiss the modal
+    // before interacting with approval prompts or the underlying screen.
+    if state.help_open {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('?') => state.help_open = false,
+            _ => {}
+        }
+        return false;
+    }
+
+    if state.modal.is_some() && !matches!(&state.modal, Some(Modal::SlashHelp { .. })) {
+        handle_modal_key(state, key);
+        return false;
+    }
+
+    // Pending tool approval — blocks all other input until resolved.
     if let Some((is_command, options_count)) = state.pending_approval.as_ref().map(|pending| {
         let request = &pending.request;
         (
@@ -89,19 +106,6 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
             }
             _ => {}
         }
-        return false;
-    }
-
-    if state.help_open {
-        match key.code {
-            KeyCode::Esc | KeyCode::Char('?') => state.help_open = false,
-            _ => {}
-        }
-        return false;
-    }
-
-    if state.modal.is_some() && !matches!(&state.modal, Some(Modal::SlashHelp { .. })) {
-        handle_modal_key(state, key);
         return false;
     }
 

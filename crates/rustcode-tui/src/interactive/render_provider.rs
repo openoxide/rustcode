@@ -1,7 +1,8 @@
 use super::{
-    Block, Borders, Clear, Color, ConnectMethod, Constraint, Direction, Layout, Line, List,
-    ListItem, Modifier, Paragraph, ProviderManagerStep, Rect, Span, Style, Wrap,
+    Block, Borders, Clear, ConnectMethod, Constraint, Direction, Layout, Line, List, ListItem,
+    Modifier, Paragraph, ProviderManagerStep, Rect, Span, Style, Wrap,
 };
+use crate::interactive::theme;
 
 /// Render the provider manager modal for a given step.
 pub(super) fn render_provider_manager_modal(
@@ -21,7 +22,7 @@ pub(super) fn render_provider_manager_modal(
             let block = Block::default()
                 .title("Providers  (Enter: connect  Esc: close  type to search)")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan));
+                .border_style(Style::default().fg(theme::ACCENT));
             let inner = block.inner(area);
             frame.render_widget(block, area);
 
@@ -39,7 +40,7 @@ pub(super) fn render_provider_manager_modal(
                 Span::styled(
                     "> ",
                     Style::default()
-                        .fg(Color::Cyan)
+                        .fg(theme::ACCENT)
                         .add_modifier(Modifier::BOLD),
                 ),
                 Span::raw(query.clone()),
@@ -65,10 +66,10 @@ pub(super) fn render_provider_manager_modal(
                         let status = if entry.connected { "[+]" } else { "[ ]" };
                         let status_style = if entry.connected {
                             Style::default()
-                                .fg(Color::Green)
+                                .fg(theme::SUCCESS)
                                 .add_modifier(Modifier::BOLD)
                         } else {
-                            Style::default().fg(Color::DarkGray)
+                            Style::default().fg(theme::MUTED)
                         };
                         ListItem::new(Line::from(vec![
                             Span::styled(format!("{status} "), status_style),
@@ -123,7 +124,7 @@ pub(super) fn render_provider_manager_modal(
             let block = Block::default()
                 .title(format!("Connect: {display_name}"))
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Yellow));
+                .border_style(Style::default().fg(theme::WARNING));
             let inner = block.inner(area);
             frame.render_widget(block, area);
 
@@ -175,7 +176,7 @@ pub(super) fn render_provider_manager_modal(
             let block = Block::default()
                 .title(title)
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Green));
+                .border_style(Style::default().fg(theme::SUCCESS));
             let inner = block.inner(area);
             frame.render_widget(block, area);
 
@@ -204,7 +205,7 @@ pub(super) fn render_provider_manager_modal(
                 Block::default()
                     .title("API Key")
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Green)),
+                    .border_style(Style::default().fg(theme::SUCCESS)),
             );
             let key_inner = Block::default()
                 .title("API Key")
@@ -281,7 +282,7 @@ fn render_oauth_waiting(
     let block = Block::default()
         .title(format!("OAuth — {display_name} ({provider_id})"))
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Magenta));
+        .border_style(Style::default().fg(theme::SECONDARY));
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
@@ -303,7 +304,7 @@ fn render_oauth_waiting(
             Span::styled(
                 code.to_string(),
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(theme::WARNING)
                     .add_modifier(Modifier::BOLD),
             ),
         ]));
@@ -320,7 +321,7 @@ fn render_oauth_waiting(
 
     let hint = Paragraph::new(Line::from(vec![Span::styled(
         "Esc: cancel",
-        Style::default().fg(Color::DarkGray),
+        Style::default().fg(theme::MUTED),
     )]))
     .block(Block::default().borders(Borders::TOP));
     frame.render_widget(hint, rows[1]);

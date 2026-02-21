@@ -149,6 +149,72 @@ impl MemoryStorage {
         Ok(())
     }
 
+    /// Delete the consolidated summary file.
+    pub fn clear_summary(&self) -> std::io::Result<()> {
+        let path = self.summary_path();
+        if path.exists() {
+            std::fs::remove_file(&path)?;
+        }
+        Ok(())
+    }
+
+    /// Delete all raw memories AND the consolidated summary.
+    pub fn clear_all(&self) -> std::io::Result<()> {
+        self.clear_raw()?;
+        self.clear_summary()
+    }
+
+    /// Check whether memory collection is disabled.
+    ///
+    /// Disabled state is indicated by a `disabled` sentinel file in the root.
+    #[must_use]
+    pub fn is_disabled(&self) -> bool {
+        self.root.join("disabled").exists()
+    }
+
+    /// Enable or disable memory collection.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the sentinel file cannot be created or removed.
+    pub fn set_enabled(&self, enabled: bool) -> Result<(), StorageError> {
+        let sentinel = self.root.join("disabled");
+        if enabled {
+            if sentinel.exists() {
+                std::fs::remove_file(&sentinel).map_err(|e| StorageError::Write {
+                    path: sentinel,
+                    source: e,
+                })?;
+            }
+        } else {
+            self.init()?;
+            std::fs::write(&sentinel, b"").map_err(|e| StorageError::Write {
+                path: sentinel,
+                source: e,
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Count the number of raw memory files on disk.
+    #[must_use]
+    pub fn raw_count(&self) -> usize {
+        let raw_dir = self.raw_dir();
+        std::fs::read_dir(&raw_dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|e| {
+                        e.path()
+                            .extension()
+                            .and_then(|ext| ext.to_str())
+                            .is_some_and(|ext| ext == "md")
+                    })
+                    .count()
+            })
+            .unwrap_or(0)
+    }
+
     fn raw_dir(&self) -> PathBuf {
         self.root.join("raw")
     }
@@ -271,5 +337,49 @@ mod tests {
         assert!(!storage.load_all_raw().is_empty());
         storage.clear_raw().unwrap();
         assert!(storage.load_all_raw().is_empty());
+    }
+
+    #[test]
+    fn clear_summary_removes_file() {
+        let (_dir, storage) = tmp_storage();
+        storage
+            .save_summary(&MemorySummary::new("summary text"))
+            .unwrap();
+        assert!(storage.load_summary().is_some());
+        storage.clear_summary().unwrap();
+        assert!(storage.load_summary().is_none());
+    }
+
+    #[test]
+    fn clear_all_removes_raw_and_summary() {
+        let (_dir, storage) = tmp_storage();
+        storage.save_raw(&RawMemory::new("ses-1", "data")).unwrap();
+        storage
+            .save_summary(&MemorySummary::new("summary"))
+            .unwrap();
+        storage.clear_all().unwrap();
+        assert!(storage.load_all_raw().is_empty());
+        assert!(storage.load_summary().is_none());
+    }
+
+    #[test]
+    fn enabled_disabled_toggle() {
+        let (_dir, storage) = tmp_storage();
+        assert!(!storage.is_disabled());
+        storage.set_enabled(false).unwrap();
+        assert!(storage.is_disabled());
+        storage.set_enabled(true).unwrap();
+        assert!(!storage.is_disabled());
+    }
+
+    #[test]
+    fn raw_count_reflects_files() {
+        let (_dir, storage) = tmp_storage();
+        assert_eq!(storage.raw_count(), 0);
+        storage.save_raw(&RawMemory::new("ses-1", "a")).unwrap();
+        storage.save_raw(&RawMemory::new("ses-2", "b")).unwrap();
+        assert_eq!(storage.raw_count(), 2);
+        storage.clear_raw().unwrap();
+        assert_eq!(storage.raw_count(), 0);
     }
 }

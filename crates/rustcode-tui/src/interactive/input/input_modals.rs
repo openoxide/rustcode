@@ -1,3 +1,4 @@
+use super::input_memory::handle_memory_key;
 use super::input_pm::handle_provider_manager_key;
 use super::input_provider::handle_model_select_key;
 use super::{
@@ -441,6 +442,9 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
         }
         Modal::ProviderManager { step } => {
             handle_provider_manager_key(state, step, key);
+        }
+        Modal::MemoryViewer { .. } | Modal::MemoryClearConfirm => {
+            handle_memory_key(state, modal, key);
         }
         Modal::DeleteConfirm { session_id, title } => match key.code {
             KeyCode::Esc | KeyCode::Char('n') => {}

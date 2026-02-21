@@ -46,6 +46,7 @@ mod render_provider;
 mod runtime;
 mod state;
 mod syntax_highlight;
+mod theme;
 mod transcript;
 mod types;
 
