@@ -82,6 +82,9 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
                 ),
                 ActivityItem::Warning { .. } => ("warn", Style::default().fg(theme::SECONDARY)),
                 ActivityItem::Failure { .. } => ("error", Style::default().fg(theme::ERROR)),
+                ActivityItem::RetryAttempt { .. } => {
+                    ("retry", Style::default().fg(theme::SECONDARY))
+                }
                 ActivityItem::Completed => ("done", Style::default().fg(theme::SUCCESS)),
             };
             ListItem::new(Line::from(vec![

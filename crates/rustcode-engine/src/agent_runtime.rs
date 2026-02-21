@@ -76,12 +76,15 @@ impl Engine {
 
             let retry_policy = crate::retry::RetryPolicy::default();
             let retry_publisher = publisher.clone();
-            let on_retry = move |msg: &str| {
+            let on_retry = move |info: &crate::retry::RetryInfo| {
                 std::mem::drop(retry_publisher.publish(rustcode_core::event::Event::new(
                     0,
                     rustcode_core::event::EventScope::Command,
-                    rustcode_core::event::EventPayload::Warning {
-                        message: msg.to_string(),
+                    rustcode_core::event::EventPayload::RetryAttempt {
+                        attempt: info.attempt,
+                        max_retries: info.max_retries,
+                        delay_secs: info.delay.as_secs(),
+                        reason: info.error_reason.clone(),
                     },
                 )));
             };

@@ -419,7 +419,7 @@ pub(super) fn render_live_activity_lines(
                         .add_modifier(Modifier::DIM),
                 )));
             }
-            ActivityItem::Failure { message } => {
+            ActivityItem::Failure { message, .. } => {
                 let capped: String = message.chars().take(70).collect();
                 lines.push(Line::from(Span::styled(
                     format!("✗ {capped}"),

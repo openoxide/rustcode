@@ -31,6 +31,7 @@ use crate::{
     InteractiveServices, InteractiveStart, InteractiveSubmitMode, TuiError, TuiPublisher,
 };
 
+mod activity_item;
 mod commands;
 mod composer;
 mod file_search;
@@ -50,6 +51,7 @@ mod theme;
 mod transcript;
 mod types;
 
+use activity_item::ActivityItem;
 use commands::{
     execute_command, filter_models, handle_slash_command, open_session_by_id,
     refresh_chat_messages, SLASH_COMMANDS,
@@ -86,10 +88,9 @@ use transcript::{
     set_find,
 };
 use types::{
-    build_prompt_history, ActivityItem, AppState, ChatFocus, ChatNav, ChatState, CommandId,
-    CommandItem, ConnectMethod, FindState, GitStat, Modal, PendingApproval, ProviderEntry,
-    ProviderManagerStep, ProviderOAuthDone, ProviderOAuthStarted, RunningCommand, Screen, Toast,
-    ToastVariant,
+    build_prompt_history, AppState, ChatFocus, ChatNav, ChatState, CommandId, CommandItem,
+    ConnectMethod, FindState, GitStat, Modal, PendingApproval, ProviderEntry, ProviderManagerStep,
+    ProviderOAuthDone, ProviderOAuthStarted, RunningCommand, Screen, Toast, ToastVariant,
 };
 
 pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {

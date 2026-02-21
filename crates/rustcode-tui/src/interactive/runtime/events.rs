@@ -95,7 +95,32 @@ pub(super) fn drain_messages(state: &mut AppState) {
                                 clean.clone(),
                                 Duration::from_secs(6),
                             );
-                            Some(ActivityItem::Failure { message: clean })
+                            Some(ActivityItem::Failure {
+                                message: clean,
+                                raw_detail: Some(message.clone()),
+                            })
+                        }
+                        EventPayload::RetryAttempt {
+                            attempt,
+                            max_retries,
+                            delay_secs,
+                            reason,
+                        } => {
+                            let toast_msg = format!(
+                                "Retrying ({attempt}/{max_retries}) in {delay_secs}s: {reason}"
+                            );
+                            push_toast(
+                                state,
+                                ToastVariant::Warning,
+                                toast_msg,
+                                Duration::from_secs((*delay_secs).max(3)),
+                            );
+                            Some(ActivityItem::RetryAttempt {
+                                attempt: *attempt,
+                                max_retries: *max_retries,
+                                delay_secs: *delay_secs,
+                                reason: reason.clone(),
+                            })
                         }
                         EventPayload::Completed => {
                             chat.running = None;
@@ -183,6 +208,7 @@ pub(super) fn drain_messages(state: &mut AppState) {
                             if !has_failure {
                                 chat.activity.push(ActivityItem::Failure {
                                     message: msg.clone(),
+                                    raw_detail: message.clone(),
                                 });
                             }
                             push_toast(state, ToastVariant::Error, msg, Duration::from_secs(6));
@@ -427,7 +453,20 @@ fn clean_failure_message(msg: &str) -> String {
         return "No provider connected — use /providers (Ctrl+A) to connect one".to_string();
     }
 
-    // Network / transport errors
+    // Specific timeout patterns (before generic network catch-all)
+    if lower.contains("timed out waiting for provider response chunk") {
+        return "Stream timed out — model may be slow to respond, try again".to_string();
+    }
+    if lower.contains("timed out waiting for provider response headers") {
+        return "Connection timed out — provider did not respond, retries exhausted".to_string();
+    }
+
+    // Connection errors
+    if lower.contains("connection reset") || lower.contains("connection refused") {
+        return "Connection lost — check your network and try again".to_string();
+    }
+
+    // Generic network / transport errors
     if lower.contains("network error")
         || lower.contains("connection")
         || lower.contains("timed out")

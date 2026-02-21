@@ -51,6 +51,17 @@ pub enum EventPayload {
     Failure {
         message: String,
     },
+    /// An LLM call is being retried after a transient failure.
+    RetryAttempt {
+        /// Current attempt number (1-based).
+        attempt: u32,
+        /// Maximum retries configured for this error type.
+        max_retries: u32,
+        /// Delay in seconds before the next attempt starts.
+        delay_secs: u64,
+        /// Human-readable reason for the retry (e.g. "rate limited").
+        reason: String,
+    },
     /// Token usage from a single LLM step — accumulated by the TUI for display.
     UsageUpdate {
         input_tokens: u64,

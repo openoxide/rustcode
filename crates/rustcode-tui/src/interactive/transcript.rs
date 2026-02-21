@@ -319,7 +319,7 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
 
     if chat.running.is_none() {
         if let Some(error) = chat.activity.iter().rev().find_map(|item| match item {
-            ActivityItem::Failure { message } => Some(message.as_str()),
+            ActivityItem::Failure { message, .. } => Some(message.as_str()),
             _ => None,
         }) {
             let clean = sanitize_output_line(error)
