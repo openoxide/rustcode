@@ -141,6 +141,22 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
 
     let transcript_inner_h = left[0].height.saturating_sub(2).max(1) as usize;
     let inner_w = left[0].width.saturating_sub(2).max(1) as usize;
+
+    // Pad diff lines so the background colour fills the entire row width.
+    // Lines with a bg style (diff add/delete) are padded with trailing spaces
+    // to `inner_w` so the coloured background forms a solid rectangle block.
+    for line in &mut lines {
+        if let Some(bg_color) = line.style.bg {
+            let used: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+            if inner_w > used {
+                line.spans.push(Span::styled(
+                    " ".repeat(inner_w - used),
+                    Style::default().bg(bg_color),
+                ));
+            }
+        }
+    }
+
     // Account for line wrapping: each logical line may span multiple visual rows.
     let wrapped_count: usize = lines
         .iter()
@@ -204,13 +220,8 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     let model_label_display = truncate_with_ellipsis(model_label, 36);
     let provider_label_display = truncate_with_ellipsis(&provider_label, 18);
 
-    let prompt_label = if chat.running.is_some() {
-        "</> Prompt (running)"
-    } else {
-        "</> Prompt"
-    };
     let mut composer_title_spans = vec![
-        Span::styled(prompt_label, Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled("</>", Style::default().add_modifier(Modifier::BOLD)),
         Span::raw("  "),
         Span::styled(
             format!("[model:{model_label_display}]"),
