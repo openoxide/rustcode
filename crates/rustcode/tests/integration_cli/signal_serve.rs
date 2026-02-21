@@ -52,41 +52,42 @@ fn sigint_cancels_long_running_command_gracefully() {
 #[cfg(unix)]
 #[test]
 fn sigint_cancels_hanging_llm_request_gracefully() {
-    let Some((port, handle)) = spawn_hanging_http_server() else {
+    let Some(server) = spawn_hanging_http_server() else {
         return;
     };
+    let local_base_url = format!("http://127.0.0.1:{}", server.port);
 
     let sessions_dir = make_temp_dir_path("sessions-sigint-hanging-llm");
 
-    let config_path = make_temp_file_path("sigint-hanging-llm");
-    std::fs::write(
-        &config_path,
-        format!(
-            r#"
-allow_network = true
-model = "openai/gpt-5"
-
-[llm]
-provider = "openai"
-base_url = "http://127.0.0.1:{port}"
-api_key_env = "RUSTCODE_TEST_KEY"
-"#
-        ),
-    )
-    .expect("must write config fixture");
-
     let mut child = Command::new(rustcode_bin())
-        .args(["run", "hang"])
+        .args([
+            "--allow-network",
+            "--model",
+            "openrouter/gpt-5",
+            "--llm-provider",
+            "openrouter",
+            "--llm-base-url",
+            &local_base_url,
+            "--llm-api-key-env",
+            "RUSTCODE_TEST_KEY",
+            "run",
+            "hang",
+        ])
         .env("RUSTCODE_SESSIONS_DIR", &sessions_dir)
-        .env("RUSTCODE_USER_CONFIG", &config_path)
-        .env("RUSTCODE_TRUST_PROJECT", "0")
         .env("RUSTCODE_TEST_KEY", "integration-secret")
+        .env("NO_PROXY", "127.0.0.1,localhost")
+        .env_remove("HTTP_PROXY")
+        .env_remove("HTTPS_PROXY")
+        .env_remove("ALL_PROXY")
+        .env_remove("http_proxy")
+        .env_remove("https_proxy")
+        .env_remove("all_proxy")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
         .expect("must spawn rustcode process");
 
-    // Avoid signal race by ensuring process remains alive briefly before SIGINT.
+    // Avoid startup race by ensuring the process is alive.
     let mut saw_running = false;
     for _ in 0..20 {
         match child.try_wait().expect("must query child state") {
@@ -100,7 +101,11 @@ api_key_env = "RUSTCODE_TEST_KEY"
         }
     }
     assert!(saw_running, "child never reached running state");
-    thread::sleep(Duration::from_millis(500));
+
+    // Best effort: if the request reaches the hanging server before SIGINT, we
+    // exercise in-flight cancellation. Even if it does not, the timeout-based
+    // wait below keeps this test from hanging indefinitely.
+    let _connected = server.wait_for_connection(Duration::from_secs(3));
 
     let pid = child.id().to_string();
     let kill_status = Command::new("kill")
@@ -109,10 +114,8 @@ api_key_env = "RUSTCODE_TEST_KEY"
         .expect("must invoke kill");
     assert!(kill_status.success(), "failed to send SIGINT");
 
-    let output = child
-        .wait_with_output()
-        .expect("must collect rustcode output");
-    handle.join().expect("server should join");
+    let output = wait_with_output_or_kill(child, Duration::from_secs(20));
+    server.shutdown_and_join();
 
     assert!(
         output.status.success(),

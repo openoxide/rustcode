@@ -1,7 +1,10 @@
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -66,29 +69,108 @@ fn spawn_mcp_discovery_server() -> Option<(u16, thread::JoinHandle<()>)> {
     Some((port, handle))
 }
 
-fn spawn_hanging_http_server() -> Option<(u16, thread::JoinHandle<()>)> {
+struct HangingHttpServer {
+    port: u16,
+    connected_rx: Receiver<()>,
+    stop: Arc<AtomicBool>,
+    handle: thread::JoinHandle<()>,
+}
+
+impl HangingHttpServer {
+    fn wait_for_connection(&self, timeout: Duration) -> bool {
+        self.connected_rx.recv_timeout(timeout).is_ok()
+    }
+
+    fn shutdown_and_join(self) {
+        self.stop.store(true, Ordering::SeqCst);
+        self.handle
+            .join()
+            .expect("hanging server thread should join");
+    }
+}
+
+fn spawn_hanging_http_server() -> Option<HangingHttpServer> {
     let listener = match TcpListener::bind("127.0.0.1:0") {
         Ok(listener) => listener,
         Err(err) if err.kind() == std::io::ErrorKind::PermissionDenied => return None,
         Err(_) => return None,
     };
+    listener.set_nonblocking(true).ok()?;
     let port = listener.local_addr().ok()?.port();
+
+    let (connected_tx, connected_rx) = mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_thread = stop.clone();
+
     let handle = thread::spawn(move || {
-        if let Ok((mut socket, _)) = listener.accept() {
-            // Read the request so the client has completed the write, then hang until the socket
-            // closes (SIGINT path should drop the request future and close the connection).
-            let mut buf = [0_u8; 8192];
-            let _ = socket.read(&mut buf);
-            loop {
-                match socket.read(&mut buf) {
-                    Ok(0) => break,
-                    Ok(_) => continue,
-                    Err(_) => break,
+        let mut socket = loop {
+            if stop_for_thread.load(Ordering::SeqCst) {
+                return;
+            }
+            match listener.accept() {
+                Ok((socket, _)) => break socket,
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(20));
+                    continue;
                 }
+                Err(_) => return,
+            }
+        };
+
+        let _ = connected_tx.send(());
+        let _ = socket.set_read_timeout(Some(Duration::from_millis(200)));
+
+        // Read the request so the client has completed the write, then hang until either
+        // the peer closes or the test asks us to stop.
+        let mut buf = [0_u8; 8192];
+        let _ = socket.read(&mut buf);
+        loop {
+            if stop_for_thread.load(Ordering::SeqCst) {
+                break;
+            }
+            match socket.read(&mut buf) {
+                Ok(0) => break,
+                Ok(_) => continue,
+                Err(err)
+                    if err.kind() == std::io::ErrorKind::WouldBlock
+                        || err.kind() == std::io::ErrorKind::TimedOut =>
+                {
+                    continue;
+                }
+                Err(_) => break,
             }
         }
     });
-    Some((port, handle))
+
+    Some(HangingHttpServer {
+        port,
+        connected_rx,
+        stop,
+        handle,
+    })
+}
+
+fn wait_with_output_or_kill(child: Child, timeout: Duration) -> Output {
+    let pid = child.id().to_string();
+    let (tx, rx) = mpsc::channel();
+
+    thread::spawn(move || {
+        let _ = tx.send(child.wait_with_output());
+    });
+
+    match rx.recv_timeout(timeout) {
+        Ok(Ok(output)) => output,
+        Ok(Err(err)) => panic!("must collect rustcode output: {err}"),
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            let _ = Command::new("kill").args(["-KILL", &pid]).status();
+            match rx.recv_timeout(Duration::from_secs(5)) {
+                Ok(Ok(output)) => output,
+                Ok(Err(err)) => panic!("must collect rustcode output after SIGKILL: {err}"),
+                Err(err) => panic!("timed out waiting for child output after SIGKILL: {err}"),
+            }
+        }
+        Err(err) => panic!("failed waiting for child output: {err}"),
+    }
 }
 
 #[path = "integration_cli/auth_browser_login.rs"]
