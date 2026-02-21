@@ -7,6 +7,7 @@ use crate::AuthError;
 
 #[derive(Debug, Clone)]
 pub(super) struct CallbackRoute {
+    host: String,
     port: u16,
     path: String,
 }
@@ -16,6 +17,9 @@ pub(super) fn callback_route_from_redirect_uri(
 ) -> Result<CallbackRoute, AuthError> {
     let parsed = reqwest::Url::parse(redirect_uri)
         .map_err(|err| AuthError::Validation(format!("invalid redirect uri: {err}")))?;
+    let host = parsed.host_str().ok_or_else(|| {
+        AuthError::Validation("redirect uri does not contain a callback host".to_string())
+    })?;
     let port = parsed.port_or_known_default().ok_or_else(|| {
         AuthError::Validation("redirect uri does not contain a callback port".to_string())
     })?;
@@ -24,7 +28,11 @@ pub(super) fn callback_route_from_redirect_uri(
     } else {
         parsed.path().to_string()
     };
-    Ok(CallbackRoute { port, path })
+    Ok(CallbackRoute {
+        host: host.to_string(),
+        port,
+        path,
+    })
 }
 
 pub(super) async fn wait_for_oauth_callback(
@@ -32,12 +40,12 @@ pub(super) async fn wait_for_oauth_callback(
     expected_state: &str,
     timeout: Duration,
 ) -> Result<String, AuthError> {
-    let listener = TcpListener::bind(("127.0.0.1", callback.port))
+    let listener = TcpListener::bind((callback.host.as_str(), callback.port))
         .await
         .map_err(|err| {
             AuthError::Network(format!(
-                "failed to bind oauth callback port {}: {err}",
-                callback.port
+                "failed to bind oauth callback {}:{}: {err}",
+                callback.host, callback.port
             ))
         })?;
     let deadline = tokio::time::Instant::now() + timeout.max(Duration::from_secs(1));

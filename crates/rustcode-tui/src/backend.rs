@@ -29,6 +29,19 @@ pub trait SessionBackend: Send + Sync {
         session_id: &str,
         title: Option<String>,
     ) -> Result<SessionInfo, String>;
+
+    /// Persist cumulative token usage and cost to the session metadata.
+    ///
+    /// Called when a run completes so the data survives across restarts.
+    /// Remote backends silently ignore this (no-op).
+    fn update_session_usage(
+        &self,
+        session_id: &str,
+        total_input_tokens: u64,
+        total_output_tokens: u64,
+        cost_usd: f64,
+    ) -> Result<(), String>;
+
     fn delete_session(&self, session_id: &str) -> Result<(), String>;
 }
 
@@ -86,6 +99,24 @@ impl SessionBackend for LocalSessionBackend {
     ) -> Result<SessionInfo, String> {
         self.store
             .update_session_title(session_id, title)
+            .map_err(|err| err.to_string())
+    }
+
+    fn update_session_usage(
+        &self,
+        session_id: &str,
+        total_input_tokens: u64,
+        total_output_tokens: u64,
+        cost_usd: f64,
+    ) -> Result<(), String> {
+        self.store
+            .update_session_usage(
+                session_id,
+                total_input_tokens,
+                total_output_tokens,
+                cost_usd,
+            )
+            .map(|_| ())
             .map_err(|err| err.to_string())
     }
 
@@ -217,6 +248,16 @@ impl SessionBackend for RemoteSessionBackend {
         _title: Option<String>,
     ) -> Result<SessionInfo, String> {
         Err("rename is not supported in tui attach mode".to_string())
+    }
+
+    fn update_session_usage(
+        &self,
+        _session_id: &str,
+        _total_input_tokens: u64,
+        _total_output_tokens: u64,
+        _cost_usd: f64,
+    ) -> Result<(), String> {
+        Ok(()) // no-op in attach mode — server owns the session metadata
     }
 
     fn delete_session(&self, _session_id: &str) -> Result<(), String> {

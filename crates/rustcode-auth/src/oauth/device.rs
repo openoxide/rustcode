@@ -359,11 +359,12 @@ async fn poll_openai_device_code(
         }
         let token: OpenAiTokenExchangeResponse = serde_json::from_str(&exchange_body)
             .map_err(|err| AuthError::Parse(err.to_string()))?;
+        let account_id = super::browser::extract_openai_account_id_from_jwt(&token.access_token);
         return Ok(DeviceCodeFlowCredential {
             access_token: token.access_token,
             refresh_token: token.refresh_token,
             expires_in_secs: token.expires_in,
-            account_id: None,
+            account_id,
         });
     }
 

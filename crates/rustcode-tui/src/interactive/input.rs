@@ -161,12 +161,7 @@ fn sync_slash_help(state: &mut AppState, chat: &ChatState) {
         let query = chat.composer.trim_start_matches('/').to_string();
         match &mut state.modal {
             Some(Modal::SlashHelp { query: q, .. }) => *q = query,
-            _ => {
-                state.modal = Some(Modal::SlashHelp {
-                    query,
-                    selected: 0,
-                })
-            }
+            _ => state.modal = Some(Modal::SlashHelp { query, selected: 0 }),
         }
     } else if matches!(state.modal, Some(Modal::SlashHelp { .. })) {
         state.modal = None;

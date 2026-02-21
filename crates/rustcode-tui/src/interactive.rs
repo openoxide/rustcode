@@ -5,10 +5,10 @@ use std::time::{Duration, SystemTime};
 use crossterm::event::{
     self, Event as CEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
 };
+use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use crossterm::{execute, ExecutableCommand};
 
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect, Size};
@@ -49,7 +49,8 @@ mod transcript;
 mod types;
 
 use commands::{
-    execute_command, filter_models, handle_slash_command, refresh_chat_messages, SLASH_COMMANDS,
+    execute_command, filter_models, handle_slash_command, open_session_by_id,
+    refresh_chat_messages, SLASH_COMMANDS,
 };
 use composer::{
     composer_backspace, composer_clear, composer_cursor_visual, composer_delete,

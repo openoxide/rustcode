@@ -265,8 +265,9 @@ fn start_openai_browser_oauth_flow(
     }
 
     let normalized_domain = normalize_domain(domain.unwrap_or("auth.openai.com"))?;
-    let issuer = format!("https://{normalized_domain}");
-    let redirect_uri = format!("http://127.0.0.1:{callback_port}{OPENAI_OAUTH_CALLBACK_PATH}");
+    let scheme = oauth_scheme_for_domain(&normalized_domain);
+    let issuer = format!("{scheme}://{normalized_domain}");
+    let redirect_uri = format!("http://localhost:{callback_port}{OPENAI_OAUTH_CALLBACK_PATH}");
     let state = generate_oauth_state();
     let code_verifier = generate_code_verifier();
     let code_challenge = generate_pkce_code_challenge(&code_verifier);
@@ -329,8 +330,9 @@ fn start_gitlab_browser_oauth_flow(
     let code_verifier = generate_code_verifier();
     let code_challenge = generate_pkce_code_challenge(&code_verifier);
 
+    let scheme = oauth_scheme_for_domain(&normalized_domain);
     let mut authorize_url = reqwest::Url::parse(&format!(
-        "https://{normalized_domain}/oauth/authorize"
+        "{scheme}://{normalized_domain}/oauth/authorize"
     ))
     .map_err(|err| AuthError::Validation(format!("invalid gitlab oauth authorize url: {err}")))?;
 
@@ -364,11 +366,7 @@ async fn complete_gitlab_browser_oauth_flow(
     let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
     let code = Box::pin(wait_for_oauth_callback(&callback, &flow.state, timeout)).await?;
 
-    let scheme = if flow.domain.starts_with("127.0.0.1:") || flow.domain.starts_with("localhost:") {
-        "http"
-    } else {
-        "https"
-    };
+    let scheme = oauth_scheme_for_domain(&flow.domain);
     let token_url = format!("{scheme}://{}/oauth/token", flow.domain);
     let client = auth_http_client()?;
     let mut form_params = BTreeMap::new();
@@ -428,11 +426,7 @@ async fn complete_openai_browser_oauth_flow(
     let callback = callback_route_from_redirect_uri(&flow.redirect_uri)?;
     let code = Box::pin(wait_for_oauth_callback(&callback, &flow.state, timeout)).await?;
 
-    let scheme = if flow.domain.starts_with("127.0.0.1:") || flow.domain.starts_with("localhost:") {
-        "http"
-    } else {
-        "https"
-    };
+    let scheme = oauth_scheme_for_domain(&flow.domain);
     let token_url = format!("{scheme}://{}/oauth/token", flow.domain);
     let client = auth_http_client()?;
     let response = client
@@ -524,6 +518,29 @@ fn generate_code_verifier() -> String {
 fn generate_pkce_code_challenge(verifier: &str) -> String {
     let digest = sha2::Sha256::digest(verifier.as_bytes());
     URL_SAFE_NO_PAD.encode(digest)
+}
+
+fn oauth_scheme_for_domain(domain: &str) -> &'static str {
+    if is_loopback_domain(domain) {
+        "http"
+    } else {
+        "https"
+    }
+}
+
+fn is_loopback_domain(domain: &str) -> bool {
+    let candidate = if domain.contains("://") {
+        domain.to_string()
+    } else {
+        format!("http://{domain}")
+    };
+    let Ok(parsed) = reqwest::Url::parse(&candidate) else {
+        return false;
+    };
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
 }
 
 /// Normalize a user-provided domain or URL into a host[:port] form.

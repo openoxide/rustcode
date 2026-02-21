@@ -10,7 +10,10 @@
       "parent_id": null,
       "cwd": "/tmp",
       "workspace_root": "/tmp",
-      "model": "null"
+      "model": "null",
+      "total_input_tokens": 0,
+      "total_output_tokens": 0,
+      "cost_usd": 0.0
     }
   ]
 }

@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use rustcode_auth::{AuthStore, StoredCredential};
 use serde::Deserialize;
 
 /// Capabilities and limits for a known model.
@@ -125,7 +126,44 @@ pub fn all_model_entries() -> Vec<String> {
         }
     }
 
+    if openai_oauth_mode() {
+        result.retain(|entry| model_visible_in_openai_oauth_mode(entry));
+    }
+
     result
+}
+
+fn openai_oauth_mode() -> bool {
+    let store = AuthStore::open_default();
+    matches!(
+        store.get("openai").ok().flatten(),
+        Some(StoredCredential::OAuth { .. })
+    )
+}
+
+fn model_visible_in_openai_oauth_mode(entry: &str) -> bool {
+    let Some((provider, model_id)) = entry.split_once('/') else {
+        return true;
+    };
+    if !provider.eq_ignore_ascii_case("openai") {
+        return true;
+    }
+    openai_oauth_model_allowed(model_id)
+}
+
+fn openai_oauth_model_allowed(model_id: &str) -> bool {
+    if model_id.to_ascii_lowercase().contains("codex") {
+        return true;
+    }
+    matches!(
+        model_id,
+        "gpt-5.1-codex-max"
+            | "gpt-5.1-codex-mini"
+            | "gpt-5.2"
+            | "gpt-5.2-codex"
+            | "gpt-5.3-codex"
+            | "gpt-5.1-codex"
+    )
 }
 
 // ── Built-in model presets ─────────────────────────────────────────
@@ -512,5 +550,19 @@ mod tests {
     fn case_insensitive_lookup() {
         let info = model_info("Claude-3.5-Sonnet");
         assert_eq!(info.context_window, 200_000);
+    }
+
+    #[test]
+    fn openai_oauth_model_filtering_matches_codex_plugin() {
+        assert!(openai_oauth_model_allowed("gpt-5.3-codex"));
+        assert!(openai_oauth_model_allowed("gpt-5.2"));
+        assert!(!openai_oauth_model_allowed("gpt-4o"));
+    }
+
+    #[test]
+    fn openai_oauth_visibility_keeps_non_openai_entries() {
+        assert!(model_visible_in_openai_oauth_mode("anthropic/claude-4"));
+        assert!(!model_visible_in_openai_oauth_mode("openai/gpt-4o"));
+        assert!(model_visible_in_openai_oauth_mode("openai/gpt-5.2-codex"));
     }
 }

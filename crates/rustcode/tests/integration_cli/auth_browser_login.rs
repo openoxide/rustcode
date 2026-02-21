@@ -83,7 +83,7 @@ fn auth_login_openai_browser_no_wait_emits_authorize_url() {
     assert!(stdout.contains("provider=openai"));
     assert!(stdout.contains("method=oauth_browser"));
     assert!(stdout.contains("authorize_url=https://auth.openai.com/oauth/authorize"));
-    assert!(stdout.contains("redirect_uri=http://127.0.0.1:19455/auth/callback"));
+    assert!(stdout.contains("redirect_uri=http://localhost:19455/auth/callback"));
     assert!(stdout.contains("status=awaiting_browser_callback"));
 }
 

@@ -4,6 +4,7 @@ use crate::auth::{load_models_index, ModelsProvider};
 use crate::cli::Cli;
 use crate::utils::{load_effective_config, write_stdout_line};
 use anyhow::Result;
+use rustcode_auth::{AuthStore, StoredCredential};
 use rustcode_llm::{builtin_provider_ids, diagnose_provider, ApiKeySource, ProviderProtocolName};
 
 pub fn handle_models_command(
@@ -166,6 +167,37 @@ fn provider_models(provider_id: &str, provider: Option<&ModelsProvider>) -> Vec<
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
+    if provider_id.eq_ignore_ascii_case("openai") && openai_oauth_mode() {
+        models.retain(|entry| {
+            let Some((_, model_id)) = entry.split_once('/') else {
+                return true;
+            };
+            openai_oauth_model_allowed(model_id)
+        });
+    }
     models.sort();
     models
+}
+
+fn openai_oauth_mode() -> bool {
+    let store = AuthStore::open_default();
+    matches!(
+        store.get("openai").ok().flatten(),
+        Some(StoredCredential::OAuth { .. })
+    )
+}
+
+fn openai_oauth_model_allowed(model_id: &str) -> bool {
+    if model_id.to_ascii_lowercase().contains("codex") {
+        return true;
+    }
+    matches!(
+        model_id,
+        "gpt-5.1-codex-max"
+            | "gpt-5.1-codex-mini"
+            | "gpt-5.2"
+            | "gpt-5.2-codex"
+            | "gpt-5.3-codex"
+            | "gpt-5.1-codex"
+    )
 }

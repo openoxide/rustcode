@@ -294,7 +294,7 @@ async fn openai_browser_flow_builds_authorize_url() {
     let flow = start_browser_oauth_flow("openai", None, None, 1455)
         .expect("openai browser flow should start");
     assert_eq!(flow.provider, "openai");
-    assert_eq!(flow.redirect_uri, "http://127.0.0.1:1455/auth/callback");
+    assert_eq!(flow.redirect_uri, "http://localhost:1455/auth/callback");
     assert!(flow
         .authorize_url
         .contains("https://auth.openai.com/oauth/authorize"));
@@ -302,6 +302,15 @@ async fn openai_browser_flow_builds_authorize_url() {
         .authorize_url
         .contains("client_id=app_EMoamEEZ73f0CkXaXp7hrann"));
     assert!(flow.authorize_url.contains("code_challenge_method=S256"));
+}
+
+#[tokio::test]
+async fn openai_browser_flow_uses_http_authorize_url_for_loopback_domain() {
+    let flow = start_browser_oauth_flow("openai", Some("localhost:18443"), None, 1458)
+        .expect("openai browser flow should start for loopback domain");
+    assert!(flow
+        .authorize_url
+        .starts_with("http://localhost:18443/oauth/authorize"));
 }
 
 #[tokio::test]
@@ -322,6 +331,16 @@ async fn gitlab_browser_flow_requires_client_id_for_self_hosted() {
     let error = start_browser_oauth_flow("gitlab", Some("gitlab.example.com"), None, 1457)
         .expect_err("self-hosted gitlab flow should require client id");
     assert!(error.to_string().contains("GITLAB_OAUTH_CLIENT_ID"));
+}
+
+#[tokio::test]
+async fn gitlab_browser_flow_uses_http_authorize_url_for_loopback_domain() {
+    let flow =
+        start_browser_oauth_flow("gitlab", Some("127.0.0.1:18444"), Some("client-123"), 1459)
+            .expect("gitlab browser flow should start for loopback domain");
+    assert!(flow
+        .authorize_url
+        .starts_with("http://127.0.0.1:18444/oauth/authorize"));
 }
 
 #[test]
