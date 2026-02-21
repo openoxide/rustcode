@@ -29,6 +29,38 @@ pub(crate) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
         return;
     };
 
+    let is_draft = crate::is_draft_session_id(&chat.session.id);
+    if is_draft {
+        let cwd = std::path::PathBuf::from(&chat.session.cwd);
+        let workspace_root = std::path::PathBuf::from(&chat.session.workspace_root);
+        let model = chat.session.model.clone();
+        let title = chat.session.title.clone();
+        match state.backend.create_session(crate::CreateSessionOptions {
+            title,
+            parent_id: None,
+            cwd,
+            workspace_root,
+            model,
+        }) {
+            Ok(session) => {
+                chat.session = session.clone();
+                state.sessions = state.backend.list_sessions().unwrap_or_else(|_| Vec::new());
+                super::super::sort_sessions(&mut state.sessions);
+                state.sessions_view =
+                    super::super::compute_sessions_view(&state.sessions, &state.sessions_filter);
+                if let Some(idx) = state.sessions.iter().position(|s| s.id == session.id) {
+                    state.selected = idx;
+                }
+            }
+            Err(err) => {
+                let msg = format!("failed to create session: {err}");
+                state.status = Some(msg.clone());
+                push_toast(state, ToastVariant::Error, msg, Duration::from_secs(4));
+                return;
+            }
+        }
+    }
+
     let history = if state.submit_mode == InteractiveSubmitMode::Agent {
         match state.backend.load_messages(&chat.session.id) {
             Ok(history) => Some(history),
@@ -85,9 +117,6 @@ pub(crate) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
     let submit_mode = state.submit_mode;
     let cancellation_for_task = cancellation.clone();
     let run_task = runtime.spawn(async move {
-        let cancel_timeout = cancellation_for_task.clone();
-        let tx_timeout = tx.clone();
-
         let context = CommandContext::with_cancellation(
             config,
             SessionMeta {
@@ -115,22 +144,12 @@ pub(crate) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
             InteractiveSubmitMode::Run => Command::Run { prompt },
         };
 
-        tokio::select! {
-            result = executor.execute(command, context, publisher) => {
-                let (ok, message) = match result {
-                    Ok(()) => (true, None),
-                    Err(err) => (false, Some(err.to_string())),
-                };
-                let _ = tx.send(InteractiveMsg::RunEnded { ok, message });
-            }
-            () = tokio::time::sleep(std::time::Duration::from_secs(7 * 60)) => {
-                cancel_timeout.cancel();
-                let _ = tx_timeout.send(InteractiveMsg::RunEnded {
-                    ok: false,
-                    message: Some("\u{23f1} Run timed out after 7 minutes".to_string()),
-                });
-            }
-        }
+        let result = executor.execute(command, context, publisher).await;
+        let (ok, message) = match result {
+            Ok(()) => (true, None),
+            Err(err) => (false, Some(err.to_string())),
+        };
+        let _ = tx.send(InteractiveMsg::RunEnded { ok, message });
     });
     chat.running = Some(RunningCommand {
         cancellation,

@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 use tokio::runtime::Handle;
@@ -55,6 +56,37 @@ pub enum InteractiveStart {
         prompt: Option<String>,
         auto_submit: bool,
     },
+}
+
+#[must_use]
+pub fn new_draft_session(
+    title: Option<String>,
+    cwd: PathBuf,
+    workspace_root: PathBuf,
+    model: String,
+) -> SessionInfo {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
+        .unwrap_or(0);
+    SessionInfo {
+        id: format!("draft-{now}"),
+        title,
+        created_at_unix_ms: now,
+        updated_at_unix_ms: now,
+        parent_id: None,
+        cwd: cwd.display().to_string(),
+        workspace_root: workspace_root.display().to_string(),
+        model,
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        cost_usd: 0.0,
+    }
+}
+
+#[must_use]
+pub fn is_draft_session_id(session_id: &str) -> bool {
+    session_id.starts_with("draft-")
 }
 
 #[derive(Debug)]
@@ -189,8 +221,9 @@ impl ToolApprover for TuiToolApprover {
                 reply: tx,
             })
             .map_err(|_| ExecutionError::Executor("approval channel closed".to_string()))?;
-        let response = rx
+        let response = tokio::time::timeout(std::time::Duration::from_secs(60), rx)
             .await
+            .map_err(|_| ExecutionError::Executor("approval timed out after 60s".to_string()))?
             .map_err(|_| ExecutionError::Executor("approval response dropped".to_string()))?;
 
         let mut policy = self

@@ -6,9 +6,13 @@ use super::super::{
 };
 use super::git::refresh_git_stat;
 
-/// Drain all queued `InteractiveMsg` messages from the channel without blocking.
+/// Maximum messages to process per frame to prevent render starvation during
+/// heavy streaming.  Remaining messages are picked up on the next frame.
+const MAX_MESSAGES_PER_FRAME: usize = 20;
+
+/// Drain up to [`MAX_MESSAGES_PER_FRAME`] queued messages without blocking.
 pub(super) fn drain_messages(state: &mut AppState) {
-    loop {
+    for _ in 0..MAX_MESSAGES_PER_FRAME {
         let msg = match state.rx.try_recv() {
             Ok(msg) => msg,
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => return,
@@ -125,6 +129,11 @@ pub(super) fn drain_messages(state: &mut AppState) {
                         EventPayload::Completed => {
                             chat.running = None;
                             chat.composer_cleared_by_ctrl_c = false;
+                            // Clear live plan/todo widgets so they don't
+                            // persist into the next conversation turn.
+                            chat.plan_title = None;
+                            chat.plan_steps.clear();
+                            chat.todos.clear();
                             push_toast(
                                 state,
                                 ToastVariant::Success,
@@ -149,6 +158,23 @@ pub(super) fn drain_messages(state: &mut AppState) {
                                 + *output_tokens as f64 * 15.0)
                                 / 1_000_000.0;
                             chat.cost_usd += step_cost;
+                            None
+                        }
+                        EventPayload::PlanUpdate { title, steps } => {
+                            chat.plan_title = Some(title.clone());
+                            chat.plan_steps = steps
+                                .iter()
+                                .map(|s| (s.description.clone(), s.status.clone()))
+                                .collect();
+                            None
+                        }
+                        EventPayload::TodoUpdate { todos } => {
+                            chat.todos = todos
+                                .iter()
+                                .map(|t| {
+                                    (t.content.clone(), t.status.clone(), t.priority.clone())
+                                })
+                                .collect();
                             None
                         }
                         EventPayload::ServeRequest { .. } => None,

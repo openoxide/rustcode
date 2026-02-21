@@ -133,6 +133,9 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                 last_max_scroll: std::cell::Cell::new(0),
                 run_started_at: None,
                 last_run_elapsed: None,
+                plan_title: None,
+                plan_steps: Vec::new(),
+                todos: Vec::new(),
             });
             if should_submit {
                 auto_submit = prompt;
@@ -200,7 +203,7 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
             .draw(|frame| render(frame, &state))
             .map_err(|err| TuiError::Io(err.to_string()))?;
 
-        if event::poll(Duration::from_millis(50)).map_err(|err| TuiError::Io(err.to_string()))? {
+        if event::poll(Duration::from_millis(16)).map_err(|err| TuiError::Io(err.to_string()))? {
             let evt = event::read().map_err(|err| TuiError::Io(err.to_string()))?;
             match evt {
                 CEvent::Key(key) => {
