@@ -1,5 +1,14 @@
 use super::ChatState;
 use std::time::Instant;
+use unicode_width::UnicodeWidthChar;
+
+fn char_display_width(ch: char) -> usize {
+    if ch == '\t' {
+        4
+    } else {
+        UnicodeWidthChar::width(ch).unwrap_or(0)
+    }
+}
 
 fn composer_set(chat: &mut ChatState, text: String) {
     chat.composer = text;
@@ -97,7 +106,7 @@ fn composer_line_col(text: &str, cursor: usize) -> (usize, usize) {
             line += 1;
             col = 0;
         } else {
-            col += 1;
+            col += char_display_width(ch);
         }
         i += ch.len_utf8();
     }
@@ -121,7 +130,7 @@ fn composer_cursor_from_line_col(text: &str, target_line: usize, target_col: usi
             byte += 1;
             continue;
         }
-        col += 1;
+        col += char_display_width(ch);
         byte += ch.len_utf8();
     }
     byte.min(text.len())
@@ -147,7 +156,7 @@ pub(super) fn composer_move_end(chat: &mut ChatState) {
             continue;
         }
         if cur_line == line {
-            cur_col += 1;
+            cur_col += char_display_width(ch);
             max_col = cur_col;
         }
     }
@@ -187,7 +196,7 @@ pub(super) fn composer_cursor_visual(text: &str, cursor: usize, width: u16) -> (
             byte += 1;
             continue;
         }
-        col += 1;
+        col += char_display_width(ch);
         byte += ch.len_utf8();
         if col >= width {
             row += 1;

@@ -1,15 +1,17 @@
 use super::{
-    apply_find_highlight, build_transcript_lines, composer_cursor_visual, format_age,
-    render_activity, render_activity_details_modal, render_approval_inline,
+    apply_find_highlight, approval_options_count, build_transcript_lines, composer_cursor_visual,
+    format_age, render_activity, render_activity_details_modal, render_approval_inline,
     render_approval_selector, render_help_modal, render_modal, AppState, Block, Borders, ChatFocus,
-    ChatState, Color, Constraint, Direction, Layout, Line, List, ListItem, Modal, Modifier,
-    Paragraph, Screen, Span, Style, ToastVariant, Wrap,
+    ChatState, Clear, Color, Constraint, Direction, Duration, Layout, Line, List, ListItem, Modal,
+    Modifier, Paragraph, Screen, Span, Style, SystemTime, ToastVariant, Wrap,
 };
 
 /// Timeout for typing indicator (milliseconds).
 const TYPING_TIMEOUT_MS: u128 = 2000;
 
 pub(super) fn render(frame: &mut ratatui::Frame<'_>, state: &AppState) {
+    frame.render_widget(Clear, frame.area());
+
     match &state.screen {
         Screen::Sessions => render_sessions(frame, state),
         Screen::Chat(chat) => render_chat(frame, state, chat),
@@ -110,12 +112,6 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
             format!(" filter:{}", state.sessions_filter),
             Style::default().fg(Color::Cyan),
         )
-    } else if let Some(ref s) = state.status {
-        let capped: String = s.chars().take(80).collect();
-        (
-            format!(" {capped}"),
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-        )
     } else if let Some(toast) = state.toasts.last() {
         let style = match toast.variant {
             ToastVariant::Info => Style::default().fg(Color::Cyan),
@@ -213,8 +209,8 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
 
     // When the approval selector is shown, enlarge the bottom pane to fit
     // the vertical option list (options + hint line + 2 borders).
-    let bottom_height = if app.pending_approval.is_some() {
-        let opt_count: u16 = 3;
+    let bottom_height = if let Some(pending) = &app.pending_approval {
+        let opt_count = approval_options_count(&pending.request) as u16;
         opt_count + 3 // options + hint + top/bottom borders
     } else {
         composer_height
@@ -283,13 +279,6 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         transcript_title_spans.push(Span::styled(
             format!("{pct:.0}% used"),
             Style::default().fg(pct_color),
-        ));
-    }
-    if chat.cost_usd > 0.001 {
-        transcript_title_spans.push(Span::raw("  "));
-        transcript_title_spans.push(Span::styled(
-            format!("~${:.3}", chat.cost_usd),
-            Style::default().fg(Color::Rgb(220, 200, 100)),
         ));
     }
     if let Some(find) = &chat.find {
@@ -363,22 +352,15 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     ))
     .right_aligned();
 
-    let mut transcript_block = Block::default()
+    let transcript_block = Block::default()
         .title(Line::from(transcript_title_spans))
         .title_bottom(transcript_bottom)
         .borders(Borders::ALL);
-    if chat.tool_details {
-        transcript_block = transcript_block.title_bottom(Line::from(Span::styled(
-            "[tools expanded]",
-            Style::default()
-                .fg(Color::Yellow)
-                .add_modifier(Modifier::DIM),
-        )));
-    }
     let transcript = Paragraph::new(lines)
         .block(transcript_block)
         .wrap(Wrap { trim: false })
         .scroll((scroll_top, 0));
+    frame.render_widget(Clear, left[0]);
     frame.render_widget(transcript, left[0]);
 
     let mode_label = match app.submit_mode {
@@ -390,6 +372,8 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     } else {
         chat.session.model.as_str()
     };
+    let model_label_display = truncate_with_ellipsis(model_label, 36);
+    let provider_label_display = truncate_with_ellipsis(&provider_label, 18);
 
     let is_typing = chat
         .last_typing_time
@@ -405,7 +389,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         Span::styled(prompt_label, Style::default().add_modifier(Modifier::BOLD)),
         Span::raw("  "),
         Span::styled(
-            format!("[model:{model_label}]"),
+            format!("[model:{model_label_display}]"),
             Style::default()
                 .fg(Color::Rgb(60, 210, 120))
                 .add_modifier(Modifier::BOLD),
@@ -419,7 +403,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         ),
         Span::raw("  "),
         Span::styled(
-            format!("[{provider_label}]"),
+            format!("[{provider_label_display}]"),
             Style::default()
                 .fg(Color::Rgb(100, 160, 220))
                 .add_modifier(Modifier::BOLD),
@@ -436,6 +420,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         ));
     }
     let composer_title = Line::from(composer_title_spans);
+    let composer_title_width = composer_title.width();
     let composer_border = if chat.focus == ChatFocus::Composer {
         Style::default().fg(Color::Rgb(80, 220, 220))
     } else {
@@ -495,10 +480,15 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                     ));
                 }
                 git_spans.push(Span::raw(" ")); // trailing padding inside border
-                composer_block = composer_block.title(Line::from(git_spans).right_aligned());
+                let git_title = Line::from(git_spans).right_aligned();
+                let fits = composer_title_width + git_title.width() + 1 <= inner_w as usize;
+                if fits {
+                    composer_block = composer_block.title(git_title);
+                }
             }
         }
 
+        let composer_inner = composer_block.inner(composer_area);
         let composer = Paragraph::new(composer_text)
             .style(composer_style)
             .block(composer_block)
@@ -513,13 +503,9 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             && (app.modal.is_none() || slash_help_open)
             && !chat.details_open
         {
-            let x = composer_area
-                .x
-                .saturating_add(1)
-                .saturating_add(cursor_col as u16);
-            let y = composer_area
+            let x = composer_inner.x.saturating_add(cursor_col as u16);
+            let y = composer_inner
                 .y
-                .saturating_add(1)
                 .saturating_add((cursor_row.saturating_sub(composer_scroll)) as u16);
             if x < composer_area.x + composer_area.width
                 && y < composer_area.y + composer_area.height
@@ -529,20 +515,8 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         }
     }
 
-    // Line 1: status/error — truncated to fit, always visible
-    let err_max = 55_usize;
-    let (status_text, status_style, has_error) = if let Some(ref s) = app.status {
-        let truncated = if s.chars().count() > err_max {
-            format!("{}…", s.chars().take(err_max).collect::<String>())
-        } else {
-            s.clone()
-        };
-        (
-            truncated,
-            Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
-            true,
-        )
-    } else if let Some(toast) = app.toasts.last() {
+    // Line 1: running/toast status only (errors are shown in transcript).
+    let (status_text, status_style, has_error) = if let Some(toast) = app.toasts.last() {
         let style = match toast.variant {
             ToastVariant::Info => Style::default().fg(Color::Cyan),
             ToastVariant::Success => Style::default().fg(Color::Green),
@@ -566,8 +540,16 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     };
     let mut status_spans = Vec::new();
     if chat.running.is_some() {
+        let ms = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_else(|_| Duration::from_secs(0))
+            .as_millis();
+        const FRAMES: &[char] = &['◐', '◓', '◑', '◒'];
+        const DOTS: &[&str] = &["   ", ".  ", ".. ", "..."];
+        let frame = FRAMES[(ms / 120 % FRAMES.len() as u128) as usize];
+        let dots = DOTS[(ms / 300 % DOTS.len() as u128) as usize];
         status_spans.push(Span::styled(
-            " running  ",
+            format!(" {frame} running{dots}"),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -646,13 +628,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             Span::styled(":cmd", Style::default().fg(Color::DarkGray))
         });
         spans.push(Span::styled(
-            "  Ctrl+D:toggle tools",
-            Style::default()
-                .fg(Color::DarkGray)
-                .add_modifier(Modifier::DIM),
-        ));
-        spans.push(Span::styled(
-            "  Ctrl+Y:thinking",
+            "  Ctrl+O:toggle tools",
             Style::default()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
@@ -730,4 +706,28 @@ fn format_tokens(n: u64) -> String {
         result.push(ch);
     }
     result
+}
+
+fn truncate_with_ellipsis(text: &str, max_chars: usize) -> String {
+    let len = text.chars().count();
+    if len <= max_chars {
+        return text.to_string();
+    }
+    if max_chars <= 1 {
+        return "…".to_string();
+    }
+
+    let keep = max_chars - 1;
+    let head = keep / 2;
+    let tail = keep - head;
+    let prefix: String = text.chars().take(head).collect();
+    let suffix: String = text
+        .chars()
+        .rev()
+        .take(tail)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("{prefix}…{suffix}")
 }

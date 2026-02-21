@@ -83,29 +83,17 @@ pub(super) fn handle_chat_key(
         return ChatNav::Stay;
     }
 
+    let is_interrupt_key =
+        (ctrl && matches!(key.code, KeyCode::Char('c' | 'C'))) || matches!(key.code, KeyCode::Esc);
+    if !is_interrupt_key {
+        chat.composer_cleared_by_ctrl_c = false;
+    }
+
     // ── Ctrl+key shortcuts (work regardless of focus) ───────────────
     if ctrl {
         match key.code {
             KeyCode::Char('c' | 'C') => {
-                // Context-aware Ctrl+C:
-                // First press clears input (if any) and shows "press again to exit"
-                // Second press exits the application
-                if !chat.composer_cleared_by_ctrl_c {
-                    // First Ctrl+C - clear input (if any) and show hint
-                    if !chat.composer.is_empty() {
-                        composer_clear(chat);
-                    }
-                    chat.composer_cleared_by_ctrl_c = true;
-                    push_toast(
-                        state,
-                        ToastVariant::Info,
-                        "press Ctrl+C again to exit",
-                        Duration::from_secs(3),
-                    );
-                    return ChatNav::Stay;
-                }
-                // Second Ctrl+C - exit the application
-                return ChatNav::Exit;
+                return handle_double_interrupt_key(state, chat, "Ctrl+C");
             }
             KeyCode::Char('p' | 'P') => {
                 open_command_palette(state, Some(chat));
@@ -162,7 +150,8 @@ pub(super) fn handle_chat_key(
                         chat.activity.clear();
                         chat.activity_selected = 0;
                         chat.details_open = false;
-                        chat.tool_details = true;
+                        chat.tool_details = false;
+                        chat.output_details = false;
                         chat.find = None;
                         chat.running = None;
                         state.status = None;
@@ -213,7 +202,8 @@ pub(super) fn handle_chat_key(
                         chat.activity.clear();
                         chat.activity_selected = 0;
                         chat.details_open = false;
-                        chat.tool_details = true;
+                        chat.tool_details = false;
+                        chat.output_details = false;
                         chat.find = None;
                         chat.running = None;
                         state.status = None;
@@ -256,31 +246,19 @@ pub(super) fn handle_chat_key(
                     return ChatNav::Stay;
                 }
             }
-            // Ctrl+D: toggle tool call details (expand/collapse tool batches)
-            KeyCode::Char('d' | 'D') => {
-                chat.tool_details = !chat.tool_details;
+            // Ctrl+O: toggle tool details (summary vs expanded).
+            KeyCode::Char('o' | 'O') => {
+                let expand = !chat.tool_details;
+                chat.tool_details = expand;
+                chat.output_details = expand;
+                chat.show_reasoning = expand;
                 push_toast(
                     state,
                     ToastVariant::Info,
-                    if chat.tool_details {
-                        "tools: expanded"
+                    if expand {
+                        "details: expanded"
                     } else {
-                        "tools: collapsed"
-                    },
-                    Duration::from_secs(2),
-                );
-                return ChatNav::Stay;
-            }
-            // Ctrl+Y: toggle thinking/reasoning visibility
-            KeyCode::Char('y' | 'Y') => {
-                chat.show_reasoning = !chat.show_reasoning;
-                push_toast(
-                    state,
-                    ToastVariant::Info,
-                    if chat.show_reasoning {
-                        "thinking: visible"
-                    } else {
-                        "thinking: hidden"
+                        "details: collapsed"
                     },
                     Duration::from_secs(2),
                 );
@@ -371,21 +349,7 @@ pub(super) fn handle_chat_key(
     match key.code {
         KeyCode::Char('?') => state.help_open = true,
         KeyCode::Esc => {
-            if chat.focus != ChatFocus::Composer {
-                chat.focus = ChatFocus::Composer;
-                return ChatNav::Stay;
-            }
-            // Escape focuses composer; if already focused, clear composer or show hint.
-            // Does NOT navigate to sessions - use Ctrl+Q for that.
-            if !chat.composer.is_empty() {
-                composer_clear(chat);
-                push_toast(
-                    state,
-                    ToastVariant::Info,
-                    "composer cleared",
-                    Duration::from_secs(2),
-                );
-            }
+            return handle_double_interrupt_key(state, chat, "Esc");
         }
         // "/" from non-composer focus: move to composer and insert "/" so user can type /commands
         KeyCode::Char('/') => {
@@ -397,10 +361,16 @@ pub(super) fn handle_chat_key(
         }
         // Scroll / selection
         KeyCode::PageUp => {
-            chat.scroll = chat.scroll.saturating_add(5);
+            let max = chat.last_max_scroll.get();
+            if max == 0 {
+                chat.scroll = 0;
+            } else {
+                chat.scroll = chat.scroll.min(max).saturating_add(5).min(max);
+            }
         }
         KeyCode::PageDown => {
-            chat.scroll = chat.scroll.saturating_sub(5);
+            let max = chat.last_max_scroll.get();
+            chat.scroll = chat.scroll.min(max).saturating_sub(5);
         }
         KeyCode::Down => {
             if chat.focus == ChatFocus::Activity {
@@ -421,12 +391,26 @@ pub(super) fn handle_chat_key(
         }
         KeyCode::Backspace => {
             if chat.focus == ChatFocus::Composer {
+                if consume_large_paste_summary_with_backspace(
+                    &mut chat.composer,
+                    &mut chat.composer_cursor,
+                    &mut chat.paste_buffer,
+                ) {
+                    return ChatNav::Stay;
+                }
                 chat.paste_buffer = None;
                 composer_backspace(chat);
             }
         }
         KeyCode::Delete => {
             if chat.focus == ChatFocus::Composer {
+                if consume_large_paste_summary_with_delete(
+                    &mut chat.composer,
+                    &mut chat.composer_cursor,
+                    &mut chat.paste_buffer,
+                ) {
+                    return ChatNav::Stay;
+                }
                 chat.paste_buffer = None;
                 composer_delete(chat);
             }
@@ -487,6 +471,49 @@ pub(super) fn handle_chat_key(
     ChatNav::Stay
 }
 
+fn handle_double_interrupt_key(
+    state: &mut AppState,
+    chat: &mut ChatState,
+    key_name: &str,
+) -> ChatNav {
+    if let Some(running) = &chat.running {
+        if chat.composer_cleared_by_ctrl_c {
+            running.cancellation.cancel();
+            chat.composer_cleared_by_ctrl_c = false;
+            push_toast(
+                state,
+                ToastVariant::Warning,
+                "cancel requested",
+                Duration::from_secs(2),
+            );
+            return ChatNav::Stay;
+        }
+        chat.composer_cleared_by_ctrl_c = true;
+        push_toast(
+            state,
+            ToastVariant::Info,
+            format!("press {key_name} again to cancel"),
+            Duration::from_secs(3),
+        );
+        return ChatNav::Stay;
+    }
+
+    if !chat.composer_cleared_by_ctrl_c {
+        if !chat.composer.is_empty() {
+            composer_clear(chat);
+        }
+        chat.composer_cleared_by_ctrl_c = true;
+        push_toast(
+            state,
+            ToastVariant::Info,
+            format!("press {key_name} again to exit"),
+            Duration::from_secs(3),
+        );
+        return ChatNav::Stay;
+    }
+    ChatNav::Exit
+}
+
 fn next_focus(focus: ChatFocus, activity_hidden: bool) -> ChatFocus {
     match focus {
         ChatFocus::Composer => {
@@ -498,6 +525,96 @@ fn next_focus(focus: ChatFocus, activity_hidden: bool) -> ChatFocus {
         }
         ChatFocus::Activity => ChatFocus::Composer,
     }
+}
+
+fn consume_large_paste_summary_with_backspace(
+    composer: &mut String,
+    cursor: &mut usize,
+    paste_buffer: &mut Option<String>,
+) -> bool {
+    let Some(full_text) = paste_buffer.as_deref() else {
+        return false;
+    };
+    let Some((summary_start, summary_end)) = large_paste_summary_span(composer, full_text) else {
+        return false;
+    };
+    let idx = (*cursor).min(composer.len());
+    if idx <= summary_start || idx > summary_end {
+        return false;
+    }
+    composer.replace_range(summary_start..summary_end, "");
+    *cursor = summary_start;
+    *paste_buffer = None;
+    true
+}
+
+fn consume_large_paste_summary_with_delete(
+    composer: &mut String,
+    cursor: &mut usize,
+    paste_buffer: &mut Option<String>,
+) -> bool {
+    let Some(full_text) = paste_buffer.as_deref() else {
+        return false;
+    };
+    let Some((summary_start, summary_end)) = large_paste_summary_span(composer, full_text) else {
+        return false;
+    };
+    let idx = (*cursor).min(composer.len());
+    if idx < summary_start || idx >= summary_end {
+        return false;
+    }
+    composer.replace_range(summary_start..summary_end, "");
+    *cursor = summary_start;
+    *paste_buffer = None;
+    true
+}
+
+fn large_paste_summary_span(displayed: &str, full_text: &str) -> Option<(usize, usize)> {
+    if displayed == full_text {
+        return None;
+    }
+
+    let prefix = common_prefix_len(displayed, full_text);
+    let suffix = common_suffix_len(displayed, full_text, prefix);
+
+    let display_mid_start = prefix;
+    let display_mid_end = displayed.len().saturating_sub(suffix);
+    if display_mid_start >= display_mid_end {
+        return None;
+    }
+    Some((display_mid_start, display_mid_end))
+}
+
+fn common_prefix_len(a: &str, b: &str) -> usize {
+    let mut a_iter = a.char_indices();
+    let mut b_iter = b.char_indices();
+    let mut prefix = 0usize;
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some((ai, ac)), Some((_, bc))) if ac == bc => {
+                prefix = ai + ac.len_utf8();
+            }
+            _ => break,
+        }
+    }
+    prefix
+}
+
+fn common_suffix_len(a: &str, b: &str, prefix: usize) -> usize {
+    let a_tail = &a[prefix.min(a.len())..];
+    let b_tail = &b[prefix.min(b.len())..];
+    let mut a_iter = a_tail.chars().rev();
+    let mut b_iter = b_tail.chars().rev();
+    let mut suffix = 0usize;
+    loop {
+        match (a_iter.next(), b_iter.next()) {
+            (Some(ac), Some(bc)) if ac == bc => {
+                suffix += ac.len_utf8();
+            }
+            _ => break,
+        }
+    }
+    suffix
 }
 
 /// Replace the composer content with the currently selected slash command and
@@ -531,5 +648,28 @@ fn complete_slash_selection(state: &mut AppState, chat: &mut ChatState) {
         chat.composer = text;
         chat.composer_cursor = byte_len;
         state.modal = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::consume_large_paste_summary_with_backspace;
+
+    #[test]
+    fn backspace_removes_large_paste_summary_in_one_keypress() {
+        let mut composer = "prefix [sss +93330 words pasted]".to_string();
+        let mut cursor = composer.len();
+        let mut paste_buffer = Some("prefix this is a very large pasted message".to_string());
+
+        let consumed = consume_large_paste_summary_with_backspace(
+            &mut composer,
+            &mut cursor,
+            &mut paste_buffer,
+        );
+
+        assert!(consumed);
+        assert_eq!(composer, "prefix ");
+        assert_eq!(cursor, "prefix ".len());
+        assert!(paste_buffer.is_none());
     }
 }

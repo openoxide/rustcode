@@ -12,13 +12,14 @@ fn append_message_lines(
     lines: &mut Vec<Line<'static>>,
     msg: &StoredMessage,
     tool_details: bool,
+    output_details: bool,
     tool_args_map: &HashMap<String, String>,
     show_reasoning: bool,
 ) {
     // Tool result messages are rendered inline without a role header — the ✓/✗
     // indicator and tool name are self-descriptive.
     if msg.role == MessageRole::Tool {
-        append_tool_message_lines(lines, msg, tool_details, tool_args_map);
+        append_tool_message_lines(lines, msg, output_details, tool_args_map);
         // No trailing blank line — tool results attach visually to the assistant turn
         return;
     }
@@ -57,7 +58,11 @@ fn append_message_lines(
             }
         }
         MessageRole::Assistant => {
-            if let Some(reasoning) = msg.reasoning.as_deref().filter(|text| !text.trim().is_empty()) {
+            if let Some(reasoning) = msg
+                .reasoning
+                .as_deref()
+                .filter(|text| !text.trim().is_empty())
+            {
                 if show_reasoning {
                     let rendered = render_markdown(reasoning);
                     let mut truncated = if rendered.len() > 300 {
@@ -72,9 +77,7 @@ fn append_message_lines(
                         if idx < truncated.len() {
                             let mut spans = vec![Span::styled(
                                 "◦  ",
-                                Style::default()
-                                    .fg(Color::Blue)
-                                    .add_modifier(Modifier::DIM),
+                                Style::default().fg(Color::Blue).add_modifier(Modifier::DIM),
                             )];
                             spans.extend(truncated[idx].spans.iter().cloned());
                             truncated[idx] = Line::from(spans);
@@ -90,7 +93,7 @@ fn append_message_lines(
                     lines.push(Line::raw(""));
                 } else {
                     lines.push(Line::from(Span::styled(
-                        "[thinking hidden - Ctrl+Y or /thinking]",
+                        "[thinking hidden - ctrl+o or /thinking]",
                         Style::default()
                             .fg(Color::Rgb(105, 110, 130))
                             .add_modifier(Modifier::DIM),
@@ -181,7 +184,7 @@ fn append_message_lines(
 fn append_tool_message_lines(
     lines: &mut Vec<Line<'static>>,
     msg: &StoredMessage,
-    tool_details: bool,
+    output_details: bool,
     tool_args_map: &HashMap<String, String>,
 ) {
     let name = msg.tool_name.as_deref().unwrap_or("tool");
@@ -220,11 +223,14 @@ fn append_tool_message_lines(
 
         lines.push(Line::from(header_spans));
 
-        if tool_details {
-            render_tool_output(lines, &output, true, ok);
-        } else {
-            render_tool_output(lines, &output, false, ok);
-        }
+        let always_show_edit_diff = is_editing_tool(name) && output.contains("\n@@diff\n") && ok;
+        render_tool_output(
+            lines,
+            name,
+            &output,
+            output_details || always_show_edit_diff,
+            ok,
+        );
         return;
     }
 
@@ -234,7 +240,12 @@ fn append_tool_message_lines(
         Style::default().fg(Color::Cyan),
     )]));
     if !content_str.is_empty() {
-        append_value_lines(lines, &msg.content, "  ", 20);
+        lines.push(Line::from(Span::styled(
+            "  └  Result available",
+            Style::default()
+                .fg(Color::Rgb(120, 125, 140))
+                .add_modifier(Modifier::DIM),
+        )));
     }
 }
 
@@ -244,7 +255,13 @@ fn append_tool_message_lines(
 /// on every diff line for a clean patch-like appearance.
 ///
 /// Plain output: collapsed shows first non-empty line; expanded shows up to 20 lines.
-fn render_tool_output(lines: &mut Vec<Line<'static>>, output: &str, expanded: bool, ok: bool) {
+fn render_tool_output(
+    lines: &mut Vec<Line<'static>>,
+    tool_name: &str,
+    output: &str,
+    expanded: bool,
+    ok: bool,
+) {
     const DIFF_MARKER: &str = "\n@@diff\n";
     if let Some(diff_pos) = output.find(DIFF_MARKER) {
         let summary = output[..diff_pos].trim();
@@ -392,11 +409,31 @@ fn render_tool_output(lines: &mut Vec<Line<'static>>, output: &str, expanded: bo
                     };
                     lines.push(Line::from(line_spans).style(bg));
                 } else {
-                    lines.push(Line::from(vec![
+                    let mut line_spans = vec![
                         Span::styled("  │ ", Style::default().fg(pipe_color)),
                         Span::styled(gutter, Style::default().add_modifier(Modifier::DIM)),
-                        Span::styled(raw.to_string(), content_style),
-                    ]));
+                    ];
+                    if let Some(rest) = raw.strip_prefix(' ') {
+                        line_spans.push(Span::styled(
+                            " ",
+                            Style::default()
+                                .fg(Color::DarkGray)
+                                .add_modifier(Modifier::DIM),
+                        ));
+                        if let Some(ref mut state) = hl {
+                            let hl_spans = highlight_code_line(rest, state);
+                            if !hl_spans.is_empty() {
+                                line_spans.extend(hl_spans);
+                            } else {
+                                line_spans.push(Span::styled(rest.to_string(), content_style));
+                            }
+                        } else {
+                            line_spans.push(Span::styled(rest.to_string(), content_style));
+                        }
+                    } else {
+                        line_spans.push(Span::styled(raw.to_string(), content_style));
+                    }
+                    lines.push(Line::from(line_spans));
                 }
             }
         }
@@ -407,53 +444,19 @@ fn render_tool_output(lines: &mut Vec<Line<'static>>, output: &str, expanded: bo
             Style::default().fg(Color::DarkGray),
         )));
     } else {
-        // Plain (non-diff) output — collapse long output, style errors.
-        // Apply tilde_path to shorten absolute paths in output.
-        let output_lines: Vec<String> = output
-            .lines()
-            .map(|l| sanitize_output_line(&tilde_path_in_line(l)))
-            .collect();
-        let total = output_lines.len();
-        let text_style = if !ok {
-            Style::default().fg(Color::Rgb(200, 80, 80)) // Red for errors
-        } else {
-            Style::default().add_modifier(Modifier::DIM) // Dimmed for success
-        };
-
-        if expanded {
-            // Expanded: show up to 50 lines.
-            for (idx, line) in output_lines.iter().enumerate() {
-                if idx >= 50 {
-                    lines.push(Line::from(Span::styled(
-                        "  …[truncated]…",
-                        Style::default().add_modifier(Modifier::DIM),
-                    )));
-                    break;
-                }
-                lines.push(Line::from(Span::styled(format!("  {line}"), text_style)));
-            }
-        } else if total > 6 {
-            // Collapsed, long output: show first 3 + last 3 with a hint.
-            for line in output_lines.iter().take(3) {
-                lines.push(Line::from(Span::styled(format!("  {line}"), text_style)));
-            }
-            lines.push(Line::from(Span::styled(
-                format!("  ··· ({} more lines — Ctrl+D to expand)", total - 6),
+        // Non-diff output is always summarized (no raw stdout/file content).
+        let summary = summarize_tool_result(tool_name, output, ok);
+        if !summary.is_empty() {
+            let style = if ok {
                 Style::default()
-                    .fg(Color::DarkGray)
-                    .add_modifier(Modifier::DIM),
-            )));
-            for line in output_lines.iter().skip(total - 3) {
-                lines.push(Line::from(Span::styled(format!("  {line}"), text_style)));
-            }
-        } else if total > 0 {
-            // Short output: show all lines.
-            for line in &output_lines {
-                lines.push(Line::from(Span::styled(format!("  {line}"), text_style)));
-            }
+                    .fg(Color::Rgb(120, 125, 140))
+                    .add_modifier(Modifier::DIM)
+            } else {
+                Style::default().fg(Color::Rgb(200, 80, 80))
+            };
+            lines.push(Line::from(Span::styled(format!("  └  {summary}"), style)));
         }
-        // else: empty output — the ✓/✗ header is enough.
-        if total > 0 {
+        if expanded {
             lines.push(Line::from(Span::styled(
                 "  └─",
                 Style::default().fg(Color::DarkGray),
@@ -462,11 +465,105 @@ fn render_tool_output(lines: &mut Vec<Line<'static>>, output: &str, expanded: bo
     }
 }
 
+fn summarize_tool_result(tool_name: &str, output: &str, ok: bool) -> String {
+    let tool = tool_name.to_ascii_lowercase();
+    let nonempty_lines = output
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .count();
+    let clean_first_line = output
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(|line| sanitize_output_line(&tilde_path_in_line(line)))
+        .unwrap_or_default();
+
+    match tool.as_str() {
+        "read" => format!(
+            "Read {nonempty_lines} {}",
+            if nonempty_lines == 1 { "line" } else { "lines" }
+        ),
+        "list" | "glob" => format!(
+            "Found {nonempty_lines} {}",
+            if nonempty_lines == 1 { "file" } else { "files" }
+        ),
+        "grep" | "codesearch" => format!(
+            "Found {nonempty_lines} {}",
+            if nonempty_lines == 1 {
+                "match"
+            } else {
+                "matches"
+            }
+        ),
+        "exec" | "bash" | "pty_exec" => {
+            if let Some(code) = parse_exit_code(output) {
+                format!("Command exited {code}")
+            } else if ok {
+                "Command completed".to_string()
+            } else {
+                "Command failed".to_string()
+            }
+        }
+        "write" | "edit" | "multiedit" | "apply_patch" => {
+            if let Some(summary) = output.lines().find(|line| !line.trim().is_empty()) {
+                sanitize_output_line(&tilde_path_in_line(summary))
+            } else if ok {
+                "Update applied".to_string()
+            } else {
+                "Update failed".to_string()
+            }
+        }
+        _ => {
+            if clean_first_line.is_empty() {
+                if ok {
+                    "Done".to_string()
+                } else {
+                    "Failed".to_string()
+                }
+            } else {
+                clean_first_line.chars().take(96).collect()
+            }
+        }
+    }
+}
+
+fn is_editing_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name.to_ascii_lowercase().as_str(),
+        "write" | "edit" | "multiedit" | "apply_patch"
+    )
+}
+
+fn parse_exit_code(output: &str) -> Option<i32> {
+    output
+        .lines()
+        .next()
+        .and_then(|line| line.strip_prefix("exit_code="))
+        .and_then(|code| code.trim().parse::<i32>().ok())
+}
+
 /// Extract the most meaningful short argument from a tool call for inline display.
 fn extract_key_arg(tool: &str, arguments: &str) -> String {
     let Ok(args) = serde_json::from_str::<serde_json::Value>(arguments) else {
         return String::new();
     };
+    if tool.eq_ignore_ascii_case("apply_patch") {
+        if let Some(patch_text) = args
+            .get("patch_text")
+            .or_else(|| args.get("patch"))
+            .and_then(|v| v.as_str())
+        {
+            if let Some(path) = extract_patch_target(patch_text) {
+                let display = tilde_path_in_line(&path);
+                let short: String = display.chars().take(60).collect();
+                return if short.len() < display.chars().count() {
+                    format!("{short}…")
+                } else {
+                    short
+                };
+            }
+            return "patch".to_string();
+        }
+    }
     // Path-like tools
     if let Some(p) = args
         .get("path")
@@ -648,15 +745,14 @@ fn format_elapsed(d: std::time::Duration) -> String {
 /// Emit one combined tool-call summary line for the entire transcript.
 ///
 /// - **Expanded** (`tool_details = true`): renders each message individually.
-/// - **Collapsed** (`tool_details = false`): one `▶ N tool calls (Ctrl+D to expand)` line
+/// - **Collapsed** (`tool_details = false`): one compact
+///   `▶ last_tool(key_arg) + N tool calls (ctrl+o to expand)` line
 ///   in normal (non-dim) colour.  Only called once per transcript — at the
 ///   position of the *last* batch of `Tool` messages so it appears just before
 ///   the final assistant response.
 fn emit_combined_tool_summary(
     lines: &mut Vec<Line<'static>>,
     pending: &[&StoredMessage],
-    total_tools: usize,
-    total_failures: usize,
     tool_details: bool,
     tool_args_map: &HashMap<String, String>,
 ) {
@@ -668,22 +764,100 @@ fn emit_combined_tool_summary(
             append_tool_message_lines(lines, msg, true, tool_args_map);
         }
     } else {
+        let latest = pending.last().copied();
+        let latest_name = latest
+            .and_then(|m| m.tool_name.as_deref())
+            .unwrap_or("tool");
+        let latest_key_arg = latest
+            .and_then(|m| m.tool_call_id.as_ref())
+            .and_then(|id| tool_args_map.get(id))
+            .map(|args| extract_key_arg(latest_name, args))
+            .unwrap_or_default();
+        let latest_label = if latest_key_arg.is_empty() {
+            latest_name.to_string()
+        } else {
+            format!("{latest_name}({latest_key_arg})")
+        };
+        let batch_total = pending.len();
+        let prior_calls = batch_total.saturating_sub(1);
+        let count_part = if prior_calls > 0 {
+            format!(
+                "  +{prior_calls} more tool use{}",
+                if prior_calls == 1 { "" } else { "s" }
+            )
+        } else {
+            String::new()
+        };
+        let total_failures = pending
+            .iter()
+            .filter(|msg| {
+                parse_tool_payload(msg.content.as_str().unwrap_or("")).is_some_and(|(ok, _, _)| !ok)
+            })
+            .count();
         let fail_part = if total_failures > 0 {
             format!("  {} \u{2717}", total_failures)
         } else {
             String::new()
         };
         lines.push(Line::from(Span::styled(
-            format!(
-                "  \u{25b6} {} tool call{}{}  (Ctrl+D to expand)",
-                total_tools,
-                if total_tools == 1 { "" } else { "s" },
-                fail_part
-            ),
+            format!("  \u{25b6} {latest_label}{count_part}{fail_part}  (ctrl+o to expand)"),
             Style::default().fg(Color::Rgb(160, 165, 180)),
         )));
+        if let Some(latest_msg) = latest {
+            if is_editing_tool(latest_name) {
+                let content = latest_msg.content.as_str().unwrap_or("");
+                if let Some((ok, _truncated, output)) = parse_tool_payload(content) {
+                    if ok && output.contains("\n@@diff\n") {
+                        render_tool_output(lines, latest_name, &output, true, ok);
+                    }
+                }
+            }
+        }
         lines.push(Line::raw(""));
     }
+}
+
+fn render_live_activity_summary(
+    lines: &mut Vec<Line<'static>>,
+    activity: &[ActivityItem],
+    ms: u128,
+) {
+    let tool_calls: Vec<(&str, &str)> = activity
+        .iter()
+        .filter_map(|item| match item {
+            ActivityItem::ToolCall {
+                name, arguments, ..
+            } => Some((name.as_str(), arguments.as_str())),
+            _ => None,
+        })
+        .collect();
+    if tool_calls.is_empty() {
+        return;
+    }
+
+    let (last_name, last_args) = tool_calls[tool_calls.len() - 1];
+    let key_arg = extract_key_arg(last_name, last_args);
+    let latest = if key_arg.is_empty() {
+        last_name.to_string()
+    } else {
+        format!("{last_name}({key_arg})")
+    };
+    let more = tool_calls.len().saturating_sub(1);
+    let more_part = if more > 0 {
+        format!(
+            "  +{more} more tool use{}",
+            if more == 1 { "" } else { "s" }
+        )
+    } else {
+        String::new()
+    };
+
+    const TRI: &[char] = &['▶', '▸', '▹', '▻'];
+    let tri = TRI[(ms / 120 % TRI.len() as u128) as usize];
+    lines.push(Line::from(Span::styled(
+        format!("  {tri} {latest}{more_part}  (ctrl+o to expand)"),
+        Style::default().fg(Color::Rgb(160, 165, 180)),
+    )));
 }
 
 /// Render a compact live feed of tool calls while a run is in progress.
@@ -780,33 +954,12 @@ fn render_live_activity_lines(lines: &mut Vec<Line<'static>>, activity: &[Activi
                     Span::styled(header_text, header_style),
                 ]));
 
-                // Output preview for completed tool calls.
+                // Summary for completed tool calls (no raw stdout/file dumps).
                 if let Some((_, output)) = result {
                     let decoded = extract_tool_output_text(output);
-                    let output_lines: Vec<String> = decoded
-                        .lines()
-                        .filter(|l| !l.trim().is_empty())
-                        .map(|l| sanitize_output_line(&tilde_path_in_line(l)))
-                        .collect();
-                    let total = output_lines.len();
-                    const PREVIEW: usize = 3;
-
-                    for (i, line) in output_lines.iter().take(PREVIEW).enumerate() {
-                        let capped: String = line.chars().take(90).collect();
-                        // First line gets └ connector; subsequent lines align with it.
-                        let prefix = if i == 0 { "└  " } else { "   " };
-                        lines.push(Line::from(Span::styled(
-                            format!("{prefix}{capped}"),
-                            out_style,
-                        )));
-                    }
-                    if total > PREVIEW {
-                        lines.push(Line::from(Span::styled(
-                            format!("… +{} lines (Ctrl+D to expand)", total - PREVIEW),
-                            Style::default()
-                                .fg(Color::Rgb(80, 85, 100))
-                                .add_modifier(Modifier::DIM),
-                        )));
+                    let summary = summarize_tool_result(name, &decoded, is_ok);
+                    if !summary.is_empty() {
+                        lines.push(Line::from(Span::styled(format!("└  {summary}"), out_style)));
                     }
                 }
             }
@@ -847,22 +1000,6 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
 
     let mut lines = Vec::new();
 
-    // Pre-compute global tool totals so collapsed mode can show ONE combined
-    // summary line (instead of one-per-batch) at the last batch position.
-    let total_tools: usize = chat
-        .messages
-        .iter()
-        .filter(|m| m.role == MessageRole::Tool)
-        .count();
-    let total_tool_failures: usize = chat
-        .messages
-        .iter()
-        .filter(|m| {
-            m.role == MessageRole::Tool
-                && parse_tool_payload(m.content.as_str().unwrap_or(""))
-                    .is_some_and(|(ok, _, _)| !ok)
-        })
-        .count();
     // Index of the last Tool message so we know which batch is the last one.
     let last_tool_idx = chat
         .messages
@@ -889,18 +1026,11 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
             if chat.tool_details {
                 // Expanded: render each tool message individually.
                 for m in &pending_tools {
-                    append_tool_message_lines(&mut lines, m, true, &tool_args_map);
+                    append_tool_message_lines(&mut lines, m, chat.output_details, &tool_args_map);
                 }
             } else if pending_includes_last && !collapsed_summary_shown {
                 // Collapsed: this is the last batch — show ONE combined summary.
-                emit_combined_tool_summary(
-                    &mut lines,
-                    &pending_tools,
-                    total_tools,
-                    total_tool_failures,
-                    false,
-                    &tool_args_map,
-                );
+                emit_combined_tool_summary(&mut lines, &pending_tools, false, &tool_args_map);
                 collapsed_summary_shown = true;
             }
             // Earlier batches in collapsed mode are silently dropped (combined).
@@ -911,6 +1041,7 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
             &mut lines,
             msg,
             chat.tool_details,
+            chat.output_details,
             &tool_args_map,
             chat.show_reasoning,
         );
@@ -919,17 +1050,10 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
     if !pending_tools.is_empty() {
         if chat.tool_details {
             for m in &pending_tools {
-                append_tool_message_lines(&mut lines, m, true, &tool_args_map);
+                append_tool_message_lines(&mut lines, m, chat.output_details, &tool_args_map);
             }
-        } else if !collapsed_summary_shown && total_tools > 0 {
-            emit_combined_tool_summary(
-                &mut lines,
-                &pending_tools,
-                total_tools,
-                total_tool_failures,
-                false,
-                &tool_args_map,
-            );
+        } else if !collapsed_summary_shown {
+            emit_combined_tool_summary(&mut lines, &pending_tools, false, &tool_args_map);
         }
     }
     // Show the in-flight user prompt immediately (before backend confirms it)
@@ -971,9 +1095,7 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
             if idx < truncated.len() {
                 let mut spans = vec![Span::styled(
                     "◦  ",
-                    Style::default()
-                        .fg(Color::Blue)
-                        .add_modifier(Modifier::DIM),
+                    Style::default().fg(Color::Blue).add_modifier(Modifier::DIM),
                 )];
                 spans.extend(truncated[idx].spans.iter().cloned());
                 truncated[idx] = Line::from(spans);
@@ -1021,7 +1143,11 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
             .any(|item| matches!(item, ActivityItem::ToolCall { .. }));
 
         if has_tool_calls {
-            render_live_activity_lines(&mut lines, &chat.activity, ms);
+            if chat.tool_details {
+                render_live_activity_lines(&mut lines, &chat.activity, ms);
+            } else {
+                render_live_activity_summary(&mut lines, &chat.activity, ms);
+            }
             // Elapsed as a very dim sub-line after the tool feed.
             if let Some(started) = chat.run_started_at {
                 lines.push(Line::from(Span::styled(
@@ -1038,7 +1164,7 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
             let thinking_hint = if chat.show_reasoning {
                 "thinking…"
             } else {
-                "thinking… [Ctrl+Y to show]"
+                "thinking… [ctrl+o to show]"
             };
             let mut thinking_spans = vec![
                 Span::styled("◆  ", Style::default().fg(Color::Cyan)),
@@ -1070,6 +1196,25 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
                 .add_modifier(Modifier::DIM),
         )));
         lines.push(Line::raw(""));
+    }
+
+    if chat.running.is_none() {
+        if let Some(error) = chat.activity.iter().rev().find_map(|item| match item {
+            ActivityItem::Failure { message } => Some(message.as_str()),
+            _ => None,
+        }) {
+            let clean = sanitize_output_line(error)
+                .chars()
+                .take(200)
+                .collect::<String>();
+            if !clean.trim().is_empty() {
+                lines.push(Line::from(Span::styled(
+                    format!("✗ {clean}"),
+                    Style::default().fg(Color::Rgb(205, 95, 95)),
+                )));
+                lines.push(Line::raw(""));
+            }
+        }
     }
 
     lines.push(Line::raw(""));
@@ -1266,12 +1411,42 @@ fn parse_hunk_header(header: &str) -> Option<(usize, usize)> {
     }
 }
 
+fn extract_patch_target(patch_text: &str) -> Option<String> {
+    for line in patch_text.lines() {
+        if let Some(path) = line.strip_prefix("+++ ") {
+            let trimmed = path.trim().trim_start_matches("b/");
+            if !trimmed.is_empty() && trimmed != "/dev/null" {
+                return Some(trimmed.to_string());
+            }
+        }
+        if let Some(path) = line.strip_prefix("*** Update File: ") {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        if let Some(path) = line.strip_prefix("*** Add File: ") {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Extract a file path from a tool description line like
 /// `"edit applied (1 replacements) to /very/long/path/file.py"`.
 ///
 /// Returns the full path with `~` replacing `$HOME` for readability.
 /// Falls back to the description itself.
 fn extract_filename(desc: &str) -> String {
+    if let Some(path) = desc.strip_prefix("file:") {
+        let path = path.trim();
+        if !path.is_empty() {
+            return tilde_path(path);
+        }
+    }
     for token in desc.split_whitespace().rev() {
         if token.contains('/') {
             return tilde_path(token);
@@ -1521,4 +1696,36 @@ pub(super) fn find_prev(state: &mut AppState, chat: &mut ChatState, viewport_h: 
         format!("match {}/{}", prev_current + 1, matches.len()),
         Duration::from_secs(2),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_key_arg_for_apply_patch_prefers_target_file() {
+        let args = serde_json::json!({
+            "patch_text": "*** Begin Patch\n*** Update File: crates/rustcode-memories/src/phase1.rs\n@@\n-old\n+new\n*** End Patch\n"
+        })
+        .to_string();
+        let key = extract_key_arg("apply_patch", &args);
+        assert_eq!(key, "crates/rustcode-memories/src/phase1.rs");
+    }
+
+    #[test]
+    fn extract_patch_target_supports_unified_and_codex_headers() {
+        let unified = "--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-old\n+new\n";
+        let codex = "*** Begin Patch\n*** Update File: src/lib.rs\n@@\n-old\n+new\n*** End Patch\n";
+        assert_eq!(
+            extract_patch_target(unified),
+            Some("src/main.rs".to_string())
+        );
+        assert_eq!(extract_patch_target(codex), Some("src/lib.rs".to_string()));
+    }
+
+    #[test]
+    fn parse_hunk_header_extracts_old_and_new_starts() {
+        let parsed = parse_hunk_header("@@ -284,7 +284,6 @@").expect("hunk should parse");
+        assert_eq!(parsed, (283, 283));
+    }
 }
