@@ -436,7 +436,11 @@ pub(super) fn tilde_path(path: &str) -> String {
 
 /// Read the file at `args["path"]` (resolved against `workspace_root`) and
 /// return the 1-based line number where `needle` first appears.
-/// Falls back to 1 if the file can't be read or the text isn't found.
+///
+/// First attempts an exact substring match.  If that fails, falls back to
+/// finding the first "distinctive" line of `needle` inside the file on a
+/// trimmed basis, then back-calculates the start line.  Returns 1 if the
+/// file cannot be read or the text cannot be located.
 pub(super) fn find_text_start_line(
     workspace_root: &Path,
     args: &serde_json::Value,
@@ -452,11 +456,37 @@ pub(super) fn find_text_start_line(
     let Ok(contents) = std::fs::read_to_string(&abs_path) else {
         return 1;
     };
-    // Find the byte offset of the needle in the file.
+
+    // Fast path: exact substring match.
     if let Some(byte_offset) = contents.find(needle) {
-        // Count newlines before that offset to get the 1-based line number.
-        contents[..byte_offset].lines().count() + 1
-    } else {
-        1
+        return contents[..byte_offset].lines().count() + 1;
     }
+
+    // Fuzzy fallback: find the first distinctive line of needle in the file.
+    // "Distinctive" means: trimmed length >= 6 and not composed entirely of
+    // punctuation/brackets (avoids false matches on lines like `{`, `};`, etc.).
+    let file_lines: Vec<&str> = contents.lines().collect();
+    let needle_lines: Vec<&str> = needle.lines().collect();
+    for (needle_idx, needle_line) in needle_lines.iter().enumerate() {
+        let trimmed = needle_line.trim();
+        if trimmed.len() < 6
+            || trimmed
+                .chars()
+                .all(|c| "{}();,[]<>/*+-=|&^%#@!~`".contains(c) || c.is_whitespace())
+        {
+            continue;
+        }
+        // Search for this trimmed line in the file.
+        for (file_idx, file_line) in file_lines.iter().enumerate() {
+            if file_line.trim() == trimmed {
+                // Back-calculate where the needle starts in the file.
+                let start = file_idx.saturating_sub(needle_idx) + 1;
+                return start;
+            }
+        }
+        // Only attempt the first distinctive line to avoid wrong matches.
+        break;
+    }
+
+    1
 }

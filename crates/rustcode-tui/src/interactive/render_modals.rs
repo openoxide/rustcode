@@ -91,7 +91,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
 
             let x = rows[0]
                 .x
-                .saturating_add(4)
+                .saturating_add(3)
                 .saturating_add(query.chars().count() as u16);
             let y = rows[0].y.saturating_add(1);
             if x < area.x + area.width && y < area.y + area.height {
@@ -158,7 +158,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
 
             let x = rows[0]
                 .x
-                .saturating_add(4)
+                .saturating_add(3)
                 .saturating_add(query.chars().count() as u16);
             let y = rows[0].y.saturating_add(1);
             if x < area.x + area.width && y < area.y + area.height {
@@ -232,7 +232,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
 
             let x = rows[0]
                 .x
-                .saturating_add(4)
+                .saturating_add(3)
                 .saturating_add(query.chars().count() as u16);
             let y = rows[0].y.saturating_add(1);
             if x < area.x + area.width && y < area.y + area.height {

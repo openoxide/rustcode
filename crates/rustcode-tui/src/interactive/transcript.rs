@@ -254,16 +254,29 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
         if has_tool_calls {
             if chat.tool_details {
                 render_live_activity_lines(&mut lines, &chat.activity, ms);
+                // In expanded mode keep elapsed as a trailing dim line.
+                if let Some(started) = chat.run_started_at {
+                    lines.push(Line::from(Span::styled(
+                        format!("   {}", format_elapsed(started.elapsed())),
+                        Style::default()
+                            .fg(Color::Rgb(50, 55, 65))
+                            .add_modifier(Modifier::DIM),
+                    )));
+                }
             } else {
                 render_live_activity_summary(&mut lines, &chat.activity, ms);
-            }
-            if let Some(started) = chat.run_started_at {
-                lines.push(Line::from(Span::styled(
-                    format!("   {}", format_elapsed(started.elapsed())),
-                    Style::default()
-                        .fg(Color::Rgb(50, 55, 65))
-                        .add_modifier(Modifier::DIM),
-                )));
+                // In collapsed mode inline elapsed into the summary line so it
+                // doesn't float as a disconnected standalone line.
+                if let Some(started) = chat.run_started_at {
+                    if let Some(last) = lines.last_mut() {
+                        last.spans.push(Span::styled(
+                            format!("  {}", format_elapsed(started.elapsed())),
+                            Style::default()
+                                .fg(Color::Rgb(70, 75, 90))
+                                .add_modifier(Modifier::DIM),
+                        ));
+                    }
+                }
             }
         } else if chat.live_assistant.trim().is_empty() {
             const FRAMES: &[char] = &['◐', '◓', '◑', '◒'];
