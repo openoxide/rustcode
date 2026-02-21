@@ -278,6 +278,47 @@ mod tests {
     }
 
     #[test]
+    fn extract_retry_after_ms_header() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after-ms", "1500".parse().unwrap());
+        assert_eq!(extract_retry_after_header(&headers), Some(2)); // rounds up
+    }
+
+    #[test]
+    fn extract_retry_after_secs_header() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after", "30".parse().unwrap());
+        assert_eq!(extract_retry_after_header(&headers), Some(30));
+    }
+
+    #[test]
+    fn extract_retry_after_ms_takes_priority() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after-ms", "5000".parse().unwrap());
+        headers.insert("retry-after", "60".parse().unwrap());
+        assert_eq!(extract_retry_after_header(&headers), Some(5));
+    }
+
+    #[test]
+    fn extract_retry_after_header_missing() {
+        let headers = reqwest::header::HeaderMap::new();
+        assert_eq!(extract_retry_after_header(&headers), None);
+    }
+
+    #[test]
+    fn classify_with_headers_overrides_retry_after() {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("retry-after", "45".parse().unwrap());
+        let kind = classify_http_error_with_headers(429, "too many requests", &headers);
+        assert!(matches!(
+            kind,
+            LlmErrorKind::RateLimit {
+                retry_after_secs: 45
+            }
+        ));
+    }
+
+    #[test]
     fn classified_error_display_contains_kind() {
         let err = LlmError::Classified {
             kind: LlmErrorKind::RateLimit {
@@ -305,13 +346,59 @@ pub trait LlmClient: Send + Sync {
 pub(crate) const HTTP_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub(crate) const HTTP_RESPONSE_HEADER_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const HTTP_RESPONSE_BODY_TIMEOUT: Duration = Duration::from_secs(30);
-pub(crate) const HTTP_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const HTTP_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub(crate) fn llm_http_client() -> Result<reqwest::Client, LlmError> {
     reqwest::Client::builder()
         .connect_timeout(HTTP_CONNECT_TIMEOUT)
+        .tcp_keepalive(Duration::from_secs(30))
+        .pool_idle_timeout(Duration::from_secs(90))
         .build()
         .map_err(|err| LlmError::Transport(format!("failed to build http client: {err}")))
+}
+
+/// Extract a `retry-after` hint from HTTP response headers.
+///
+/// Supports both `retry-after-ms` (milliseconds, priority) and `retry-after`
+/// (seconds) headers. Returns seconds (rounded up for ms values).
+///
+/// # Errors
+///
+/// Returns `None` if neither header is present or parseable.
+#[must_use]
+pub(crate) fn extract_retry_after_header(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    if let Some(val) = headers.get("retry-after-ms").and_then(|v| v.to_str().ok()) {
+        if let Ok(ms) = val.parse::<u64>() {
+            return Some((ms + 999) / 1000);
+        }
+    }
+    if let Some(val) = headers.get("retry-after").and_then(|v| v.to_str().ok()) {
+        if let Ok(secs) = val.parse::<u64>() {
+            return Some(secs);
+        }
+    }
+    None
+}
+
+/// Classify an HTTP error response, applying `retry-after` header hints.
+///
+/// Calls [`classify_http_error`] and overrides `retry_after_secs` in
+/// [`LlmErrorKind::RateLimit`] when the HTTP headers provide a nonzero value.
+#[must_use]
+pub(crate) fn classify_http_error_with_headers(
+    status: u16,
+    body: &str,
+    headers: &reqwest::header::HeaderMap,
+) -> LlmErrorKind {
+    let mut kind = classify_http_error(status, body);
+    if let (Some(secs), LlmErrorKind::RateLimit { retry_after_secs }) =
+        (extract_retry_after_header(headers), &mut kind)
+    {
+        if *retry_after_secs == 0 {
+            *retry_after_secs = secs;
+        }
+    }
+    kind
 }
 
 /// A [`LlmClient`] wrapper that allows hot-swapping the underlying client at runtime.

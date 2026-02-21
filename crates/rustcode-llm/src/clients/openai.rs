@@ -143,13 +143,18 @@ impl LlmClient for OpenAiCompatibleClient {
 
         let status = response.status();
         if !status.is_success() {
+            let resp_headers = response.headers().clone();
             let body = timeout(HTTP_RESPONSE_BODY_TIMEOUT, response.text())
                 .await
                 .map_err(|_| {
                     LlmError::Transport("timed out reading provider error body".to_string())
                 })?
                 .map_err(|err| LlmError::Transport(err.to_string()))?;
-            let kind = crate::types::classify_http_error(status.as_u16(), &body);
+            let kind = crate::types::classify_http_error_with_headers(
+                status.as_u16(),
+                &body,
+                &resp_headers,
+            );
             return Err(LlmError::Classified {
                 kind,
                 message: format!(
@@ -299,11 +304,16 @@ impl LlmClient for OpenAiCompatibleClient {
 
         let status = response.status();
         if !status.is_success() {
+            let resp_headers = response.headers().clone();
             let body = timeout(HTTP_RESPONSE_BODY_TIMEOUT, response.text())
                 .await
                 .map_err(|_| LlmError::Transport("timed out reading provider body".to_string()))?
                 .map_err(|err| LlmError::Transport(err.to_string()))?;
-            let kind = crate::types::classify_http_error(status.as_u16(), &body);
+            let kind = crate::types::classify_http_error_with_headers(
+                status.as_u16(),
+                &body,
+                &resp_headers,
+            );
             return Err(LlmError::Classified {
                 kind,
                 message: format!(

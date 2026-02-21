@@ -79,14 +79,14 @@ fn system_prompt_model_hints() {
 fn retry_policy_delays() {
     let policy = retry::RetryPolicy::default();
 
-    // Check exponential backoff
-    let delay1 = policy.delay(1);
-    let delay2 = policy.delay(2);
-    let delay3 = policy.delay(3);
+    // Check exponential backoff with ~15% jitter
+    let d1 = policy.delay(1).as_millis() as u64;
+    let d2 = policy.delay(2).as_millis() as u64;
+    let d3 = policy.delay(3).as_millis() as u64;
 
-    assert_eq!(delay1.as_millis(), 2000); // 2s
-    assert_eq!(delay2.as_millis(), 4000); // 4s
-    assert_eq!(delay3.as_millis(), 8000); // 8s
+    assert!(d1 >= 2000 && d1 <= 2300, "attempt 1: {d1}ms");
+    assert!(d2 >= 4000 && d2 <= 4600, "attempt 2: {d2}ms");
+    assert!(d3 >= 8000 && d3 <= 9200, "attempt 3: {d3}ms");
 }
 
 #[test]
@@ -107,6 +107,7 @@ fn retry_identifies_retryable_errors() {
 async fn retry_stops_after_max_attempts() {
     let policy = retry::RetryPolicy {
         max_retries: 2,
+        stream_extra_retries: 0,
         initial_delay_ms: 10,
         backoff_factor: 2,
         max_delay_ms: 100,

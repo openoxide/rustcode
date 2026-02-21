@@ -28,6 +28,7 @@ mod approvals;
 mod core;
 mod fixtures;
 mod mcp;
+mod retry_tests;
 mod serve;
 mod session_management;
 mod tool_validation;
