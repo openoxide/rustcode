@@ -44,7 +44,7 @@ pub(super) fn render_approval_preview(
 
     if tool == "apply_patch" {
         let patch_text = get_arg_str(args, &["patch_text", "patch"]);
-        render_patch_text_preview(&mut out, &patch_text, &ext, w);
+        render_patch_text_preview(&mut out, &patch_text, &ext, w, workspace_root);
     } else if tool == "multiedit" {
         render_multiedit_preview(&mut out, args, &ext, w);
     } else if perm == "edit" {
