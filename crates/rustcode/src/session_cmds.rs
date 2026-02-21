@@ -16,6 +16,7 @@ pub fn handle_session_command(command: SessionCommand, json_output: bool) -> Res
                         "id": meta.id,
                         "title": meta.title,
                         "created_at": meta.created_at_unix_ms,
+                        "branch": meta.branch,
                     }));
                 }
                 let payload = serde_json::json!({
@@ -28,11 +29,12 @@ pub fn handle_session_command(command: SessionCommand, json_output: bool) -> Res
                 write_stdout_line(&format!("sessions={}", sessions.len()))?;
                 for meta in sessions {
                     write_stdout_line(&format!(
-                        "id={}\ttitle={}\tcreated_at={}\tupdated_at={}",
+                        "id={}\ttitle={}\tcreated_at={}\tupdated_at={}\tbranch={}",
                         meta.id,
                         meta.title.as_deref().unwrap_or(""),
                         meta.created_at_unix_ms,
-                        meta.updated_at_unix_ms
+                        meta.updated_at_unix_ms,
+                        meta.branch
                     ))?;
                 }
             }

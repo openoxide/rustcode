@@ -57,6 +57,7 @@ fn make_session() -> SessionInfo {
         cwd: "/tmp".to_string(),
         workspace_root: "/tmp".to_string(),
         model: "null".to_string(),
+        branch: String::new(),
         total_input_tokens: 0,
         total_output_tokens: 0,
         cost_usd: 0.0,

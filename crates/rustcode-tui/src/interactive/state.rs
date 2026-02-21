@@ -34,7 +34,8 @@ pub(super) fn compute_sessions_view(sessions: &[SessionInfo], filter: &str) -> V
     let mut out = Vec::new();
     for (idx, session) in sessions.iter().enumerate() {
         let title = session.title.as_deref().unwrap_or("");
-        let haystack = format!("{}\t{}", session.id, title).to_ascii_lowercase();
+        let branch = session.branch.trim();
+        let haystack = format!("{}\t{}\t{}", session.id, title, branch).to_ascii_lowercase();
         if haystack.contains(&needle) {
             out.push(idx);
         }

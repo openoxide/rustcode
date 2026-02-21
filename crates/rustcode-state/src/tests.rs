@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rustcode_core::session::{MessageRole, StoredToolCall};
@@ -172,4 +173,69 @@ fn update_session_model_round_trips() {
 
     let loaded = store.get_session(&session.id).expect("get");
     assert_eq!(loaded.model, "openai/gpt-5.3-codex");
+}
+
+#[test]
+fn create_session_stores_empty_branch_outside_git_repo() {
+    let root = temp_dir("branch-empty");
+    let workspace = root.join("workspace");
+    fs::create_dir_all(&workspace).expect("create workspace");
+    let store = SessionStore::with_root(root.join("sessions"));
+
+    let session = store
+        .create_session(
+            Some("t1".to_string()),
+            None,
+            &workspace,
+            &workspace,
+            "openai/gpt-test",
+        )
+        .expect("create session");
+
+    assert_eq!(session.branch, "");
+}
+
+#[test]
+fn create_session_stores_git_branch_name() {
+    if Command::new("git").arg("--version").output().is_err() {
+        return;
+    }
+
+    let root = temp_dir("branch-git");
+    let workspace = root.join("workspace");
+    fs::create_dir_all(&workspace).expect("create workspace");
+
+    let init = Command::new("git")
+        .args(["init", "-b", "session-branch-test"])
+        .current_dir(&workspace)
+        .output();
+    let init_ok = init.as_ref().is_ok_and(|out| out.status.success());
+    if !init_ok {
+        let fallback = Command::new("git")
+            .arg("init")
+            .current_dir(&workspace)
+            .output()
+            .expect("git init fallback");
+        assert!(fallback.status.success(), "git init must succeed");
+
+        let checkout = Command::new("git")
+            .args(["checkout", "-b", "session-branch-test"])
+            .current_dir(&workspace)
+            .output()
+            .expect("git checkout -b");
+        assert!(checkout.status.success(), "git checkout -b must succeed");
+    }
+
+    let store = SessionStore::with_root(root.join("sessions"));
+    let session = store
+        .create_session(
+            Some("t1".to_string()),
+            None,
+            &workspace,
+            &workspace,
+            "openai/gpt-test",
+        )
+        .expect("create session");
+
+    assert_eq!(session.branch, "session-branch-test");
 }

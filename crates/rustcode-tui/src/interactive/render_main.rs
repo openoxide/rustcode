@@ -71,6 +71,15 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
                     Span::raw("  "),
                     Span::styled(age, Style::default().add_modifier(Modifier::DIM)),
                 ]);
+                if !session.branch.trim().is_empty() {
+                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(
+                        format!("on {}", session.branch.trim()),
+                        Style::default()
+                            .fg(theme::MUTED)
+                            .add_modifier(Modifier::DIM),
+                    ));
+                }
                 ListItem::new(Line::from(spans))
             })
             .collect::<Vec<_>>()

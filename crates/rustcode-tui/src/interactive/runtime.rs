@@ -203,8 +203,18 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
 
     let mut last_screen_is_chat = matches!(state.screen, Screen::Chat(_));
 
+    // Periodic animation tick — ensures spinners, elapsed timers, and thinking
+    // animations update smoothly even when no engine messages or input arrive.
+    // 100ms (10 Hz) is enough for text-mode spinners/counters.
+    let mut animation_tick = tokio::time::interval(std::time::Duration::from_millis(100));
+    animation_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
         tokio::select! {
+            // Bias toward engine messages so streaming chunks are processed
+            // before we spend time drawing or handling input.
+            biased;
+
             Some(msg) = state.rx.recv() => {
                 events::process_message(&mut state, msg);
                 frame_requester.schedule_frame();
@@ -247,6 +257,10 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
                         frame_requester.schedule_frame();
                     }
                 }
+            }
+            // Periodic tick for animations (spinners, elapsed time, thinking dots).
+            _ = animation_tick.tick() => {
+                frame_requester.schedule_frame();
             }
         }
     }

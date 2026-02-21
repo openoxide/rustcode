@@ -77,6 +77,7 @@ pub fn new_draft_session(
         cwd: cwd.display().to_string(),
         workspace_root: workspace_root.display().to_string(),
         model,
+        branch: String::new(),
         total_input_tokens: 0,
         total_output_tokens: 0,
         cost_usd: 0.0,

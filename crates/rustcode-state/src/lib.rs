@@ -3,6 +3,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rand::RngCore;
@@ -67,6 +68,9 @@ impl SessionStore {
 
         let id = new_session_id();
         let now = now_unix_ms()?;
+        let branch = detect_git_branch(workspace_root)
+            .or_else(|| detect_git_branch(cwd))
+            .unwrap_or_default();
         let info = SessionInfo {
             id: id.clone(),
             title,
@@ -76,6 +80,7 @@ impl SessionStore {
             cwd: cwd.display().to_string(),
             workspace_root: workspace_root.display().to_string(),
             model: model.to_string(),
+            branch,
             total_input_tokens: 0,
             total_output_tokens: 0,
             cost_usd: 0.0,
@@ -432,6 +437,24 @@ fn new_message_id() -> MessageId {
         let _ = write!(rand_hex, "{b:02x}");
     }
     format!("m-{now}-{rand_hex}")
+}
+
+fn detect_git_branch(path: &Path) -> Option<String> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(path)
+        .args(["symbolic-ref", "--short", "-q", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if branch.is_empty() {
+        None
+    } else {
+        Some(branch)
+    }
 }
 
 #[cfg(unix)]

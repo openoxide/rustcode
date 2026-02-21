@@ -58,6 +58,13 @@ pub struct SessionInfo {
     /// Model id as configured at runtime (e.g. "openai/gpt-4.1").
     pub model: String,
 
+    /// Git branch at session creation time.
+    ///
+    /// Empty when the workspace is not a git repository, git is unavailable,
+    /// or HEAD is detached.
+    #[serde(default)]
+    pub branch: String,
+
     /// Cumulative input tokens from all LLM API responses in this session.
     #[serde(default)]
     pub total_input_tokens: u64,

@@ -44,6 +44,7 @@ fn sessions_screen_renders_title_and_help() {
             cwd: "/tmp".to_string(),
             workspace_root: "/tmp".to_string(),
             model: "null".to_string(),
+            branch: "main".to_string(),
             total_input_tokens: 0,
             total_output_tokens: 0,
             cost_usd: 0.0,
@@ -96,4 +97,5 @@ fn sessions_screen_renders_title_and_help() {
         "text={text}"
     );
     assert!(text.contains("s-1"), "text={text}");
+    assert!(text.contains("on main"), "text={text}");
 }
