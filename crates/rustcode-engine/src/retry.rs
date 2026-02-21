@@ -84,8 +84,8 @@ impl RetryPolicy {
 
     /// Check if more retries are allowed for the given attempt and error.
     #[must_use]
-    pub fn should_retry(&self, attempt: u32) -> bool {
-        attempt <= self.max_retries
+    pub fn should_retry(&self, attempt: u32, error_msg: &str) -> bool {
+        attempt <= self.effective_max_retries(error_msg)
     }
 }
 

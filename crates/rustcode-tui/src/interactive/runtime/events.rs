@@ -159,10 +159,10 @@ pub(super) fn drain_messages(state: &mut AppState) {
                     let auto_follow_tail = chat.focus != ChatFocus::Activity || was_at_tail;
 
                     if let Some(item) = item {
-                        chat.activity.push(item);
+                        chat.activity.push_back(item);
                     }
                     while chat.activity.len() > 200 {
-                        chat.activity.remove(0);
+                        chat.activity.pop_front();
                         if chat.activity_selected > 0 {
                             chat.activity_selected -= 1;
                         }
@@ -206,7 +206,7 @@ pub(super) fn drain_messages(state: &mut AppState) {
                                 .iter()
                                 .any(|item| matches!(item, ActivityItem::Failure { .. }));
                             if !has_failure {
-                                chat.activity.push(ActivityItem::Failure {
+                                chat.activity.push_back(ActivityItem::Failure {
                                     message: msg.clone(),
                                     raw_detail: message.clone(),
                                 });
@@ -244,6 +244,11 @@ pub(super) fn drain_messages(state: &mut AppState) {
                                         }
                                     }
                                 }
+                                chat.live_assistant.clear();
+                                chat.live_reasoning.clear();
+                            } else {
+                                // On failure, clear stale streaming buffers so the transcript
+                                // renders cleanly and scroll offsets remain valid.
                                 chat.live_assistant.clear();
                                 chat.live_reasoning.clear();
                             }

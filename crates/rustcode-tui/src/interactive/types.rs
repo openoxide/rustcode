@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use super::{
     AbortHandle, ActivityItem, ApprovalResponse, Arc, CancellationToken, InteractiveDefaults,
     InteractiveMsg, InteractiveSubmitMode, MessageRole, ResolvedConfig, SessionInfo, Size,
@@ -253,7 +255,7 @@ pub(super) enum ChatFocus {
 pub(super) struct ChatState {
     pub(super) session: SessionInfo,
     pub(super) messages: Vec<StoredMessage>,
-    pub(super) scroll: u16,
+    pub(super) scroll: usize,
     pub(super) live_assistant: String,
     pub(super) live_reasoning: String,
     /// Whether reasoning/thinking blocks are visible in transcript.
@@ -270,7 +272,7 @@ pub(super) struct ChatState {
     pub(super) history_cursor: Option<usize>,
     pub(super) history_draft: String,
     pub(super) focus: ChatFocus,
-    pub(super) activity: Vec<ActivityItem>,
+    pub(super) activity: VecDeque<ActivityItem>,
     pub(super) activity_selected: usize,
     pub(super) details_open: bool,
     /// Whether the activity panel is hidden (toggled with Ctrl+W).
@@ -304,7 +306,7 @@ pub(super) struct ChatState {
     /// Last `max_scroll` value computed by the render pass — updated each frame
     /// via `Cell` interior mutability so the scroll event handler can clamp
     /// `scroll` immediately without phantom over-scrolling.
-    pub(super) last_max_scroll: std::cell::Cell<u16>,
+    pub(super) last_max_scroll: std::cell::Cell<usize>,
     /// Instant when the current run started — cleared when the run ends.
     pub(super) run_started_at: Option<Instant>,
     /// Elapsed duration of the most recently completed run.

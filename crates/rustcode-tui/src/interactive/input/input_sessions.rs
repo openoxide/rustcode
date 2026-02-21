@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use super::{
     build_prompt_history, compute_sessions_view, execute_command, open_command_palette, push_toast,
     AppState, ChatFocus, ChatState, CommandId, Duration, KeyCode, KeyEvent, KeyModifiers, Screen,
@@ -59,7 +61,7 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         history_cursor: None,
                         history_draft: String::new(),
                         focus: ChatFocus::Composer,
-                        activity: Vec::new(),
+                        activity: VecDeque::new(),
                         activity_selected: 0,
                         details_open: false,
                         activity_hidden: false,
@@ -184,7 +186,7 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 history_cursor: None,
                 history_draft: String::new(),
                 focus: ChatFocus::Composer,
-                activity: Vec::new(),
+                activity: VecDeque::new(),
                 activity_selected: 0,
                 details_open: false,
                 activity_hidden: false,

@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use rustcode_state::SessionStore;
@@ -20,7 +21,7 @@ fn make_chat_state_with_focus(session: SessionInfo, focus: ChatFocus) -> ChatSta
         history_cursor: None,
         history_draft: String::new(),
         focus,
-        activity: Vec::new(),
+        activity: VecDeque::new(),
         activity_selected: 0,
         details_open: false,
         activity_hidden: true,

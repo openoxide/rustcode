@@ -60,8 +60,10 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
     };
     let end = (start + available).min(chat.activity.len());
 
-    let items = chat.activity[start..end]
+    let items = chat.activity
         .iter()
+        .skip(start)
+        .take(end - start)
         .map(|item| {
             let (tag, style) = match item {
                 ActivityItem::CommandAccepted { .. } => ("cmd", Style::default().fg(theme::ACCENT)),

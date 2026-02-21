@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use rustcode_core::SessionInfo;
 
 use super::super::{
@@ -114,7 +116,7 @@ pub(crate) fn open_session(state: &mut AppState, session: SessionInfo) {
         history_cursor: None,
         history_draft: String::new(),
         focus: ChatFocus::Composer,
-        activity: Vec::new(),
+        activity: VecDeque::new(),
         activity_selected: 0,
         details_open: false,
         activity_hidden: false,

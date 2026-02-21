@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use ratatui::backend::TestBackend;
@@ -51,11 +52,11 @@ fn activity_details_modal_renders_tool_arguments() {
             history_cursor: None,
             history_draft: String::new(),
             focus: ChatFocus::Activity,
-            activity: vec![ActivityItem::ToolCall {
+            activity: VecDeque::from([ActivityItem::ToolCall {
                 id: "tc-1".to_string(),
                 name: "read".to_string(),
                 arguments: "{\"path\":\"README.md\"}".to_string(),
-            }],
+            }]),
             activity_selected: 0,
             details_open: true,
             activity_hidden: true,

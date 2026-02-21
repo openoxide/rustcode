@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
 };
@@ -111,7 +113,7 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                 history_cursor: None,
                 history_draft: String::new(),
                 focus: ChatFocus::Composer,
-                activity: Vec::new(),
+                activity: VecDeque::new(),
                 activity_selected: 0,
                 details_open: false,
                 activity_hidden: false,

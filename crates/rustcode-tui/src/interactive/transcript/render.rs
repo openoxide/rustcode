@@ -1,6 +1,6 @@
 //! Tool output rendering and live-activity feed for the transcript pane.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -283,7 +283,7 @@ pub(super) fn render_tool_output(
 /// Render a compact summary line of live tool calls (collapsed mode).
 pub(super) fn render_live_activity_summary(
     lines: &mut Vec<Line<'static>>,
-    activity: &[ActivityItem],
+    activity: &VecDeque<ActivityItem>,
     ms: u128,
 ) {
     let tool_calls: Vec<(&str, &str)> = activity
@@ -326,7 +326,7 @@ pub(super) fn render_live_activity_summary(
 /// Render a detailed live feed of tool calls while a run is in progress.
 pub(super) fn render_live_activity_lines(
     lines: &mut Vec<Line<'static>>,
-    activity: &[ActivityItem],
+    activity: &VecDeque<ActivityItem>,
     ms: u128,
 ) {
     const SPIN: &[char] = &['⠋', '⠙', '⠸', '⠴', '⠦', '⠇'];
@@ -351,13 +351,12 @@ pub(super) fn render_live_activity_lines(
         })
         .collect();
     let show_from = displayable.len().saturating_sub(8);
-    let show = &displayable[show_from..];
 
     let out_style = Style::default()
         .fg(theme::MUTED)
         .add_modifier(Modifier::DIM);
 
-    for item in show {
+    for item in displayable.iter().skip(show_from) {
         match item {
             ActivityItem::ToolCall {
                 id,

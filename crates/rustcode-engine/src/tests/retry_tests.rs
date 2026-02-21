@@ -48,9 +48,24 @@ fn should_retry_within_limit() {
         max_retries: 3,
         ..RetryPolicy::default()
     };
-    assert!(policy.should_retry(1));
-    assert!(policy.should_retry(3));
-    assert!(!policy.should_retry(4));
+    assert!(policy.should_retry(1, "rate_limit_exceeded"));
+    assert!(policy.should_retry(3, "rate_limit_exceeded"));
+    assert!(!policy.should_retry(4, "rate_limit_exceeded"));
+}
+
+#[test]
+fn should_retry_uses_effective_max_for_stream_errors() {
+    let policy = RetryPolicy {
+        max_retries: 3,
+        stream_extra_retries: 2,
+        ..RetryPolicy::default()
+    };
+    // Stream/transport errors should get 3 + 2 = 5 retries
+    assert!(policy.should_retry(4, "stream error: connection reset"));
+    assert!(policy.should_retry(5, "stream error: connection reset"));
+    assert!(!policy.should_retry(6, "stream error: connection reset"));
+    // Non-stream errors still limited to base max_retries (3)
+    assert!(!policy.should_retry(4, "rate_limit_exceeded"));
 }
 
 // ── is_retryable ────────────────────────────────────────────────────────

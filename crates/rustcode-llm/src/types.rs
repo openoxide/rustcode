@@ -351,6 +351,8 @@ pub(crate) const HTTP_STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 pub(crate) fn llm_http_client() -> Result<reqwest::Client, LlmError> {
     reqwest::Client::builder()
         .connect_timeout(HTTP_CONNECT_TIMEOUT)
+        .read_timeout(Duration::from_secs(300))
+        .timeout(Duration::from_secs(420))
         .tcp_keepalive(Duration::from_secs(30))
         .pool_idle_timeout(Duration::from_secs(90))
         .build()

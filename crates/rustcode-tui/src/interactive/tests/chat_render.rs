@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use ratatui::backend::TestBackend;
@@ -73,7 +74,7 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
             history_cursor: None,
             history_draft: String::new(),
             focus: ChatFocus::Composer,
-            activity: Vec::new(),
+            activity: VecDeque::new(),
             activity_selected: 0,
             details_open: false,
             activity_hidden: true,
@@ -133,7 +134,7 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
     assert!(text.contains("read"), "text={text}");
     assert!(text.contains("(ctrl+o to expand)"), "text={text}");
     assert!(text.contains("model:null"), "text={text}");
-    assert!(text.contains("mode:agent"), "text={text}");
+    assert!(text.contains("[Null]"), "text={text}"); // provider label
     // "ok=true" and "Output:" were removed in the new compact rendering
     assert!(!text.contains("ok=true"), "text={text}");
     assert!(!text.contains("Output:"), "text={text}");
@@ -212,7 +213,7 @@ fn chat_screen_hides_system_messages() {
             history_cursor: None,
             history_draft: String::new(),
             focus: ChatFocus::Composer,
-            activity: Vec::new(),
+            activity: VecDeque::new(),
             activity_selected: 0,
             details_open: false,
             activity_hidden: true,

@@ -386,8 +386,8 @@ fn jump_transcript_to_line(
         chat.scroll = 0;
         return;
     }
-    let max_scroll = total_lines.saturating_sub(viewport_h) as u16;
-    let scroll_top = line_idx.saturating_sub(2).min(max_scroll as usize) as u16;
+    let max_scroll = total_lines.saturating_sub(viewport_h);
+    let scroll_top = line_idx.saturating_sub(2).min(max_scroll);
     chat.scroll = max_scroll.saturating_sub(scroll_top);
 }
 

@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use super::super::{
     build_prompt_history, build_provider_entries, build_transcript_lines, composer_clear,
     compute_find_matches, compute_sessions_view, filter_files, filter_provider_entries, push_toast,
@@ -85,7 +87,7 @@ pub(crate) fn execute_command(state: &mut AppState, id: CommandId) {
                         history_cursor: None,
                         history_draft: String::new(),
                         focus: ChatFocus::Composer,
-                        activity: Vec::new(),
+                        activity: VecDeque::new(),
                         activity_selected: 0,
                         details_open: false,
                         activity_hidden: false,
