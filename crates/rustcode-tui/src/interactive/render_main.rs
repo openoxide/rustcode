@@ -213,13 +213,8 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
 
     // When the approval selector is shown, enlarge the bottom pane to fit
     // the vertical option list (options + hint line + 2 borders).
-    let bottom_height = if let Some(pending) = &app.pending_approval {
-        let perm = pending.request.permission.to_lowercase();
-        let opt_count: u16 = if perm == "write" || perm == "edit" || perm == "exec" {
-            3
-        } else {
-            2
-        };
+    let bottom_height = if app.pending_approval.is_some() {
+        let opt_count: u16 = 3;
         opt_count + 3 // options + hint + top/bottom borders
     } else {
         composer_height

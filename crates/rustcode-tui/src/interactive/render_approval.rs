@@ -51,18 +51,19 @@ pub(super) fn render_approval_selector(
     selected: usize,
 ) {
     let perm = req.permission.to_lowercase();
-    let is_edit = perm == "write" || perm == "edit";
-    let is_cmd = perm == "exec";
-    let options: &[&str] = if is_edit {
-        &["Allow once", "Allow all edits", "Deny"]
-    } else if is_cmd {
-        &["Allow once", "Allow all cmds", "Deny"]
-    } else {
-        &["Approve", "Deny"]
-    };
+    let is_command = matches!(perm.as_str(), "exec" | "bash" | "pty_exec");
+    let options = vec![
+        format!("Approve once [{}]", req.tool),
+        if is_command {
+            "Approve all commands in this directory".to_string()
+        } else {
+            "Approve all tools in this directory".to_string()
+        },
+        "Deny".to_string(),
+    ];
 
     let mut option_lines: Vec<Line<'static>> = Vec::new();
-    for (i, opt) in options.iter().enumerate() {
+    for (i, opt) in options.into_iter().enumerate() {
         if i == selected {
             option_lines.push(Line::from(Span::styled(
                 format!("  ❯ {opt}"),

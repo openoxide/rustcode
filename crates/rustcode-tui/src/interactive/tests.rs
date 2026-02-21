@@ -448,15 +448,16 @@ fn approval_modal_renders_tool_name() {
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
-    // Inline approval: "Approval" in selector title, tool name in transcript, "Approve" option
+    // Inline approval: "Approval" in selector title, tool name in transcript,
+    // and an explicit once option with tool name in brackets.
     assert!(text.contains("Approval"), "text={text}");
     assert!(text.contains("read"), "text={text}"); // tool name in transcript
     assert!(text.contains("test"), "text={text}"); // reason in transcript
-    assert!(text.contains("Approve"), "text={text}"); // option in selector
+    assert!(text.contains("Approve once [read]"), "text={text}"); // option in selector
 }
 
 #[test]
-fn approval_modal_shows_allow_all_edits_for_write() {
+fn approval_modal_shows_allow_all_tools_in_directory_for_write() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).expect("terminal");
 
@@ -556,8 +557,11 @@ fn approval_modal_shows_allow_all_edits_for_write() {
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
-    // Inline approval selector for write: "Allow all edits" option must be visible
-    assert!(text.contains("Allow all edits"), "text={text}");
+    // Inline approval selector for write: directory-scoped tool approval option.
+    assert!(
+        text.contains("Approve all tools in this directory"),
+        "text={text}"
+    );
 }
 
 #[test]
@@ -664,8 +668,11 @@ fn approval_modal_keeps_actions_visible_with_long_arguments() {
     let text = buffer_to_string(terminal.backend().buffer());
     // Inline selector: both options always visible regardless of content preview length
     // (selector is in a fixed-height composer area, not inline with preview)
-    assert!(text.contains("Allow once"), "text={text}");
-    assert!(text.contains("Allow all edits"), "text={text}");
+    assert!(text.contains("Approve once [write]"), "text={text}");
+    assert!(
+        text.contains("Approve all tools in this directory"),
+        "text={text}"
+    );
 }
 
 #[test]

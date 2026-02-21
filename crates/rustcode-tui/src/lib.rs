@@ -73,8 +73,8 @@ pub enum InteractiveMsg {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalResponse {
     AllowOnce,
-    AllowAllEdits,
-    AllowAllCommands,
+    AllowAllToolsInDirectory,
+    AllowAllCommandsInDirectory,
     Deny,
 }
 
@@ -131,14 +131,17 @@ struct TuiToolApprover {
 
 #[derive(Debug, Default)]
 struct ApprovalPolicy {
-    allow_all_edits: bool,
-    allow_all_commands: bool,
+    allow_all_tools_in_directory: bool,
+    allow_all_commands_in_directory: bool,
 }
 
 impl ApprovalPolicy {
     fn allows(&self, request: &ToolApprovalRequest) -> bool {
-        (self.allow_all_edits && is_edit_permission(&request.permission))
-            || (self.allow_all_commands && is_command_permission(&request.permission))
+        if is_command_permission(&request.permission) {
+            self.allow_all_commands_in_directory
+        } else {
+            self.allow_all_tools_in_directory
+        }
     }
 
     fn apply_response(
@@ -148,15 +151,15 @@ impl ApprovalPolicy {
     ) -> bool {
         match response {
             ApprovalResponse::AllowOnce => true,
-            ApprovalResponse::AllowAllEdits => {
-                if is_edit_permission(&request.permission) {
-                    self.allow_all_edits = true;
+            ApprovalResponse::AllowAllToolsInDirectory => {
+                if !is_command_permission(&request.permission) {
+                    self.allow_all_tools_in_directory = true;
                 }
                 true
             }
-            ApprovalResponse::AllowAllCommands => {
+            ApprovalResponse::AllowAllCommandsInDirectory => {
                 if is_command_permission(&request.permission) {
-                    self.allow_all_commands = true;
+                    self.allow_all_commands_in_directory = true;
                 }
                 true
             }
@@ -165,12 +168,11 @@ impl ApprovalPolicy {
     }
 }
 
-fn is_edit_permission(permission: &str) -> bool {
-    matches!(permission, "write" | "edit")
-}
-
 fn is_command_permission(permission: &str) -> bool {
-    permission == "exec"
+    matches!(
+        permission.to_ascii_lowercase().as_str(),
+        "exec" | "bash" | "pty_exec"
+    )
 }
 
 #[async_trait::async_trait]
@@ -363,12 +365,10 @@ mod tests {
     }
 
     #[test]
-    fn approval_policy_allows_expected_permission_groups() {
-        assert!(is_edit_permission("write"));
-        assert!(is_edit_permission("edit"));
-        assert!(!is_edit_permission("exec"));
-
+    fn approval_policy_classifies_command_permissions() {
         assert!(is_command_permission("exec"));
+        assert!(is_command_permission("bash"));
+        assert!(is_command_permission("pty_exec"));
         assert!(!is_command_permission("write"));
     }
 }

@@ -28,9 +28,8 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
             .request
             .permission
             .to_lowercase();
-        let is_edit = perm == "write" || perm == "edit";
-        let is_cmd = perm == "exec";
-        let options_count: usize = if is_edit || is_cmd { 3 } else { 2 };
+        let is_command = matches!(perm.as_str(), "exec" | "bash" | "pty_exec");
+        let options_count: usize = 3;
 
         match key.code {
             KeyCode::Left | KeyCode::Up => {
@@ -47,22 +46,23 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
                 let pending = state.pending_approval.take().unwrap();
                 let response = match state.approval_selection {
                     0 => ApprovalResponse::AllowOnce,
-                    1 if is_edit => ApprovalResponse::AllowAllEdits,
-                    1 if is_cmd => ApprovalResponse::AllowAllCommands,
+                    1 if is_command => ApprovalResponse::AllowAllCommandsInDirectory,
+                    1 => ApprovalResponse::AllowAllToolsInDirectory,
                     _ => ApprovalResponse::Deny,
                 };
                 let label = match response {
-                    ApprovalResponse::AllowOnce => "approved once",
-                    ApprovalResponse::AllowAllEdits => "approved all edits",
-                    ApprovalResponse::AllowAllCommands => "approved all commands",
-                    ApprovalResponse::Deny => "denied",
+                    ApprovalResponse::AllowOnce => {
+                        format!("approved once [{}]", pending.request.tool)
+                    }
+                    ApprovalResponse::AllowAllToolsInDirectory => {
+                        "approved all tools in this directory".to_string()
+                    }
+                    ApprovalResponse::AllowAllCommandsInDirectory => {
+                        "approved all commands in this directory".to_string()
+                    }
+                    ApprovalResponse::Deny => format!("denied [{}]", pending.request.tool),
                 };
-                push_toast(
-                    state,
-                    ToastVariant::Info,
-                    format!("{}: {label}", pending.request.tool),
-                    Duration::from_secs(2),
-                );
+                push_toast(state, ToastVariant::Info, label, Duration::from_secs(2));
                 let _ = pending.reply.send(response);
                 state.approval_selection = 0;
             }
@@ -71,7 +71,7 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
                 push_toast(
                     state,
                     ToastVariant::Info,
-                    format!("{}: denied", pending.request.tool),
+                    format!("denied [{}]", pending.request.tool),
                     Duration::from_secs(2),
                 );
                 let _ = pending.reply.send(ApprovalResponse::Deny);
