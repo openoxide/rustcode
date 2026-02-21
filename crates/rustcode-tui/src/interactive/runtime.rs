@@ -22,7 +22,7 @@ mod submit;
 use self::event_stream::TuiEvent;
 use self::events::{drain_messages, poll_provider_oauth};
 use self::frame_scheduler::FrameScheduler;
-use self::git::refresh_git_stat;
+use self::git::refresh_git_stat_async;
 pub(super) use self::submit::submit_prompt;
 
 /// Run the interactive TUI event loop using async `tokio::select!`.
@@ -190,7 +190,7 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
         llm_cell,
         git_stat: None,
     };
-    refresh_git_stat(&mut state);
+    refresh_git_stat_async(state.defaults.workspace_root.clone(), state.tx.clone());
 
     if let Some(prompt) = auto_submit {
         if !prompt.trim().is_empty() {
@@ -211,10 +211,6 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
 
     loop {
         tokio::select! {
-            // Bias toward engine messages so streaming chunks are processed
-            // before we spend time drawing or handling input.
-            biased;
-
             Some(msg) = state.rx.recv() => {
                 events::process_message(&mut state, msg);
                 frame_requester.schedule_frame();

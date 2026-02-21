@@ -97,5 +97,5 @@ fn sessions_screen_renders_title_and_help() {
         "text={text}"
     );
     assert!(text.contains("s-1"), "text={text}");
-    assert!(text.contains("on main"), "text={text}");
+    assert!(text.contains("[main]"), "text={text}");
 }

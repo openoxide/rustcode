@@ -50,15 +50,29 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
                 };
                 let id_short = &session.id;
                 let title = session.title.as_deref().unwrap_or("").trim();
+                let title = truncate_with_ellipsis(title, 32);
+                let has_title = !title.is_empty();
+                let branch = session.branch.trim();
                 let mut spans = vec![Span::styled(
                     fork_marker,
                     Style::default().fg(theme::ACCENT),
                 )];
-                if !title.is_empty() {
+                if has_title {
                     spans.push(Span::styled(
-                        title.to_string(),
+                        title,
                         Style::default().add_modifier(Modifier::BOLD),
                     ));
+                }
+                if !branch.is_empty() {
+                    if has_title {
+                        spans.push(Span::raw(" "));
+                    }
+                    spans.push(Span::styled(
+                        format!("[{branch}]"),
+                        Style::default().fg(theme::ACCENT),
+                    ));
+                }
+                if has_title || !branch.is_empty() {
                     spans.push(Span::raw("  "));
                 }
                 spans.extend([
@@ -71,15 +85,6 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
                     Span::raw("  "),
                     Span::styled(age, Style::default().add_modifier(Modifier::DIM)),
                 ]);
-                if !session.branch.trim().is_empty() {
-                    spans.push(Span::raw("  "));
-                    spans.push(Span::styled(
-                        format!("on {}", session.branch.trim()),
-                        Style::default()
-                            .fg(theme::MUTED)
-                            .add_modifier(Modifier::DIM),
-                    ));
-                }
                 ListItem::new(Line::from(spans))
             })
             .collect::<Vec<_>>()

@@ -1,20 +1,19 @@
 use rustcode_core::event::EventScope;
 
 use super::super::{
-    push_toast, ActivityItem, AppState, ChatFocus, Duration, EventPayload, InteractiveMsg,
+    push_toast, ActivityItem, AppState, ChatFocus, Duration, EventPayload, GitStat, InteractiveMsg,
     MessageRole, Modal, PendingApproval, ProviderManagerStep, Screen, ToastVariant,
 };
-use super::git::refresh_git_stat;
+use super::git::refresh_git_stat_async;
 
-/// Maximum messages to drain per draw frame in the async loop.
-const MAX_DRAIN_PER_FRAME: usize = 50;
-
-/// Drain up to [`MAX_DRAIN_PER_FRAME`] queued messages without blocking.
+/// Drain **all** queued messages without blocking.
 ///
-/// Used on draw frames to catch up with any messages that arrived between
-/// the last `select!` wakeup and the current draw.
+/// Called on draw frames to catch up with any messages that arrived between
+/// the last `select!` wakeup and the current render.  In the async
+/// architecture, render starvation is prevented by the `select!` loop
+/// itself, so there is no need to cap the drain count.
 pub(super) fn drain_messages(state: &mut AppState) {
-    for _ in 0..MAX_DRAIN_PER_FRAME {
+    loop {
         let msg = match state.rx.try_recv() {
             Ok(msg) => msg,
             Err(tokio::sync::mpsc::error::TryRecvError::Empty) => return,
@@ -211,9 +210,7 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
             state.approval_selection = 0;
         }
         InteractiveMsg::RunEnded { ok, message } => {
-            if ok {
-                refresh_git_stat(state);
-            }
+            // Phase 1: immediate state updates (non-blocking).
             if let Screen::Chat(chat) = &mut screen {
                 if let Some(started) = chat.run_started_at.take() {
                     chat.last_run_elapsed = Some(started.elapsed());
@@ -221,13 +218,6 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
                 chat.running = None;
                 chat.composer_cleared_by_ctrl_c = false;
                 if ok {
-                    // Persist accumulated token usage so it survives restarts.
-                    let _ = state.backend.update_session_usage(
-                        &chat.session.id,
-                        chat.total_input_tokens,
-                        chat.total_output_tokens,
-                        chat.cost_usd,
-                    );
                     state.status = None;
                 } else {
                     let clean = message.as_deref().map(clean_failure_message);
@@ -246,7 +236,61 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
                         push_toast(state, ToastVariant::Error, msg, Duration::from_secs(6));
                     }
                 }
-                match state.backend.load_messages(&chat.session.id) {
+
+                // Phase 2: offload blocking I/O (disk reads, git subprocess) to
+                // a background thread so the event loop stays responsive.
+                let session_id = chat.session.id.clone();
+                let session_title = chat.session.title.clone();
+                let session_model = chat.session.model.clone();
+                let tokens_in = chat.total_input_tokens;
+                let tokens_out = chat.total_output_tokens;
+                let cost = chat.cost_usd;
+                let live_reasoning = chat.live_reasoning.clone();
+                let backend = state.backend.clone();
+                let tx = state.tx.clone();
+                let workspace = state.defaults.workspace_root.clone();
+                tokio::task::spawn_blocking(move || {
+                    // Persist usage (fire-and-forget).
+                    if ok {
+                        let _ =
+                            backend.update_session_usage(&session_id, tokens_in, tokens_out, cost);
+                    }
+                    // Reload transcript from disk.
+                    let messages = backend.load_messages(&session_id);
+
+                    // Auto-rename untitled session from first user message.
+                    let session_update = if ok && session_title.is_none() {
+                        auto_rename_session(
+                            &*backend,
+                            &session_id,
+                            &session_model,
+                            &live_reasoning,
+                            messages.as_deref().ok(),
+                        )
+                    } else {
+                        None
+                    };
+
+                    let _ = tx.send(InteractiveMsg::RunEndedIo {
+                        ok,
+                        messages,
+                        session_update,
+                    });
+                });
+
+                // Also refresh git stats in background.
+                if ok {
+                    refresh_git_stat_async(workspace, state.tx.clone());
+                }
+            }
+        }
+        InteractiveMsg::RunEndedIo {
+            ok,
+            messages,
+            session_update,
+        } => {
+            if let Screen::Chat(chat) = &mut screen {
+                match messages {
                     Ok(messages) => {
                         let was_at_bottom = chat.scroll == 0;
                         chat.messages = messages;
@@ -279,42 +323,12 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
                             chat.live_assistant.clear();
                             chat.live_reasoning.clear();
                         } else {
-                            // On failure, clear stale streaming buffers so the transcript
-                            // renders cleanly and scroll offsets remain valid.
                             chat.live_assistant.clear();
                             chat.live_reasoning.clear();
                         }
-
-                        // Auto-rename untitled sessions from the first user message.
-                        if ok && chat.session.title.is_none() {
-                            if let Some(first_user_msg) =
-                                chat.messages.iter().find(|m| m.role == MessageRole::User)
-                            {
-                                if let Some(text) = first_user_msg.content.as_str() {
-                                    let clean = text.trim().replace('\n', " ");
-                                    if !clean.is_empty() {
-                                        let title = if clean.chars().count() > 50 {
-                                            // Truncate at word boundary
-                                            let short: String = clean.chars().take(50).collect();
-                                            if let Some(pos) = short.rfind(' ') {
-                                                format!("{}…", &short[..pos])
-                                            } else {
-                                                format!("{short}…")
-                                            }
-                                        } else {
-                                            clean
-                                        };
-                                        if let Ok(mut info) = state
-                                            .backend
-                                            .update_session_title(&chat.session.id, Some(title))
-                                        {
-                                            // Renaming must never alter the active model label.
-                                            info.model = chat.session.model.clone();
-                                            chat.session = info;
-                                        }
-                                    }
-                                }
-                            }
+                        if let Some(mut info) = session_update {
+                            info.model = chat.session.model.clone();
+                            chat.session = info;
                         }
                     }
                     Err(err) => {
@@ -328,6 +342,17 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
                     }
                 }
             }
+        }
+        InteractiveMsg::GitStatUpdate {
+            files,
+            insertions,
+            deletions,
+        } => {
+            state.git_stat = Some(GitStat {
+                files,
+                insertions,
+                deletions,
+            });
         }
     }
 
@@ -525,4 +550,37 @@ fn clean_failure_message(msg: &str) -> String {
     } else {
         capped
     }
+}
+
+/// Auto-rename an untitled session from the first user message.
+///
+/// Runs on a blocking thread — performs disk I/O via `update_session_title`.
+fn auto_rename_session(
+    backend: &dyn crate::SessionBackend,
+    session_id: &str,
+    session_model: &str,
+    _live_reasoning: &str,
+    messages: Option<&[rustcode_core::StoredMessage]>,
+) -> Option<rustcode_core::SessionInfo> {
+    let messages = messages?;
+    let first_user = messages.iter().find(|m| m.role == MessageRole::User)?;
+    let text = first_user.content.as_str()?;
+    let clean = text.trim().replace('\n', " ");
+    if clean.is_empty() {
+        return None;
+    }
+    let title = if clean.chars().count() > 50 {
+        let short: String = clean.chars().take(50).collect();
+        if let Some(pos) = short.rfind(' ') {
+            format!("{}…", &short[..pos])
+        } else {
+            format!("{short}…")
+        }
+    } else {
+        clean
+    };
+    let mut info = backend.update_session_title(session_id, Some(title)).ok()?;
+    // Renaming must never alter the active model label.
+    info.model = session_model.to_string();
+    Some(info)
 }

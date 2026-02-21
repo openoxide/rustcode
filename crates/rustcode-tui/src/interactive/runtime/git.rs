@@ -1,20 +1,36 @@
-use super::super::AppState;
-use super::super::GitStat;
+use std::path::PathBuf;
 
-/// Refresh git diff stats by running `git diff --shortstat HEAD` in the workspace root.
+use super::super::GitStat;
+use crate::InteractiveMsg;
+
+/// Spawn a background task to compute git diff stats, sending the result
+/// back via the TUI message channel.
 ///
-/// Non-blocking: if git is unavailable or the directory isn't a repo, the stat is cleared.
-pub(super) fn refresh_git_stat(state: &mut AppState) {
-    let Ok(output) = std::process::Command::new("git")
+/// Uses `spawn_blocking` to avoid blocking the async event loop.
+pub(super) fn refresh_git_stat_async(
+    workspace_root: PathBuf,
+    tx: tokio::sync::mpsc::UnboundedSender<InteractiveMsg>,
+) {
+    tokio::task::spawn_blocking(move || {
+        if let Some(stat) = compute_git_stat(&workspace_root) {
+            let _ = tx.send(InteractiveMsg::GitStatUpdate {
+                files: stat.files,
+                insertions: stat.insertions,
+                deletions: stat.deletions,
+            });
+        }
+    });
+}
+
+/// Run `git diff --shortstat HEAD` synchronously and parse the output.
+fn compute_git_stat(workspace_root: &std::path::Path) -> Option<GitStat> {
+    let output = std::process::Command::new("git")
         .args(["diff", "--shortstat", "HEAD"])
-        .current_dir(&state.defaults.workspace_root)
+        .current_dir(workspace_root)
         .output()
-    else {
-        state.git_stat = None;
-        return;
-    };
+        .ok()?;
     let text = String::from_utf8_lossy(&output.stdout);
-    state.git_stat = parse_git_shortstat(text.trim());
+    parse_git_shortstat(text.trim())
 }
 
 /// Parse the output of `git diff --shortstat HEAD` into a `GitStat`.

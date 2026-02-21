@@ -100,6 +100,19 @@ pub enum InteractiveMsg {
         request: ToolApprovalRequest,
         reply: oneshot::Sender<ApprovalResponse>,
     },
+    /// Result of a background `spawn_blocking` that reloaded the transcript
+    /// and persisted session metadata after a run completed.
+    RunEndedIo {
+        ok: bool,
+        messages: Result<Vec<rustcode_core::StoredMessage>, String>,
+        session_update: Option<SessionInfo>,
+    },
+    /// Async git stat result from `spawn_blocking`.
+    GitStatUpdate {
+        files: u32,
+        insertions: u32,
+        deletions: u32,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
