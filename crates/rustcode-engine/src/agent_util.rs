@@ -8,8 +8,7 @@ use rustcode_core::permissions::PermissionAction;
 ///
 /// Allowlisted (no approval): lsp, question, plan, task, codesearch.
 /// `list`, `read`, `glob`, and `grep` are allowlisted only when scoped to the
-/// current dir (`path` omitted/`.` for list|glob|grep, and a direct file in `.`
-/// for read).
+/// current dir tree (relative paths that do not escape via `..` or absolutes).
 /// All other tools require approval.
 pub(crate) fn is_mutating_tool(name: &str, args: &Value) -> bool {
     if name.starts_with("mcp:") {
@@ -289,20 +288,14 @@ fn exec_match_targets(args: &Value) -> Vec<String> {
 
 fn tool_targets_current_dir(args: &Value) -> bool {
     let path = args.get("path").and_then(Value::as_str).unwrap_or(".");
-    let normalized = normalize_path(path);
-    let trimmed = normalized.trim_end_matches('/');
-    trimmed.is_empty() || trimmed == "."
+    path_within_current_dir(path, true)
 }
 
 fn read_targets_current_dir(args: &Value) -> bool {
     let Some(path) = args.get("path").and_then(Value::as_str) else {
         return false;
     };
-    let normalized = normalize_path(path);
-    if normalized.is_empty() || normalized == "." {
-        return false;
-    }
-    !normalized.contains('/')
+    path_within_current_dir(path, false)
 }
 
 fn normalize_path(path: &str) -> String {
@@ -311,6 +304,47 @@ fn normalize_path(path: &str) -> String {
         normalized = normalized[2..].to_string();
     }
     normalized
+}
+
+fn path_within_current_dir(path: &str, allow_current_dir: bool) -> bool {
+    let normalized = normalize_path(path);
+
+    if normalized.is_empty() || normalized == "." {
+        return allow_current_dir;
+    }
+
+    // Block absolute paths on Unix and Windows (e.g. /tmp/a, C:/tmp/a).
+    if normalized.starts_with('/')
+        || (normalized.len() > 2
+            && normalized.as_bytes()[1] == b':'
+            && normalized.as_bytes()[2] == b'/'
+            && normalized.as_bytes()[0].is_ascii_alphabetic())
+    {
+        return false;
+    }
+
+    let mut depth = 0usize;
+    let mut has_non_current_component = false;
+    for component in normalized.split('/') {
+        if component.is_empty() || component == "." {
+            continue;
+        }
+        if component == ".." {
+            if depth == 0 {
+                return false;
+            }
+            depth -= 1;
+            continue;
+        }
+        has_non_current_component = true;
+        depth += 1;
+    }
+
+    if !allow_current_dir && depth == 0 {
+        return false;
+    }
+
+    has_non_current_component || allow_current_dir
 }
 
 fn extract_first_patch_target(patch_text: &str) -> Option<String> {
@@ -429,9 +463,17 @@ mod tests {
             "glob",
             &serde_json::json!({"pattern":"*.rs","path":"./"})
         ));
-        assert!(is_mutating_tool(
+        assert!(!is_mutating_tool(
             "glob",
             &serde_json::json!({"pattern":"*.rs","path":"src"})
+        ));
+        assert!(is_mutating_tool(
+            "glob",
+            &serde_json::json!({"pattern":"*.rs","path":"../src"})
+        ));
+        assert!(is_mutating_tool(
+            "glob",
+            &serde_json::json!({"pattern":"*.rs","path":"/tmp/src"})
         ));
     }
 
@@ -442,15 +484,23 @@ mod tests {
             "grep",
             &serde_json::json!({"pattern":"todo"})
         ));
-        assert!(is_mutating_tool("list", &serde_json::json!({"path":"src"})));
-        assert!(is_mutating_tool(
+        assert!(!is_mutating_tool("list", &serde_json::json!({"path":"src"})));
+        assert!(!is_mutating_tool(
             "grep",
             &serde_json::json!({"pattern":"todo","path":"src"})
+        ));
+        assert!(is_mutating_tool(
+            "list",
+            &serde_json::json!({"path":"../outside"})
+        ));
+        assert!(is_mutating_tool(
+            "grep",
+            &serde_json::json!({"pattern":"todo","path":"/tmp"})
         ));
     }
 
     #[test]
-    fn read_requires_approval_for_nested_paths() {
+    fn read_requires_approval_outside_current_dir() {
         assert!(!is_mutating_tool(
             "read",
             &serde_json::json!({"path":"main.rs"})
@@ -459,9 +509,17 @@ mod tests {
             "read",
             &serde_json::json!({"path":"./main.rs"})
         ));
-        assert!(is_mutating_tool(
+        assert!(!is_mutating_tool(
             "read",
             &serde_json::json!({"path":"src/main.rs"})
+        ));
+        assert!(is_mutating_tool(
+            "read",
+            &serde_json::json!({"path":"../main.rs"})
+        ));
+        assert!(is_mutating_tool(
+            "read",
+            &serde_json::json!({"path":"/tmp/main.rs"})
         ));
     }
 }
