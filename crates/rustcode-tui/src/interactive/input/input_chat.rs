@@ -273,7 +273,17 @@ pub(super) fn handle_chat_key(
             }
             // Ctrl+Y: toggle thinking/reasoning visibility
             KeyCode::Char('y' | 'Y') => {
-                execute_command(state, CommandId::ToggleReasoning);
+                chat.show_reasoning = !chat.show_reasoning;
+                push_toast(
+                    state,
+                    ToastVariant::Info,
+                    if chat.show_reasoning {
+                        "thinking: visible"
+                    } else {
+                        "thinking: hidden"
+                    },
+                    Duration::from_secs(2),
+                );
                 return ChatNav::Stay;
             }
             // Ctrl+Left/Right: word jump
