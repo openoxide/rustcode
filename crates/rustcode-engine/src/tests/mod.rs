@@ -16,7 +16,9 @@ use rustcode_core::config::ResolvedConfig;
 use rustcode_core::context::{CommandContext, SessionMeta};
 use rustcode_core::error::PublishError;
 use rustcode_core::event::{Event, EventPayload};
+use rustcode_core::permissions::PermissionAction;
 use rustcode_core::ports::{EventPublisher, ToolApprover};
+use rustcode_core::ToolApprovalRequest;
 use rustcode_io::{FileSystemPort, IoError, ProcessOutput, ProcessPort};
 use rustcode_llm::{
     ChatRequest, ChatResponse, LlmClient, LlmRequest, LlmResponse, NullLlmClient, TokenUsage,

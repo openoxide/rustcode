@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
-use tokio::runtime::Handle;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
@@ -239,7 +238,6 @@ pub struct InteractiveServices {
     pub defaults: InteractiveDefaults,
     pub initial_status: Option<String>,
     pub start: InteractiveStart,
-    pub runtime: Handle,
     pub handles: InteractiveHandles,
 
     pub config: Option<Arc<ResolvedConfig>>,
@@ -253,8 +251,12 @@ pub struct InteractiveServices {
     pub submit_mode: InteractiveSubmitMode,
 }
 
-pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
-    interactive::run_interactive(services)
+/// Run the interactive TUI event loop.
+///
+/// # Errors
+/// Returns `TuiError` on terminal I/O or channel failures.
+pub async fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
+    interactive::run_interactive(services).await
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

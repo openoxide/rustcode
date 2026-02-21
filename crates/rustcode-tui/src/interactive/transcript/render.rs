@@ -8,8 +8,8 @@ use ratatui::text::{Line, Span};
 use super::super::syntax_highlight::{highlight_code_line, HighlightState};
 use super::super::ActivityItem;
 use super::helpers::{
-    extract_filename, extract_key_arg, extract_tool_output_text, is_stat_line, parse_exit_code,
-    parse_hunk_header, sanitize_output_line, tilde_path_in_line,
+    extract_filename, extract_key_arg, extract_tool_output_text, is_editing_tool, is_stat_line,
+    parse_exit_code, parse_hunk_header, sanitize_output_line, tilde_path_in_line,
 };
 use crate::interactive::theme;
 
@@ -321,6 +321,33 @@ pub(super) fn render_live_activity_summary(
         format!("  {tri} {latest}{more_part}  (ctrl+o to expand)"),
         Style::default().fg(theme::ACTIVITY_DONE),
     )));
+
+    // In collapsed mode, also render diffs for completed editing tools so
+    // patches are visible in autopilot/allow-all mode.
+    let mut results_map: HashMap<&str, (bool, &str, &str)> = HashMap::new();
+    for item in activity {
+        if let ActivityItem::ToolResult {
+            id,
+            ok,
+            output,
+            name,
+        } = item
+        {
+            results_map.insert(id.as_str(), (*ok, output.as_str(), name.as_str()));
+        }
+    }
+    for item in activity {
+        if let ActivityItem::ToolCall { id, name, .. } = item {
+            if is_editing_tool(name) {
+                if let Some((ok, raw_output, _)) = results_map.get(id.as_str()) {
+                    let decoded = extract_tool_output_text(raw_output);
+                    if *ok && decoded.contains("\n@@diff\n") {
+                        render_tool_output(lines, name, &decoded, true, *ok);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Render a detailed live feed of tool calls while a run is in progress.
@@ -403,9 +430,15 @@ pub(super) fn render_live_activity_lines(
 
                 if let Some((_, output)) = result {
                     let decoded = extract_tool_output_text(output);
-                    let summary = summarize_tool_result(name, &decoded, is_ok);
-                    if !summary.is_empty() {
-                        lines.push(Line::from(Span::styled(format!("└  {summary}"), out_style)));
+                    // For editing tools, render the full diff inline.
+                    if is_editing_tool(name) && is_ok && decoded.contains("\n@@diff\n") {
+                        render_tool_output(lines, name, &decoded, true, is_ok);
+                    } else {
+                        let summary = summarize_tool_result(name, &decoded, is_ok);
+                        if !summary.is_empty() {
+                            lines
+                                .push(Line::from(Span::styled(format!("└  {summary}"), out_style)));
+                        }
                     }
                 }
             }

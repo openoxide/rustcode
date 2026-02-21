@@ -63,7 +63,16 @@ suggest natural next steps if any exist.
 - Prefer reading existing code before making changes.
 - Use the `bash` tool for compilation, tests, and verification.
 - Respect the user's existing code style and conventions.
-- When done, respond with a clear, final answer without tool calls.";
+- When done, respond with a clear, final answer without tool calls.
+
+## Planning & Tracking
+- For complex multi-step tasks, use the `plan` tool at the start to outline your \
+approach. Update the plan as you complete each step by calling `plan` again with \
+updated step statuses (`completed`, `in_progress`, `pending`, `blocked`).
+- Use `todowrite` when you need a structured checklist of items to work through. \
+Update todo statuses (`in_progress`, `completed`) as you progress.
+- Plans and todos are rendered live in the UI — keep them up to date so the user \
+can track your progress.";
 
 /// Build the full system prompt.
 ///

@@ -5,7 +5,7 @@ use super::{
     composer_word_left, composer_word_right, execute_command, filter_slash_commands,
     handle_slash_command, history_next, history_prev, open_command_palette, push_toast,
     refresh_chat_messages, submit_prompt, AppState, ChatFocus, ChatNav, ChatState, CommandId,
-    CreateSessionOptions, Duration, KeyCode, KeyEvent, KeyModifiers, Modal, ToastVariant,
+    Duration, KeyCode, KeyEvent, KeyModifiers, Modal, ToastVariant,
 };
 
 #[path = "input_chat_helpers.rs"]
@@ -124,52 +124,34 @@ pub(super) fn handle_chat_key(
                         return ChatNav::Stay;
                     }
                 };
-                match state.backend.create_session(CreateSessionOptions {
-                    title: None,
-                    parent_id: None,
+                chat.session = crate::new_draft_session(
+                    None,
                     cwd,
-                    workspace_root: state.defaults.workspace_root.clone(),
-                    model: state.defaults.model.clone(),
-                }) {
-                    Ok(session) => {
-                        let messages =
-                            state
-                                .backend
-                                .load_messages(&session.id)
-                                .unwrap_or_else(|err| {
-                                    state.status = Some(err.clone());
-                                    push_toast(
-                                        state,
-                                        ToastVariant::Error,
-                                        err,
-                                        Duration::from_secs(4),
-                                    );
-                                    Vec::new()
-                                });
-                        chat.session = session;
-                        chat.messages = messages;
-                        chat.scroll = 0;
-                        chat.live_assistant.clear();
-                        composer_clear(chat);
-                        chat.prompt_history = build_prompt_history(&chat.messages);
-                        chat.history_cursor = None;
-                        chat.history_draft.clear();
-                        chat.focus = ChatFocus::Composer;
-                        chat.activity.clear();
-                        chat.activity_selected = 0;
-                        chat.details_open = false;
-                        chat.tool_details = false;
-                        chat.output_details = false;
-                        chat.find = None;
-                        chat.running = None;
-                        state.status = None;
-                    }
-                    Err(err) => {
-                        let msg = format!("failed to create session: {err}");
-                        state.status = Some(msg.clone());
-                        push_toast(state, ToastVariant::Error, msg, Duration::from_secs(4));
-                    }
-                }
+                    state.defaults.workspace_root.clone(),
+                    state.defaults.model.clone(),
+                );
+                chat.messages = Vec::new();
+                chat.scroll = 0;
+                chat.live_assistant.clear();
+                composer_clear(chat);
+                chat.prompt_history = build_prompt_history(&chat.messages);
+                chat.history_cursor = None;
+                chat.history_draft.clear();
+                chat.focus = ChatFocus::Composer;
+                chat.activity.clear();
+                chat.activity_selected = 0;
+                chat.details_open = false;
+                chat.tool_details = false;
+                chat.output_details = false;
+                chat.find = None;
+                chat.running = None;
+                state.status = None;
+                push_toast(
+                    state,
+                    ToastVariant::Success,
+                    "new session (saved on first message)",
+                    Duration::from_secs(2),
+                );
                 return ChatNav::Stay;
             }
             KeyCode::Char('f' | 'F') => {

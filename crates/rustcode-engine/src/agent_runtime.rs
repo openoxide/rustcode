@@ -1,13 +1,11 @@
 use super::{
     agent_tools, join_all, AgentOptions, AgentState, Arc, ChatMessage, ChatRequest, ChatRole,
     CommandContext, Engine, EventPayload, EventPublisher, EventScope, ExecutionError, MessageRole,
-    PermissionAction, RequestInitiator, StoredMessage, StoredToolCall, SystemTime,
-    ToolApprovalRequest, ToolCall, Value, UNIX_EPOCH,
+    RequestInitiator, StoredMessage, StoredToolCall, SystemTime, ToolCall, Value, UNIX_EPOCH,
 };
 
 use crate::agent_util::{
-    approval_fields, approval_match_targets, is_mutating_tool, is_parallel_safe_tool,
-    resolve_permission_action, stored_messages_to_chat, tool_payload_json,
+    is_mutating_tool, is_parallel_safe_tool, stored_messages_to_chat, tool_payload_json,
 };
 use crate::context_tracker::ContextTracker;
 
@@ -502,6 +500,33 @@ impl Engine {
                 tool_name: Some(call.name.clone()),
                 tool_calls: Vec::new(),
             });
+
+            // Emit plan/todo update events after successful tool calls
+            if ok && call.name == "plan" {
+                if let Some(title) = &state.plan_title {
+                    self.emit(
+                        publisher.clone(),
+                        EventScope::Command,
+                        EventPayload::PlanUpdate {
+                            title: title.clone(),
+                            steps: state.plan_steps.clone(),
+                        },
+                        context,
+                    )
+                    .await?;
+                }
+            }
+            if ok && call.name == "todowrite" && !state.todos.is_empty() {
+                self.emit(
+                    publisher.clone(),
+                    EventScope::Command,
+                    EventPayload::TodoUpdate {
+                        todos: state.todos.clone(),
+                    },
+                    context,
+                )
+                .await?;
+            }
         }
 
         Ok(())
@@ -534,62 +559,5 @@ impl Engine {
         }
 
         agent_tools::AgentToolRegistry::execute(self, name, args, context, options, state).await
-    }
-
-    async fn check_tool_permission(
-        &self,
-        name: &str,
-        args: &Value,
-        context: &CommandContext,
-    ) -> Result<(), ExecutionError> {
-        let (permission, pattern, reason) = approval_fields(name, args);
-        let match_targets = approval_match_targets(name, args);
-        let decision = resolve_permission_action(
-            &context.config.permission_rules,
-            &permission,
-            &match_targets,
-        )?;
-
-        match decision {
-            Some(PermissionAction::Deny) => Err(ExecutionError::Dispatch(format!(
-                "tool permission denied by rule: tool={name} permission={permission} target={pattern}"
-            ))),
-            Some(PermissionAction::Allow) => Ok(()),
-            Some(PermissionAction::Ask) | None => {
-                let Some(approver) = self.approver.as_ref() else {
-                    return Err(ExecutionError::Dispatch(format!(
-                        "tool approval required but no interactive approver is available: tool={name} permission={permission} target={pattern}"
-                    )));
-                };
-                let approved = approver
-                    .approve(ToolApprovalRequest {
-                        tool: name.to_string(),
-                        permission,
-                        pattern,
-                        arguments: args.clone(),
-                        reason,
-                    })
-                    .await?;
-                if !approved {
-                    return Err(ExecutionError::Dispatch(
-                        "tool execution rejected by user".to_string(),
-                    ));
-                }
-                Ok(())
-            }
-        }
-    }
-
-    async fn execute_mcp_tool(&self, name: &str, args: Value) -> Result<String, ExecutionError> {
-        if let Some(mcp) = self.mcp.as_ref() {
-            match mcp.call_tool(name, args).await {
-                Ok(result) => Ok(result),
-                Err(err) => Err(ExecutionError::Executor(format!("MCP tool failed: {err}"))),
-            }
-        } else {
-            Err(ExecutionError::Dispatch(
-                "MCP tool called but MCP registry not configured".to_string(),
-            ))
-        }
     }
 }

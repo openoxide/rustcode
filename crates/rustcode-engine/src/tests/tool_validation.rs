@@ -225,8 +225,13 @@ async fn todowrite_accepts_and_normalizes_todos() {
         )
         .await
         .expect("todowrite should succeed");
-    assert!(output.contains("\"todos\""), "output={output}");
-    assert!(output.contains("\"pending\""), "output={output}");
-    assert!(output.contains("\"high\""), "output={output}");
-    assert!(output.contains("do thing"), "output={output}");
+    // New format: summary string instead of JSON
+    assert!(output.contains("Todo list updated"), "output={output}");
+    assert!(output.contains("1 items"), "output={output}");
+    assert!(output.contains("1 pending"), "output={output}");
+    // Verify state was persisted
+    assert_eq!(state.todos.len(), 1);
+    assert_eq!(state.todos[0].content, "do thing");
+    assert_eq!(state.todos[0].status, "pending");
+    assert_eq!(state.todos[0].priority, "high");
 }

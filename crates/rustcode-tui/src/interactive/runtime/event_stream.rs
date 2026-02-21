@@ -83,16 +83,12 @@ impl Stream for TuiEventStream {
         for source in [first_poll, second_poll] {
             match source {
                 PollSource::Draw => {
-                    if let Poll::Ready(Some(_)) =
-                        Pin::new(&mut this.draw_rx).poll_next(cx)
-                    {
+                    if let Poll::Ready(Some(_)) = Pin::new(&mut this.draw_rx).poll_next(cx) {
                         return Poll::Ready(Some(TuiEvent::Draw));
                     }
                 }
                 PollSource::Crossterm => {
-                    if let Poll::Ready(maybe) =
-                        Pin::new(&mut this.crossterm).poll_next(cx)
-                    {
+                    if let Poll::Ready(maybe) = Pin::new(&mut this.crossterm).poll_next(cx) {
                         match maybe {
                             Some(Ok(ct_event)) => {
                                 if let Some(tui_event) = map_crossterm_event(ct_event) {

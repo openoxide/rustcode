@@ -24,6 +24,7 @@ impl FrameRequester {
     }
 
     /// Request a frame after `delay`.
+    #[allow(dead_code)] // Available for future use (e.g., delayed redraws).
     pub(crate) fn schedule_frame_in(&self, delay: Duration) {
         let tx = self.tx.clone();
         tokio::spawn(async move {
@@ -58,7 +59,9 @@ impl FrameScheduler {
 
     /// Run the scheduler loop.  Exits when all [`FrameRequester`] handles are dropped.
     pub(crate) async fn run(mut self) {
-        let mut last_draw = Instant::now() - MIN_FRAME_INTERVAL;
+        let mut last_draw = Instant::now()
+            .checked_sub(MIN_FRAME_INTERVAL)
+            .unwrap_or_else(Instant::now);
 
         while let Some(_requested_at) = self.rx.recv().await {
             // Drain any additional coalesced requests.
@@ -67,7 +70,9 @@ impl FrameScheduler {
             // Enforce rate limit.
             let elapsed = last_draw.elapsed();
             if elapsed < MIN_FRAME_INTERVAL {
-                tokio::time::sleep(MIN_FRAME_INTERVAL - elapsed).await;
+                if let Some(remaining) = MIN_FRAME_INTERVAL.checked_sub(elapsed) {
+                    tokio::time::sleep(remaining).await;
+                }
                 // Drain again after sleep in case more requests arrived.
                 while self.rx.try_recv().is_ok() {}
             }

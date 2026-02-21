@@ -41,6 +41,9 @@ fn make_chat_state_with_focus(session: SessionInfo, focus: ChatFocus) -> ChatSta
         last_max_scroll: std::cell::Cell::new(0),
         run_started_at: None,
         last_run_elapsed: None,
+        plan_title: None,
+        plan_steps: Vec::new(),
+        todos: Vec::new(),
     }
 }
 
@@ -86,7 +89,7 @@ fn make_focus_state(session: SessionInfo) -> AppState {
         ))),
         config: None,
         executor: None,
-        runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
+        frame_requester: super::test_frame_requester(),
         tx: tokio::sync::mpsc::unbounded_channel().0,
         rx: tokio::sync::mpsc::unbounded_channel().1,
         request_seq: 0,

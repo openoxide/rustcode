@@ -9,9 +9,9 @@ use super::{
     history_prev, maybe_execute_palette_query, open_command_palette, provider_connect_methods,
     provider_display_name, provider_env_hint, push_toast, refresh_chat_messages, set_find,
     sort_sessions, submit_prompt, transcript_area_height, AppState, ApprovalResponse, Arc,
-    ChatFocus, ChatNav, ChatState, CommandId, ConnectMethod, CreateSessionOptions, Duration,
-    KeyCode, KeyEvent, KeyModifiers, Modal, ProviderManagerStep, ProviderOAuthDone,
-    ProviderOAuthStarted, Screen, ToastVariant, SLASH_COMMANDS,
+    ChatFocus, ChatNav, ChatState, CommandId, ConnectMethod, Duration, KeyCode, KeyEvent,
+    KeyModifiers, Modal, ProviderManagerStep, ProviderOAuthDone, ProviderOAuthStarted, Screen,
+    ToastVariant, SLASH_COMMANDS,
 };
 
 mod input_chat;

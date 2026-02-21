@@ -2,9 +2,7 @@ use std::io;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-use crossterm::event::{
-    self, Event as CEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEventKind,
-};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -27,8 +25,8 @@ use rustcode_core::{Command, CommandContext, ResolvedConfig, SessionInfo};
 use rustcode_core::{MessageRole, SessionMeta, StoredMessage, ToolApprovalRequest};
 
 use crate::{
-    ApprovalResponse, CreateSessionOptions, InteractiveDefaults, InteractiveMsg,
-    InteractiveServices, InteractiveStart, InteractiveSubmitMode, TuiError, TuiPublisher,
+    ApprovalResponse, InteractiveDefaults, InteractiveMsg, InteractiveServices, InteractiveStart,
+    InteractiveSubmitMode, TuiError, TuiPublisher,
 };
 
 mod activity_item;
@@ -93,8 +91,8 @@ use types::{
     ProviderOAuthDone, ProviderOAuthStarted, RunningCommand, Screen, Toast, ToastVariant,
 };
 
-pub fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
-    runtime::run_interactive(services)
+pub async fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
+    runtime::run_interactive(services).await
 }
 
 #[cfg(test)]

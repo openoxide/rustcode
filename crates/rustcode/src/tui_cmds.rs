@@ -16,7 +16,6 @@ pub async fn handle_tui_command(tui: TuiCommand, cli: &Cli) -> Result<()> {
         return Ok(());
     }
 
-    let runtime = tokio::runtime::Handle::current();
     let handles = rustcode_tui::InteractiveHandles::new();
 
     match tui {
@@ -85,15 +84,12 @@ pub async fn handle_tui_command(tui: TuiCommand, cli: &Cli) -> Result<()> {
                     if prompt_text.trim().is_empty() {
                         Err(anyhow::anyhow!("--prompt must not be empty"))
                     } else {
-                        backend
-                            .create_session(rustcode_tui::CreateSessionOptions {
-                                title: title.clone(),
-                                parent_id: None,
-                                cwd: cwd.clone(),
-                                workspace_root: defaults.workspace_root.clone(),
-                                model: defaults.model.clone(),
-                            })
-                            .map_err(|err| anyhow::anyhow!("failed to create session: {err}"))
+                        Ok(rustcode_tui::new_draft_session(
+                            title.clone(),
+                            cwd.clone(),
+                            defaults.workspace_root.clone(),
+                            defaults.model.clone(),
+                        ))
                     }
                 } else {
                     Err(anyhow::anyhow!("no session selection provided"))
@@ -116,24 +112,20 @@ pub async fn handle_tui_command(tui: TuiCommand, cli: &Cli) -> Result<()> {
                 }
             }
 
-            tokio::task::spawn_blocking(move || {
-                let services = rustcode_tui::InteractiveServices {
-                    backend,
-                    defaults,
-                    initial_status,
-                    start,
-                    runtime,
-                    handles,
-                    config,
-                    executor,
-                    llm_cell: None,
-                    submit_mode: rustcode_tui::InteractiveSubmitMode::Run,
-                };
-                rustcode_tui::run_interactive(services)
-            })
-            .await
-            .context("tui join failed")?
-            .context("tui failed")?;
+            let services = rustcode_tui::InteractiveServices {
+                backend,
+                defaults,
+                initial_status,
+                start,
+                handles,
+                config,
+                executor,
+                llm_cell: None,
+                submit_mode: rustcode_tui::InteractiveSubmitMode::Run,
+            };
+            rustcode_tui::run_interactive(services)
+                .await
+                .context("tui failed")?;
         }
     }
     Ok(())
@@ -151,7 +143,6 @@ pub async fn handle_tui_default(
         return Ok(());
     }
 
-    let runtime = tokio::runtime::Handle::current();
     let handles = rustcode_tui::InteractiveHandles::new();
     let store = SessionStore::open_default();
     let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
@@ -227,22 +218,20 @@ pub async fn handle_tui_default(
         initial_status = Some("--fork requires --continue or --session <SESSION_ID>".to_string());
     }
 
-    // Default: create a new session and open directly (matches codex/opencode behavior).
+    // Default: open a new draft session and persist it only on first submit.
     // The session picker is accessible via Ctrl+Q from inside the chat.
     let mut start = if !continue_session && session.is_none() && prompt.is_none() && !fork {
-        // Default startup: open a new empty session
+        // Default startup: open a new empty draft session
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        if let Some(cfg) = config.as_deref() {
-            match store.create_session(title.clone(), None, &cwd, &cfg.workspace_root, &cfg.model) {
-                Ok(new_session) => rustcode_tui::InteractiveStart::Chat {
-                    session: new_session,
-                    prompt: None,
-                    auto_submit: false,
-                },
-                Err(_) => rustcode_tui::InteractiveStart::Sessions,
-            }
-        } else {
-            rustcode_tui::InteractiveStart::Sessions
+        rustcode_tui::InteractiveStart::Chat {
+            session: rustcode_tui::new_draft_session(
+                title.clone(),
+                cwd,
+                defaults.workspace_root.clone(),
+                defaults.model.clone(),
+            ),
+            prompt: None,
+            auto_submit: false,
         }
     } else {
         rustcode_tui::InteractiveStart::Sessions
@@ -268,15 +257,12 @@ pub async fn handle_tui_default(
                 Err(anyhow::anyhow!("--prompt must not be empty"))
             } else if let Some(config) = config.as_deref() {
                 match std::env::current_dir() {
-                    Ok(cwd) => store
-                        .create_session(
-                            title.clone(),
-                            None,
-                            &cwd,
-                            &config.workspace_root,
-                            &config.model,
-                        )
-                        .map_err(|err| anyhow::anyhow!("failed to create session: {err}")),
+                    Ok(cwd) => Ok(rustcode_tui::new_draft_session(
+                        title.clone(),
+                        cwd,
+                        config.workspace_root.clone(),
+                        config.model.clone(),
+                    )),
                     Err(err) => Err(anyhow::anyhow!("failed to resolve cwd: {err}")),
                 }
             } else {
@@ -321,23 +307,19 @@ pub async fn handle_tui_default(
     let backend: Arc<dyn rustcode_tui::SessionBackend> =
         Arc::new(rustcode_tui::LocalSessionBackend::new(store.clone()));
 
-    tokio::task::spawn_blocking(move || {
-        let services = rustcode_tui::InteractiveServices {
-            backend,
-            defaults,
-            initial_status,
-            start,
-            runtime,
-            handles,
-            config,
-            executor,
-            llm_cell,
-            submit_mode: rustcode_tui::InteractiveSubmitMode::Agent,
-        };
-        rustcode_tui::run_interactive(services)
-    })
-    .await
-    .context("tui join failed")?
-    .context("tui failed")?;
+    let services = rustcode_tui::InteractiveServices {
+        backend,
+        defaults,
+        initial_status,
+        start,
+        handles,
+        config,
+        executor,
+        llm_cell,
+        submit_mode: rustcode_tui::InteractiveSubmitMode::Agent,
+    };
+    rustcode_tui::run_interactive(services)
+        .await
+        .context("tui failed")?;
     Ok(())
 }

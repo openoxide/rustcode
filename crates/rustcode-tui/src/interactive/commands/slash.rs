@@ -1,8 +1,7 @@
 use super::super::{
     build_prompt_history, build_transcript_lines, composer_clear, composer_insert_str,
     compute_find_matches, compute_sessions_view, open_command_palette, push_toast, sort_sessions,
-    AppState, ChatFocus, ChatNav, ChatState, CommandId, CreateSessionOptions, Duration, Modal,
-    ToastVariant,
+    AppState, ChatFocus, ChatNav, ChatState, CommandId, Duration, Modal, ToastVariant,
 };
 use super::execute::execute_command;
 use super::session_ops::{open_session_by_id, refresh_chat_messages};
@@ -166,52 +165,32 @@ pub(crate) fn handle_slash_command(
                     return ChatNav::Stay;
                 }
             };
-            match state.backend.create_session(CreateSessionOptions {
-                title: None,
-                parent_id: None,
+            chat.session = crate::new_draft_session(
+                None,
                 cwd,
-                workspace_root: state.defaults.workspace_root.clone(),
-                model: state.defaults.model.clone(),
-            }) {
-                Ok(session) => {
-                    let messages = state
-                        .backend
-                        .load_messages(&session.id)
-                        .unwrap_or_else(|err| {
-                            push_toast(state, ToastVariant::Error, err, Duration::from_secs(4));
-                            Vec::new()
-                        });
-                    chat.session = session;
-                    chat.messages = messages;
-                    chat.scroll = 0;
-                    chat.live_assistant.clear();
-                    composer_clear(chat);
-                    chat.prompt_history = build_prompt_history(&chat.messages);
-                    chat.history_cursor = None;
-                    chat.history_draft.clear();
-                    chat.focus = ChatFocus::Composer;
-                    chat.activity.clear();
-                    chat.activity_selected = 0;
-                    chat.details_open = false;
-                    chat.tool_details = false;
-                    chat.output_details = false;
-                    chat.running = None;
-                    push_toast(
-                        state,
-                        ToastVariant::Success,
-                        "created session",
-                        Duration::from_secs(2),
-                    );
-                }
-                Err(err) => {
-                    push_toast(
-                        state,
-                        ToastVariant::Error,
-                        format!("failed to create session: {err}"),
-                        Duration::from_secs(4),
-                    );
-                }
-            }
+                state.defaults.workspace_root.clone(),
+                state.defaults.model.clone(),
+            );
+            chat.messages = Vec::new();
+            chat.scroll = 0;
+            chat.live_assistant.clear();
+            composer_clear(chat);
+            chat.prompt_history = build_prompt_history(&chat.messages);
+            chat.history_cursor = None;
+            chat.history_draft.clear();
+            chat.focus = ChatFocus::Composer;
+            chat.activity.clear();
+            chat.activity_selected = 0;
+            chat.details_open = false;
+            chat.tool_details = false;
+            chat.output_details = false;
+            chat.running = None;
+            push_toast(
+                state,
+                ToastVariant::Success,
+                "new session (saved on first message)",
+                Duration::from_secs(2),
+            );
             ChatNav::Stay
         }
         "fork" => {

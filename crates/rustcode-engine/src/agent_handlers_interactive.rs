@@ -1,4 +1,5 @@
-use super::{Engine, ExecutionError};
+use super::{AgentState, Engine, ExecutionError};
+use rustcode_core::event::{PlanStepEvent, TodoItemEvent};
 
 impl Engine {
     /// Invoke a named skill and return its content to the agent.
@@ -43,14 +44,6 @@ impl Engine {
     }
 
     /// Ask the user one or more questions during an agent loop.
-    ///
-    /// In interactive mode (TUI or stdio), the questions are printed and
-    /// the agent pauses until the user answers. In non-interactive mode,
-    /// the tool returns "unanswered" for each question.
-    ///
-    /// This is a lightweight implementation: it serializes questions as
-    /// formatted output and relies on the agent picking up the user response
-    /// in the next conversation turn.
     pub(crate) async fn agent_tool_question(
         &self,
         questions: &[QuestionItem],
@@ -61,9 +54,6 @@ impl Engine {
             ));
         }
 
-        // For now, format questions as structured output that the agent
-        // can present to the user. The actual interactive I/O is handled
-        // by the tool approval channel when in agent mode.
         let mut output = String::new();
         output.push_str(&format!(
             "Please answer the following {} question(s):\n\n",
@@ -93,12 +83,13 @@ impl Engine {
 
     /// Create or update a plan during agent execution.
     ///
-    /// The plan tool stores a structured plan in the agent state,
-    /// allowing the agent to organize complex tasks step by step.
+    /// Stores the plan persistently in `AgentState`. The caller
+    /// (`execute_tool_calls`) emits the `PlanUpdate` event.
     pub(crate) async fn agent_tool_plan(
         &self,
         title: &str,
         steps: &[PlanStep],
+        state: &mut AgentState,
     ) -> Result<String, ExecutionError> {
         if title.trim().is_empty() {
             return Err(ExecutionError::Dispatch(
@@ -111,25 +102,43 @@ impl Engine {
             ));
         }
 
-        let mut output = String::new();
-        output.push_str(&format!("# Plan: {title}\n\n"));
+        let event_steps: Vec<PlanStepEvent> = steps
+            .iter()
+            .map(|s| PlanStepEvent {
+                description: s.description.clone(),
+                status: s.status.clone(),
+            })
+            .collect();
 
-        for (idx, step) in steps.iter().enumerate() {
-            let status_icon = match step.status.as_str() {
-                "completed" => "✅",
-                "in_progress" => "🔄",
-                "blocked" => "🚫",
-                _ => "⬜",
-            };
-            output.push_str(&format!(
-                "{} {}. {}\n",
-                status_icon,
-                idx + 1,
-                step.description
-            ));
-        }
+        state.plan_title = Some(title.to_string());
+        state.plan_steps = event_steps;
 
-        Ok(output)
+        let completed = steps.iter().filter(|s| s.status == "completed").count();
+        let in_progress = steps.iter().filter(|s| s.status == "in_progress").count();
+        let total = steps.len();
+        Ok(format!(
+            "Plan \"{title}\" updated: {total} steps ({completed} completed, {in_progress} in progress)"
+        ))
+    }
+
+    /// Update the agent's working todo list.
+    ///
+    /// Stores todos persistently in `AgentState`. The caller
+    /// (`execute_tool_calls`) emits the `TodoUpdate` event.
+    pub(crate) async fn agent_tool_todowrite(
+        &self,
+        todos: Vec<TodoItemEvent>,
+        state: &mut AgentState,
+    ) -> Result<String, ExecutionError> {
+        state.todos = todos.clone();
+
+        let completed = todos.iter().filter(|t| t.status == "completed").count();
+        let pending = todos.iter().filter(|t| t.status == "pending").count();
+        let in_progress = todos.iter().filter(|t| t.status == "in_progress").count();
+        let total = todos.len();
+        Ok(format!(
+            "Todo list updated: {total} items ({completed} completed, {in_progress} in progress, {pending} pending)"
+        ))
     }
 }
 

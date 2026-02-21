@@ -132,9 +132,7 @@ fn spawn_hanging_http_server() -> Option<HangingHttpServer> {
                 Ok(_) => {}
                 Err(err)
                     if err.kind() == std::io::ErrorKind::WouldBlock
-                        || err.kind() == std::io::ErrorKind::TimedOut =>
-                {
-                }
+                        || err.kind() == std::io::ErrorKind::TimedOut => {}
                 Err(_) => break,
             }
         }

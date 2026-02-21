@@ -311,6 +311,13 @@ pub(super) struct ChatState {
     pub(super) run_started_at: Option<Instant>,
     /// Elapsed duration of the most recently completed run.
     pub(super) last_run_elapsed: Option<std::time::Duration>,
+    // ── Plan/Todo tracking (updated from PlanUpdate/TodoUpdate events) ───
+    /// Current plan title (None if no plan set).
+    pub(super) plan_title: Option<String>,
+    /// Current plan steps: (description, status).
+    pub(super) plan_steps: Vec<(String, String)>,
+    /// Current todo list: (content, status, priority).
+    pub(super) todos: Vec<(String, String, String)>,
 }
 
 /// Cached result of `git diff --shortstat HEAD`.
@@ -342,7 +349,8 @@ pub(super) struct AppState {
     pub(super) backend: Arc<dyn crate::SessionBackend>,
     pub(super) config: Option<Arc<ResolvedConfig>>,
     pub(super) executor: Option<Arc<dyn rustcode_core::ports::CommandExecutor>>,
-    pub(super) runtime: tokio::runtime::Handle,
+    #[allow(dead_code)] // Accessible for any code that needs to trigger a redraw.
+    pub(super) frame_requester: super::runtime::frame_scheduler::FrameRequester,
     pub(super) tx: tokio::sync::mpsc::UnboundedSender<InteractiveMsg>,
     pub(super) rx: tokio::sync::mpsc::UnboundedReceiver<InteractiveMsg>,
     pub(super) request_seq: u64,
@@ -352,10 +360,10 @@ pub(super) struct AppState {
     /// Receives `DeviceCodeFlowStart`-derived info once the OAuth device code is ready.
     /// Stored here (not in Modal) because Receiver is not Clone.
     pub(super) provider_oauth_start_rx:
-        Option<std::sync::mpsc::Receiver<Result<ProviderOAuthStarted, String>>>,
+        Option<tokio::sync::mpsc::UnboundedReceiver<Result<ProviderOAuthStarted, String>>>,
     /// Receives the final credential once the user completes OAuth authorization.
     pub(super) provider_oauth_done_rx:
-        Option<std::sync::mpsc::Receiver<Result<ProviderOAuthDone, String>>>,
+        Option<tokio::sync::mpsc::UnboundedReceiver<Result<ProviderOAuthDone, String>>>,
     /// Shared cell that controls the engine's active LLM client.
     ///
     /// Writing a new `Arc<dyn LlmClient>` here causes all subsequent LLM

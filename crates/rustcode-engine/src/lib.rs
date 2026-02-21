@@ -27,7 +27,6 @@ use rustcode_core::command::{AgentOptions, Command};
 use rustcode_core::context::CommandContext;
 use rustcode_core::error::{ExecutionError, PublishError};
 use rustcode_core::event::{Event, EventPayload, EventScope};
-use rustcode_core::permissions::PermissionAction;
 use rustcode_core::ports::{
     CommandExecutor, EventPublisher, PathOperation, PermissionPolicy, ToolApprover,
     TranscriptRecorder,
@@ -37,7 +36,6 @@ use rustcode_core::server_protocol::{
     V1SessionShowResponse, V1SessionsListResponse, SERVER_API_SCHEMA_VERSION,
 };
 use rustcode_core::session::{MessageRole, StoredMessage, StoredToolCall};
-use rustcode_core::ToolApprovalRequest;
 use rustcode_io::{FileSystemPort, IoError, ProcessOutput, ProcessPort};
 use rustcode_llm::{
     ChatMessage, ChatRequest, ChatRole, LlmClient, LlmRequest, RequestInitiator, ToolCall,
@@ -58,6 +56,7 @@ mod agent_handlers_task;
 mod agent_handlers_web;
 mod agent_handlers_worktree;
 mod agent_runtime;
+mod agent_tool_permission;
 mod agent_tool_specs;
 mod agent_tools;
 mod agent_util;
@@ -149,6 +148,12 @@ pub(crate) struct AgentState {
     ///
     /// Set on the first mutating tool call; `None` means no snapshot yet.
     pub(crate) auto_snapshot_hash: Option<String>,
+    /// Current plan title (set by the `plan` tool).
+    pub(crate) plan_title: Option<String>,
+    /// Current plan steps (set by the `plan` tool).
+    pub(crate) plan_steps: Vec<rustcode_core::event::PlanStepEvent>,
+    /// Current todo list (set by the `todowrite` tool).
+    pub(crate) todos: Vec<rustcode_core::event::TodoItemEvent>,
 }
 
 impl Engine {

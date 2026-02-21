@@ -224,7 +224,7 @@ pub(super) async fn execute_tool<'a>(
                 .await
         }
         "question" => execute_question(engine, args).await,
-        "plan" => execute_plan(engine, args).await,
+        "plan" => execute_plan(engine, args, state).await,
         "websearch" => {
             ensure_allowed_keys(&args, &["query", "num_results"])?;
             if !context.config.allow_network {
@@ -250,7 +250,7 @@ pub(super) async fn execute_tool<'a>(
                 .agent_tool_webfetch(url, format, timeout_secs, context)
                 .await
         }
-        "todowrite" => execute_todowrite(args).await,
+        "todowrite" => execute_todowrite(engine, args, state).await,
         "lsp" => {
             ensure_allowed_keys(&args, &["operation", "path", "line", "character", "query"])?;
             let operation = opt_str(&args, "operation")?.ok_or_else(|| {
@@ -458,7 +458,11 @@ async fn execute_question(engine: &Engine, args: Value) -> Result<String, Execut
     engine.agent_tool_question(&questions).await
 }
 
-async fn execute_plan(engine: &Engine, args: Value) -> Result<String, ExecutionError> {
+async fn execute_plan(
+    engine: &Engine,
+    args: Value,
+    state: &mut AgentState,
+) -> Result<String, ExecutionError> {
     ensure_allowed_keys(&args, &["title", "steps"])?;
     let title = opt_str(&args, "title")?
         .ok_or_else(|| ExecutionError::Dispatch("plan requires title".to_string()))?;
@@ -485,10 +489,14 @@ async fn execute_plan(engine: &Engine, args: Value) -> Result<String, ExecutionE
             status,
         });
     }
-    engine.agent_tool_plan(title, &steps).await
+    engine.agent_tool_plan(title, &steps, state).await
 }
 
-async fn execute_todowrite(args: Value) -> Result<String, ExecutionError> {
+async fn execute_todowrite(
+    engine: &Engine,
+    args: Value,
+    state: &mut AgentState,
+) -> Result<String, ExecutionError> {
     ensure_allowed_keys(&args, &["todos"])?;
     let todos = args
         .get("todos")
@@ -555,15 +563,12 @@ async fn execute_todowrite(args: Value) -> Result<String, ExecutionError> {
             )));
         }
 
-        normalized.push(serde_json::json!({
-            "content": content,
-            "status": status,
-            "priority": priority,
-        }));
+        normalized.push(rustcode_core::event::TodoItemEvent {
+            content,
+            status,
+            priority,
+        });
     }
 
-    Ok(serde_json::json!({
-        "todos": normalized,
-    })
-    .to_string())
+    engine.agent_tool_todowrite(normalized, state).await
 }

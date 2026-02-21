@@ -14,6 +14,11 @@ mod chat_render;
 mod focus;
 mod modals;
 
+/// Create a no-op [`FrameRequester`] for tests that don't need frame scheduling.
+fn test_frame_requester() -> super::runtime::frame_scheduler::FrameRequester {
+    super::runtime::frame_scheduler::test_frame_requester()
+}
+
 fn buffer_to_string(buffer: &Buffer) -> String {
     let mut out = String::new();
     for y in 0..buffer.area.height {
@@ -67,7 +72,7 @@ fn sessions_screen_renders_title_and_help() {
         ))),
         config: None,
         executor: None,
-        runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
+        frame_requester: test_frame_requester(),
         tx: tokio::sync::mpsc::unbounded_channel().0,
         rx: tokio::sync::mpsc::unbounded_channel().1,
         request_seq: 0,

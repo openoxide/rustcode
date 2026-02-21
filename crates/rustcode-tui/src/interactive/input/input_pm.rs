@@ -436,13 +436,15 @@ pub(super) fn handle_provider_manager_key(
 /// Spawn the OAuth device-code flow in the background and transition the modal
 /// to the `OAuthStarting` step.
 fn handle_oauth_device_code(state: &mut AppState, provider_id: String, display_name: String) {
-    let (start_tx, start_rx) = std::sync::mpsc::channel::<Result<ProviderOAuthStarted, String>>();
-    let (done_tx, done_rx) = std::sync::mpsc::channel::<Result<ProviderOAuthDone, String>>();
+    let (start_tx, start_rx) =
+        tokio::sync::mpsc::unbounded_channel::<Result<ProviderOAuthStarted, String>>();
+    let (done_tx, done_rx) =
+        tokio::sync::mpsc::unbounded_channel::<Result<ProviderOAuthDone, String>>();
     state.provider_oauth_start_rx = Some(start_rx);
     state.provider_oauth_done_rx = Some(done_rx);
 
     let provider_id_clone = provider_id.clone();
-    state.runtime.spawn(async move {
+    tokio::spawn(async move {
         let flow = match rustcode_auth::start_device_code_flow(&provider_id_clone, None).await {
             Ok(f) => f,
             Err(err) => {

@@ -132,6 +132,9 @@ pub(crate) fn open_session(state: &mut AppState, session: SessionInfo) {
         last_max_scroll: std::cell::Cell::new(0),
         run_started_at: None,
         last_run_elapsed: None,
+        plan_title: None,
+        plan_steps: Vec::new(),
+        todos: Vec::new(),
     });
     if let Some(idx) = state.sessions.iter().position(|s| s.id == session_id) {
         state.selected = idx;

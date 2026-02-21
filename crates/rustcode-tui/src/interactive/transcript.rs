@@ -7,6 +7,7 @@ use super::{
 
 mod append;
 mod helpers;
+mod plan_todo;
 mod render;
 
 use append::{append_message_lines, append_tool_message_lines};
@@ -244,6 +245,9 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
         lines.extend(truncated);
         lines.push(Line::raw(""));
     }
+    // ── Live plan/todo widgets ──────────────────────────────────────────
+    plan_todo::render_plan_lines(&mut lines, chat);
+    plan_todo::render_todo_lines(&mut lines, chat);
 
     if chat.running.is_some() {
         let has_tool_calls = chat

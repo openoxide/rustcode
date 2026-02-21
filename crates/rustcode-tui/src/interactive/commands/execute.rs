@@ -3,8 +3,8 @@ use std::collections::VecDeque;
 use super::super::{
     build_prompt_history, build_provider_entries, build_transcript_lines, composer_clear,
     compute_find_matches, compute_sessions_view, filter_files, filter_provider_entries, push_toast,
-    scan_workspace_files, sort_sessions, AppState, ChatFocus, ChatState, CommandId,
-    CreateSessionOptions, Duration, Modal, ProviderManagerStep, Screen, ToastVariant,
+    scan_workspace_files, sort_sessions, AppState, ChatFocus, ChatState, CommandId, Duration,
+    Modal, ProviderManagerStep, Screen, ToastVariant,
 };
 use super::filter_models;
 use super::session_ops::refresh_chat_messages;
@@ -44,86 +44,56 @@ pub(crate) fn execute_command(state: &mut AppState, id: CommandId) {
                     return;
                 }
             };
-            match state.backend.create_session(CreateSessionOptions {
-                title: None,
-                parent_id: None,
+            let session = crate::new_draft_session(
+                None,
                 cwd,
-                workspace_root: state.defaults.workspace_root.clone(),
-                model: state.defaults.model.clone(),
-            }) {
-                Ok(session) => {
-                    state.sessions = state.backend.list_sessions().unwrap_or_else(|err| {
-                        push_toast(state, ToastVariant::Error, err, Duration::from_secs(4));
-                        Vec::new()
-                    });
-                    sort_sessions(&mut state.sessions);
-                    state.sessions_view =
-                        compute_sessions_view(&state.sessions, &state.sessions_filter);
-                    state.selected = state
-                        .sessions
-                        .iter()
-                        .position(|s| s.id == session.id)
-                        .unwrap_or(0);
-
-                    let messages = state
-                        .backend
-                        .load_messages(&session.id)
-                        .unwrap_or_else(|err| {
-                            push_toast(state, ToastVariant::Error, err, Duration::from_secs(4));
-                            Vec::new()
-                        });
-                    let prompt_history = build_prompt_history(&messages);
-                    state.screen = Screen::Chat(ChatState {
-                        session,
-                        messages,
-                        scroll: 0,
-                        live_assistant: String::new(),
-                        live_reasoning: String::new(),
-                        show_reasoning: false,
-                        composer: String::new(),
-                        composer_cursor: 0,
-                        paste_buffer: None,
-                        prompt_history,
-                        history_cursor: None,
-                        history_draft: String::new(),
-                        focus: ChatFocus::Composer,
-                        activity: VecDeque::new(),
-                        activity_selected: 0,
-                        details_open: false,
-                        activity_hidden: false,
-                        tool_details: false,
-                        output_details: false,
-                        find: None,
-                        running: None,
-                        pending_prompt: None,
-                        committed_approvals: Vec::new(),
-                        composer_cleared_by_ctrl_c: false,
-                        last_typing_time: None,
-                        total_input_tokens: 0,
-                        total_output_tokens: 0,
-                        last_total_tokens: 0,
-                        context_limit: 0,
-                        cost_usd: 0.0,
-                        last_max_scroll: std::cell::Cell::new(0),
-                        run_started_at: None,
-                        last_run_elapsed: None,
-                    });
-                    push_toast(
-                        state,
-                        ToastVariant::Success,
-                        "created session",
-                        Duration::from_secs(2),
-                    );
-                }
-                Err(err) => {
-                    push_toast(
-                        state,
-                        ToastVariant::Error,
-                        format!("failed to create session: {err}"),
-                        Duration::from_secs(4),
-                    );
-                }
-            }
+                state.defaults.workspace_root.clone(),
+                state.defaults.model.clone(),
+            );
+            state.screen = Screen::Chat(ChatState {
+                session,
+                messages: Vec::new(),
+                scroll: 0,
+                live_assistant: String::new(),
+                live_reasoning: String::new(),
+                show_reasoning: false,
+                composer: String::new(),
+                composer_cursor: 0,
+                paste_buffer: None,
+                prompt_history: Vec::new(),
+                history_cursor: None,
+                history_draft: String::new(),
+                focus: ChatFocus::Composer,
+                activity: VecDeque::new(),
+                activity_selected: 0,
+                details_open: false,
+                activity_hidden: false,
+                tool_details: false,
+                output_details: false,
+                find: None,
+                running: None,
+                pending_prompt: None,
+                committed_approvals: Vec::new(),
+                composer_cleared_by_ctrl_c: false,
+                last_typing_time: None,
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                last_total_tokens: 0,
+                context_limit: 0,
+                cost_usd: 0.0,
+                last_max_scroll: std::cell::Cell::new(0),
+                run_started_at: None,
+                last_run_elapsed: None,
+                plan_title: None,
+                plan_steps: Vec::new(),
+                todos: Vec::new(),
+            });
+            push_toast(
+                state,
+                ToastVariant::Success,
+                "new session (saved on first message)",
+                Duration::from_secs(2),
+            );
         }
         CommandId::ForkSession => {
             let Screen::Chat(mut chat) = std::mem::replace(&mut state.screen, Screen::Sessions)

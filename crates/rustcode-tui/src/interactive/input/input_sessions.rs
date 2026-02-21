@@ -81,6 +81,9 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         last_max_scroll: std::cell::Cell::new(0),
                         run_started_at: None,
                         last_run_elapsed: None,
+                        plan_title: None,
+                        plan_steps: Vec::new(),
+                        todos: Vec::new(),
                     });
                 }
                 state.sessions_filter_active = false;
@@ -206,6 +209,9 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 last_max_scroll: std::cell::Cell::new(0),
                 run_started_at: None,
                 last_run_elapsed: None,
+                plan_title: None,
+                plan_steps: Vec::new(),
+                todos: Vec::new(),
             });
         }
         _ => {}

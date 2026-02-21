@@ -60,7 +60,8 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
     };
     let end = (start + available).min(chat.activity.len());
 
-    let items = chat.activity
+    let items = chat
+        .activity
         .iter()
         .skip(start)
         .take(end - start)

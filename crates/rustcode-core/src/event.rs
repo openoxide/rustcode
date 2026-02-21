@@ -18,6 +18,19 @@ pub enum EventScope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PlanStepEvent {
+    pub description: String,
+    pub status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TodoItemEvent {
+    pub content: String,
+    pub status: String,
+    pub priority: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "type", content = "data")]
 pub enum EventPayload {
     CommandAccepted {
@@ -70,6 +83,15 @@ pub enum EventPayload {
         cache_read: u64,
         cache_write: u64,
         context_limit: u64,
+    },
+    /// The agent updated its structured plan.
+    PlanUpdate {
+        title: String,
+        steps: Vec<PlanStepEvent>,
+    },
+    /// The agent updated its working todo list.
+    TodoUpdate {
+        todos: Vec<TodoItemEvent>,
     },
     Completed,
 }

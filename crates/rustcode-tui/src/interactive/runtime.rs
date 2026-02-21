@@ -2,31 +2,39 @@ use std::collections::VecDeque;
 
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    MouseEventKind,
 };
+use futures_util::StreamExt;
 
 use super::{
     build_prompt_history, composer_insert_str, compute_sessions_view, disable_raw_mode,
-    drain_toasts, enable_raw_mode, event, execute, handle_key, io, render, sort_sessions, AppState,
-    CEvent, ChatFocus, ChatState, CrosstermBackend, Duration, EnterAlternateScreen,
-    InteractiveServices, InteractiveStart, KeyEventKind, LeaveAlternateScreen, MouseEventKind,
-    Screen, Terminal, TuiError,
+    drain_toasts, enable_raw_mode, execute, handle_key, io, render, sort_sessions, AppState,
+    ChatFocus, ChatState, CrosstermBackend, EnterAlternateScreen, InteractiveServices,
+    InteractiveStart, LeaveAlternateScreen, Screen, Terminal, TuiError,
 };
 
+mod event_stream;
 mod events;
+pub(crate) mod frame_scheduler;
 mod git;
 mod submit;
 
+use self::event_stream::TuiEvent;
 use self::events::{drain_messages, poll_provider_oauth};
+use self::frame_scheduler::FrameScheduler;
 use self::git::refresh_git_stat;
 pub(super) use self::submit::submit_prompt;
 
-pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
+/// Run the interactive TUI event loop using async `tokio::select!`.
+///
+/// # Errors
+/// Returns `TuiError` on terminal I/O or state failures.
+pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {
     let InteractiveServices {
         backend: session_backend,
         defaults,
         initial_status,
         start,
-        runtime,
         handles,
         config,
         executor,
@@ -35,8 +43,6 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
     } = services;
 
     // Install a terminal-restoring panic hook so the panic message is legible.
-    // Without this, the message prints while the terminal is still in raw mode.
-    // TerminalCleanup's Drop still runs during unwinding, so double-restore is harmless.
     let prev_panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
@@ -66,6 +72,13 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
     terminal
         .clear()
         .map_err(|err| TuiError::Io(err.to_string()))?;
+
+    // ── Frame scheduler ──
+    let (frame_requester, draw_rx, scheduler) = FrameScheduler::new();
+    tokio::spawn(scheduler.run());
+
+    // ── TUI event stream (crossterm + draw signals) ──
+    let mut tui_events = event_stream::TuiEventStream::new(draw_rx);
 
     let mut sessions = session_backend.list_sessions().map_err(TuiError::State)?;
     sort_sessions(&mut sessions);
@@ -161,7 +174,7 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
         backend: session_backend,
         config,
         executor,
-        runtime,
+        frame_requester: frame_requester.clone(),
         tx: handles.tx,
         rx: handles.rx,
         request_seq: 0,
@@ -181,83 +194,96 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
         }
     }
 
+    // Request an initial draw so the UI appears immediately.
+    frame_requester.schedule_frame();
+
     let mut last_screen_is_chat = matches!(state.screen, Screen::Chat(_));
 
     loop {
-        // Clear terminal when transitioning between Sessions and Chat screens
-        // to prevent ghost cells from the previous layout.
-        let screen_is_chat = matches!(state.screen, Screen::Chat(_));
-        if screen_is_chat != last_screen_is_chat {
-            let _ = terminal.clear();
-        }
-        last_screen_is_chat = screen_is_chat;
+        tokio::select! {
+            Some(msg) = state.rx.recv() => {
+                events::process_message(&mut state, msg);
+                frame_requester.schedule_frame();
+            }
+            Some(event) = tui_events.next() => {
+                match event {
+                    TuiEvent::Draw => {
+                        // Drain additional queued engine messages before drawing.
+                        drain_messages(&mut state);
+                        drain_toasts(&mut state);
+                        poll_provider_oauth(&mut state);
 
-        if let Ok(size) = terminal.size() {
-            state.last_area = size;
-        }
-        drain_toasts(&mut state);
-        drain_messages(&mut state);
-        poll_provider_oauth(&mut state);
-
-        terminal
-            .draw(|frame| render(frame, &state))
-            .map_err(|err| TuiError::Io(err.to_string()))?;
-
-        if event::poll(Duration::from_millis(16)).map_err(|err| TuiError::Io(err.to_string()))? {
-            let evt = event::read().map_err(|err| TuiError::Io(err.to_string()))?;
-            match evt {
-                CEvent::Key(key) => {
-                    if key.kind == KeyEventKind::Press && handle_key(&mut state, key) {
-                        return Ok(());
-                    }
-                }
-                CEvent::Paste(text) => handle_paste(&mut state, &text),
-                CEvent::Mouse(mouse) => {
-                    if let Screen::Chat(mut chat) =
-                        std::mem::replace(&mut state.screen, Screen::Sessions)
-                    {
-                        match mouse.kind {
-                            MouseEventKind::ScrollUp => {
-                                let max = chat.last_max_scroll.get();
-                                if max == 0 {
-                                    chat.scroll = 0;
-                                } else {
-                                    chat.scroll = chat.scroll.min(max).saturating_add(3).min(max);
-                                }
-                            }
-                            MouseEventKind::ScrollDown => {
-                                // Clamp to last known max_scroll before subtracting so
-                                // that over-scrolling up doesn't require many ticks to
-                                // "drain" before visual movement resumes.
-                                let max = chat.last_max_scroll.get();
-                                let clamped = if max > 0 {
-                                    chat.scroll.min(max)
-                                } else {
-                                    chat.scroll
-                                };
-                                chat.scroll = clamped.saturating_sub(3);
-                            }
-                            MouseEventKind::Down(_) => {
-                                // Click in the activity panel (right 28%) → switch focus there;
-                                // click elsewhere → return focus to composer.
-                                if !chat.activity_hidden {
-                                    let activity_x = state.last_area.width * 72 / 100;
-                                    if mouse.column >= activity_x {
-                                        chat.focus = ChatFocus::Activity;
-                                    } else {
-                                        chat.focus = ChatFocus::Composer;
-                                    }
-                                }
-                            }
-                            _ => {}
+                        // Clear terminal on screen transitions.
+                        let screen_is_chat = matches!(state.screen, Screen::Chat(_));
+                        if screen_is_chat != last_screen_is_chat {
+                            let _ = terminal.clear();
                         }
-                        state.screen = Screen::Chat(chat);
+                        last_screen_is_chat = screen_is_chat;
+
+                        if let Ok(size) = terminal.size() {
+                            state.last_area = size;
+                        }
+
+                        terminal
+                            .draw(|frame| render(frame, &state))
+                            .map_err(|err| TuiError::Io(err.to_string()))?;
+                    }
+                    TuiEvent::Key(key) => {
+                        if handle_key(&mut state, key) {
+                            return Ok(());
+                        }
+                        frame_requester.schedule_frame();
+                    }
+                    TuiEvent::Paste(text) => {
+                        handle_paste(&mut state, &text);
+                        frame_requester.schedule_frame();
+                    }
+                    TuiEvent::Mouse(mouse) => {
+                        handle_mouse(&mut state, mouse);
+                        frame_requester.schedule_frame();
                     }
                 }
-                _ => {}
             }
         }
     }
+}
+
+/// Handle a mouse event in the chat screen.
+fn handle_mouse(state: &mut AppState, mouse: crossterm::event::MouseEvent) {
+    let Screen::Chat(mut chat) = std::mem::replace(&mut state.screen, Screen::Sessions) else {
+        return;
+    };
+    match mouse.kind {
+        MouseEventKind::ScrollUp => {
+            let max = chat.last_max_scroll.get();
+            if max == 0 {
+                chat.scroll = 0;
+            } else {
+                chat.scroll = chat.scroll.min(max).saturating_add(3).min(max);
+            }
+        }
+        MouseEventKind::ScrollDown => {
+            let max = chat.last_max_scroll.get();
+            let clamped = if max > 0 {
+                chat.scroll.min(max)
+            } else {
+                chat.scroll
+            };
+            chat.scroll = clamped.saturating_sub(3);
+        }
+        MouseEventKind::Down(_) => {
+            if !chat.activity_hidden {
+                let activity_x = state.last_area.width * 72 / 100;
+                if mouse.column >= activity_x {
+                    chat.focus = ChatFocus::Activity;
+                } else {
+                    chat.focus = ChatFocus::Composer;
+                }
+            }
+        }
+        _ => {}
+    }
+    state.screen = Screen::Chat(chat);
 }
 
 pub(super) fn handle_paste(state: &mut AppState, text: &str) {
@@ -269,7 +295,6 @@ pub(super) fn handle_paste(state: &mut AppState, text: &str) {
         const LARGE_PASTE_THRESHOLD: usize = 30; // words
         let word_count = normalized.split_whitespace().count();
         if word_count >= LARGE_PASTE_THRESHOLD {
-            // Build a short summary: "first two words +N words pasted"
             let mut words = normalized.split_whitespace();
             let w1 = words.next().unwrap_or("");
             let w2 = words.next().unwrap_or("");
@@ -282,14 +307,11 @@ pub(super) fn handle_paste(state: &mut AppState, text: &str) {
             let remaining = word_count.saturating_sub(shown);
             let summary = format!("[{preview} +{remaining} words pasted]");
 
-            // Split composer at cursor so existing text is preserved.
             let before = chat.composer[..chat.composer_cursor].to_string();
             let after = chat.composer[chat.composer_cursor..].to_string();
 
-            // Full text that will be submitted: prefix + paste + suffix.
             let full_text = format!("{before}{normalized}{after}");
 
-            // Displayed text: prefix + summary + suffix.
             let new_cursor = before.len() + summary.len();
             chat.composer = format!("{before}{summary}{after}");
             chat.composer_cursor = new_cursor;

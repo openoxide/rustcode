@@ -94,6 +94,9 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
             last_max_scroll: std::cell::Cell::new(0),
             run_started_at: None,
             last_run_elapsed: None,
+            plan_title: None,
+            plan_steps: Vec::new(),
+            todos: Vec::new(),
         }),
         status: None,
         toasts: Vec::new(),
@@ -114,7 +117,7 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
         ))),
         config: None,
         executor: None,
-        runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
+        frame_requester: super::test_frame_requester(),
         tx: tokio::sync::mpsc::unbounded_channel().0,
         rx: tokio::sync::mpsc::unbounded_channel().1,
         request_seq: 0,
@@ -135,7 +138,7 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
     assert!(text.contains("(ctrl+o to expand)"), "text={text}");
     assert!(text.contains("model:null"), "text={text}");
     assert!(text.contains("[Null]"), "text={text}"); // provider label
-    // "ok=true" and "Output:" were removed in the new compact rendering
+                                                     // "ok=true" and "Output:" were removed in the new compact rendering
     assert!(!text.contains("ok=true"), "text={text}");
     assert!(!text.contains("Output:"), "text={text}");
 
@@ -233,6 +236,9 @@ fn chat_screen_hides_system_messages() {
             last_max_scroll: std::cell::Cell::new(0),
             run_started_at: None,
             last_run_elapsed: None,
+            plan_title: None,
+            plan_steps: Vec::new(),
+            todos: Vec::new(),
         }),
         status: None,
         toasts: Vec::new(),
@@ -252,7 +258,7 @@ fn chat_screen_hides_system_messages() {
         ))),
         config: None,
         executor: None,
-        runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
+        frame_requester: super::test_frame_requester(),
         tx: tokio::sync::mpsc::unbounded_channel().0,
         rx: tokio::sync::mpsc::unbounded_channel().1,
         request_seq: 0,
