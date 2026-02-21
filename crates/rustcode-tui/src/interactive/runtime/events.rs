@@ -194,6 +194,26 @@ pub(super) fn drain_messages(state: &mut AppState) {
                             chat.scroll = 0;
                             chat.pending_prompt = None;
                             if ok {
+                                if !chat.live_reasoning.trim().is_empty() {
+                                    let has_assistant_reasoning = chat
+                                        .messages
+                                        .iter()
+                                        .rev()
+                                        .find(|msg| msg.role == MessageRole::Assistant)
+                                        .and_then(|msg| msg.reasoning.as_deref())
+                                        .is_some_and(|text| !text.trim().is_empty());
+                                    if !has_assistant_reasoning {
+                                        if let Some(last_assistant) = chat
+                                            .messages
+                                            .iter_mut()
+                                            .rev()
+                                            .find(|msg| msg.role == MessageRole::Assistant)
+                                        {
+                                            last_assistant.reasoning =
+                                                Some(chat.live_reasoning.clone());
+                                        }
+                                    }
+                                }
                                 chat.live_assistant.clear();
                                 chat.live_reasoning.clear();
                             }

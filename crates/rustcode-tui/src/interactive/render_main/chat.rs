@@ -5,7 +5,7 @@ use super::super::{
     Constraint, Direction, Duration, InteractiveSubmitMode, Layout, Line, Modal, Modifier,
     Paragraph, Span, Style, SystemTime, ToastVariant, Wrap,
 };
-use super::{format_tokens, truncate_with_ellipsis, TYPING_TIMEOUT_MS};
+use super::{format_tokens, truncate_with_ellipsis};
 
 const RUNNING_FRAMES: &[char] = &['◐', '◓', '◑', '◒'];
 const RUNNING_DOTS: &[&str] = &["   ", ".  ", ".. ", "..."];
@@ -198,13 +198,8 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     let model_label_display = truncate_with_ellipsis(model_label, 36);
     let provider_label_display = truncate_with_ellipsis(&provider_label, 18);
 
-    let is_typing = chat
-        .last_typing_time
-        .is_some_and(|t| t.elapsed().as_millis() < TYPING_TIMEOUT_MS);
     let prompt_label = if chat.running.is_some() {
         "</> Prompt (running)"
-    } else if is_typing {
-        "</> Prompt (typing...)"
     } else {
         "</> Prompt"
     };

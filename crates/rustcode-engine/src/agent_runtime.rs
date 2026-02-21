@@ -90,6 +90,18 @@ impl Engine {
                 Some(&on_retry),
             )
             .await?;
+            let mut response = response;
+
+            if response
+                .reasoning
+                .as_deref()
+                .is_none_or(|text| text.trim().is_empty())
+            {
+                let merged_reasoning = response.reasoning_chunks.join("");
+                if !merged_reasoning.trim().is_empty() {
+                    response.reasoning = Some(merged_reasoning);
+                }
+            }
 
             // Record token usage for context tracking
             if let Some(usage) = &response.usage {

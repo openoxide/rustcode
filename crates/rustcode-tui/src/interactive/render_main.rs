@@ -7,9 +7,6 @@ use super::{
 mod chat;
 use self::chat::render_chat;
 
-/// Timeout for typing indicator (milliseconds).
-const TYPING_TIMEOUT_MS: u128 = 2000;
-
 pub(super) fn render(frame: &mut ratatui::Frame<'_>, state: &AppState) {
     frame.render_widget(Clear, frame.area());
 
