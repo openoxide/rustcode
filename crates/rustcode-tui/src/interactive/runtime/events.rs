@@ -190,8 +190,12 @@ pub(super) fn drain_messages(state: &mut AppState) {
                     }
                     match state.backend.load_messages(&chat.session.id) {
                         Ok(messages) => {
+                            let was_at_bottom = chat.scroll == 0;
                             chat.messages = messages;
-                            chat.scroll = 0;
+                            if was_at_bottom {
+                                chat.scroll = 0;
+                            }
+                            chat.committed_approvals.clear();
                             chat.pending_prompt = None;
                             if ok {
                                 if !chat.live_reasoning.trim().is_empty() {

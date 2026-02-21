@@ -29,6 +29,7 @@ fn make_chat_state_with_focus(session: SessionInfo, focus: ChatFocus) -> ChatSta
         find: None,
         running: None,
         pending_prompt: None,
+        committed_approvals: Vec::new(),
         composer_cleared_by_ctrl_c: false,
         last_typing_time: None,
         total_input_tokens: 0,

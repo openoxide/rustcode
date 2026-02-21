@@ -26,7 +26,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     let composer_content_lines = if chat.composer.is_empty() {
         1
     } else {
-        chat.composer.lines().count().max(1)
+        chat.composer.split('\n').count().max(1)
     };
     let composer_height = (composer_content_lines as u16 + 2).clamp(5, 8);
 
@@ -122,15 +122,21 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     let mut lines = build_transcript_lines(chat);
     lines = apply_find_highlight(lines, chat.find.as_ref());
 
-    // Append inline approval info when a tool approval is pending.
-    if let Some(pending) = &app.pending_approval {
+    // Append inline approval previews: committed (approved, awaiting result) first,
+    // then the current pending approval (if any).
+    {
         let inner_w = left[0].width.saturating_sub(2);
         let ws_root = app
             .config
             .as_ref()
             .map(|c| c.workspace_root.clone())
             .unwrap_or_default();
-        lines.extend(render_approval_inline(&pending.request, inner_w, &ws_root));
+        for req in &chat.committed_approvals {
+            lines.extend(render_approval_inline(req, inner_w, &ws_root));
+        }
+        if let Some(pending) = &app.pending_approval {
+            lines.extend(render_approval_inline(&pending.request, inner_w, &ws_root));
+        }
     }
 
     let transcript_inner_h = left[0].height.saturating_sub(2).max(1) as usize;

@@ -52,6 +52,7 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
                         2 if is_command => ApprovalResponse::AllowAllToolsAutopilot,
                         _ => ApprovalResponse::Deny,
                     };
+                    let is_deny = matches!(response, ApprovalResponse::Deny);
                     let label = match response {
                         ApprovalResponse::AllowOnce => {
                             format!("approved once [{}]", pending.request.tool)
@@ -67,6 +68,11 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
                     push_toast(state, ToastVariant::Info, label, Duration::from_secs(2));
                     let _ = pending.reply.send(response);
                     state.approval_selection = 0;
+                    if !is_deny {
+                        if let Screen::Chat(chat) = &mut state.screen {
+                            chat.committed_approvals.push(pending.request);
+                        }
+                    }
                 }
             }
             KeyCode::Esc => {

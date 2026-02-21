@@ -120,6 +120,7 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                 find: None,
                 running: None,
                 pending_prompt: None,
+                committed_approvals: Vec::new(),
                 composer_cleared_by_ctrl_c: false,
                 last_typing_time: None,
                 total_input_tokens: tokens_in,

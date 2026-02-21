@@ -32,6 +32,7 @@ fn make_chat_state(session: SessionInfo) -> ChatState {
         find: None,
         running: None,
         pending_prompt: None,
+        committed_approvals: Vec::new(),
         composer_cleared_by_ctrl_c: false,
         last_typing_time: None,
         total_input_tokens: 0,

@@ -123,6 +123,7 @@ pub(crate) fn open_session(state: &mut AppState, session: SessionInfo) {
         find: None,
         running: None,
         pending_prompt: None,
+        committed_approvals: Vec::new(),
         composer_cleared_by_ctrl_c: false,
         last_typing_time: None,
         context_limit: 0,

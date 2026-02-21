@@ -111,7 +111,7 @@ pub(super) fn render_tool_output(
         let filename = extract_filename(&desc_line);
 
         let mut header_spans: Vec<Span<'static>> =
-            vec![Span::styled("  ┌─ ", Style::default().fg(Color::DarkGray))];
+            vec![Span::styled(" ┌─ ", Style::default().fg(Color::DarkGray))];
         header_spans.push(Span::styled(
             filename,
             Style::default()
@@ -157,7 +157,7 @@ pub(super) fn render_tool_output(
                         del_no = range.1;
                     }
                     lines.push(Line::from(Span::styled(
-                        "  │ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄".to_string(),
+                        " │ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄".to_string(),
                         Style::default().fg(Color::Rgb(40, 50, 65)),
                     )));
                     continue;
@@ -173,7 +173,7 @@ pub(super) fn render_tool_output(
                 let (gutter, content_style, pipe_color) = if is_add {
                     add_no += 1;
                     (
-                        format!("{add_no:>3} "),
+                        format!("{add_no:>2} "),
                         Style::default()
                             .fg(Color::Rgb(80, 200, 80))
                             .bg(Color::Rgb(3, 40, 0)),
@@ -182,7 +182,7 @@ pub(super) fn render_tool_output(
                 } else if is_del {
                     del_no += 1;
                     (
-                        format!("{del_no:>3} "),
+                        format!("{del_no:>2} "),
                         Style::default()
                             .fg(Color::Rgb(200, 80, 80))
                             .bg(Color::Rgb(61, 1, 0)),
@@ -192,7 +192,7 @@ pub(super) fn render_tool_output(
                     add_no += 1;
                     del_no += 1;
                     (
-                        format!("{add_no:>3} "),
+                        format!("{add_no:>2} "),
                         Style::default().fg(Color::Rgb(160, 165, 178)),
                         Color::DarkGray,
                     )
@@ -209,7 +209,7 @@ pub(super) fn render_tool_output(
 
                 if is_diff_line {
                     let mut line_spans = vec![
-                        Span::styled("  │ ", Style::default().fg(pipe_color)),
+                        Span::styled(" │ ", Style::default().fg(pipe_color)),
                         Span::styled(gutter, Style::default().fg(pipe_color)),
                         Span::styled(sign.to_string(), Style::default().fg(pipe_color)),
                     ];
@@ -231,7 +231,7 @@ pub(super) fn render_tool_output(
                     lines.push(Line::from(line_spans).style(bg));
                 } else {
                     let mut line_spans = vec![
-                        Span::styled("  │ ", Style::default().fg(pipe_color)),
+                        Span::styled(" │ ", Style::default().fg(pipe_color)),
                         Span::styled(gutter, Style::default().fg(Color::Rgb(90, 95, 110))),
                     ];
                     if let Some(rest) = raw.strip_prefix(' ') {
@@ -255,7 +255,7 @@ pub(super) fn render_tool_output(
         }
 
         lines.push(Line::from(Span::styled(
-            "  └─",
+            " └─",
             Style::default().fg(Color::DarkGray),
         )));
     } else {

@@ -468,6 +468,9 @@ pub(super) struct ChatState {
     pub(super) running: Option<RunningCommand>,
     /// The prompt most recently submitted but not yet confirmed by backend reload.
     pub(super) pending_prompt: Option<String>,
+    /// Tool approval requests that were approved but whose results are not yet
+    /// loaded into `messages`. Rendered in the transcript until RunEnded fires.
+    pub(super) committed_approvals: Vec<ToolApprovalRequest>,
     /// Whether composer was just cleared by Ctrl+C (for "press again to exit" flow).
     pub(super) composer_cleared_by_ctrl_c: bool,
     /// Timestamp of last typing activity in composer.
