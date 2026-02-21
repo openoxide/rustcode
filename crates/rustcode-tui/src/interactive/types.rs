@@ -1,5 +1,5 @@
 use super::{
-    ApprovalResponse, Arc, CancellationToken, InteractiveDefaults, InteractiveMsg,
+    AbortHandle, ApprovalResponse, Arc, CancellationToken, InteractiveDefaults, InteractiveMsg,
     InteractiveSubmitMode, Line, MessageRole, Modifier, ResolvedConfig, SessionInfo, Size, Span,
     StoredMessage, Style, SystemTime, ToolApprovalRequest,
 };
@@ -17,6 +17,7 @@ pub(super) struct PendingApproval {
 
 pub(super) struct RunningCommand {
     pub(super) cancellation: CancellationToken,
+    pub(super) abort_handle: AbortHandle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -459,7 +460,10 @@ pub(super) struct ChatState {
     pub(super) details_open: bool,
     /// Whether the activity panel is hidden (toggled with Ctrl+W).
     pub(super) activity_hidden: bool,
+    /// Whether tool-call batches are expanded in transcript.
     pub(super) tool_details: bool,
+    /// Whether tool outputs are fully expanded (vs collapsed preview).
+    pub(super) output_details: bool,
     pub(super) find: Option<FindState>,
     pub(super) running: Option<RunningCommand>,
     /// The prompt most recently submitted but not yet confirmed by backend reload.

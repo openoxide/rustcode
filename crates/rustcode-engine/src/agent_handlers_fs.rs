@@ -11,7 +11,7 @@ use super::{
 ///
 /// At most `max_diff_lines` `+`/`-` lines are included; excess are summarised
 /// with a `...[N more]` note.
-fn diff_output(old: &str, new: &str, max_diff_lines: usize) -> String {
+pub(crate) fn diff_output(old: &str, new: &str, max_diff_lines: usize) -> String {
     use similar::{ChangeTag, TextDiff};
     let diff = TextDiff::from_lines(old, new);
     let mut added = 0usize;

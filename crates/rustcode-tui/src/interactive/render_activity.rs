@@ -4,6 +4,8 @@ use super::{
 };
 
 pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: &ChatState) {
+    frame.render_widget(Clear, area);
+
     let border = if chat.focus == ChatFocus::Activity {
         Style::default().fg(Color::Cyan)
     } else {
@@ -49,8 +51,12 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
     let selected = chat
         .activity_selected
         .min(chat.activity.len().saturating_sub(1));
-    let half = available / 2;
-    let start = selected.saturating_sub(half);
+    let start = if selected + 1 >= chat.activity.len() {
+        chat.activity.len().saturating_sub(available)
+    } else {
+        let half = available / 2;
+        selected.saturating_sub(half)
+    };
     let end = (start + available).min(chat.activity.len());
 
     let items = chat.activity[start..end]
@@ -69,9 +75,10 @@ pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: 
                 ActivityItem::OutputChunk { .. } => {
                     ("out", Style::default().add_modifier(Modifier::DIM))
                 }
-                ActivityItem::ReasoningChunk { .. } => {
-                    ("think", Style::default().fg(Color::Blue).add_modifier(Modifier::DIM))
-                }
+                ActivityItem::ReasoningChunk { .. } => (
+                    "think",
+                    Style::default().fg(Color::Blue).add_modifier(Modifier::DIM),
+                ),
                 ActivityItem::Warning { .. } => ("warn", Style::default().fg(Color::Magenta)),
                 ActivityItem::Failure { .. } => ("error", Style::default().fg(Color::Red)),
                 ActivityItem::Completed => ("done", Style::default().fg(Color::Green)),

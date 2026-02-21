@@ -110,22 +110,6 @@ pub(super) fn build_command_items(
     });
 
     items.push(CommandItem {
-        id: CommandId::ToggleTools,
-        title: "Toggle tools".to_string(),
-        detail: "Expand/collapse tool call details (Ctrl+D)".to_string(),
-        enabled: in_chat,
-        disabled_reason: (!in_chat).then_some("Open a session first".to_string()),
-    });
-
-    items.push(CommandItem {
-        id: CommandId::ToggleReasoning,
-        title: "Toggle thinking".to_string(),
-        detail: "Show/hide reasoning blocks (Ctrl+Y)".to_string(),
-        enabled: in_chat,
-        disabled_reason: (!in_chat).then_some("Open a session first".to_string()),
-    });
-
-    items.push(CommandItem {
         id: CommandId::Search,
         title: "Search transcript".to_string(),
         detail: "Find in transcript  /find <query>".to_string(),

@@ -17,11 +17,21 @@ pub(crate) async fn read_sse_or_body(
     let mut raw_body = String::new();
     let mut parse_buffer = String::new();
     let mut events = Vec::new();
+    let mut timed_out_with_partial_events = false;
 
     loop {
-        let chunk = timeout(idle_timeout, stream.next()).await.map_err(|_| {
-            LlmError::Transport("timed out waiting for provider response chunk".to_string())
-        })?;
+        let Ok(chunk) = timeout(idle_timeout, stream.next()).await else {
+            // Fallback: if we've already received complete SSE events, keep
+            // the partial response instead of failing the whole run.
+            if !events.is_empty() {
+                timed_out_with_partial_events = true;
+                break;
+            }
+            return Err(LlmError::Transport(
+                "timed out waiting for provider response chunk".to_string(),
+            ));
+        };
+
         let Some(chunk) = chunk else {
             break;
         };
@@ -41,8 +51,12 @@ pub(crate) async fn read_sse_or_body(
         return Ok(StreamedProviderBody::Body(raw_body));
     }
 
-    if let Some(trailing) = parse_sse_data_block(parse_buffer.trim()) {
-        events.push(trailing);
+    // Only parse trailing data when the stream ended cleanly. On timeout,
+    // trailing buffer is likely an incomplete SSE event fragment.
+    if !timed_out_with_partial_events {
+        if let Some(trailing) = parse_sse_data_block(parse_buffer.trim()) {
+            events.push(trailing);
+        }
     }
     Ok(StreamedProviderBody::SseEvents(events))
 }

@@ -152,7 +152,7 @@ mod tests {
         assert!(result.is_err(), "expected error for non-zero exit");
         let msg = result.unwrap_err().to_string();
         assert!(
-            msg.contains("exit_code=7") || msg.contains("7"),
+            msg.contains("exit_code=7") || msg.contains('7'),
             "msg={msg}"
         );
     }

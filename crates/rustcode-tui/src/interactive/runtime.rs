@@ -111,7 +111,8 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                 activity_selected: 0,
                 details_open: false,
                 activity_hidden: false,
-                tool_details: true,
+                tool_details: false,
+                output_details: false,
                 find: None,
                 running: None,
                 pending_prompt: None,
@@ -207,7 +208,12 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                     {
                         match mouse.kind {
                             MouseEventKind::ScrollUp => {
-                                chat.scroll = chat.scroll.saturating_add(3);
+                                let max = chat.last_max_scroll.get();
+                                if max == 0 {
+                                    chat.scroll = 0;
+                                } else {
+                                    chat.scroll = chat.scroll.min(max).saturating_add(3).min(max);
+                                }
                             }
                             MouseEventKind::ScrollDown => {
                                 // Clamp to last known max_scroll before subtracting so
@@ -306,7 +312,6 @@ pub(super) fn drain_messages(state: &mut AppState) {
         match msg {
             InteractiveMsg::EngineEvent(event) => {
                 if let Screen::Chat(chat) = &mut screen {
-                    let mut refresh = false;
                     let item = match &event.payload {
                         EventPayload::CommandAccepted { name } => {
                             Some(ActivityItem::CommandAccepted { name: name.clone() })
@@ -373,24 +378,21 @@ pub(super) fn drain_messages(state: &mut AppState) {
                             })
                         }
                         EventPayload::Failure { message } => {
-                            // Show a clean, actionable message in the footer and
-                            // toast; preserve the full technical detail in the
-                            // Activity panel (Ctrl+E to expand).
+                            // Show a clean, actionable message in transcript/toast.
+                            // Raw provider errors are often too noisy for UI.
                             let clean = clean_failure_message(&message);
                             state.status = Some(clean.clone());
-                            push_toast(state, ToastVariant::Error, clean, Duration::from_secs(6));
-                            refresh = true;
-                            chat.live_assistant.clear();
-                            chat.live_reasoning.clear();
-                            Some(ActivityItem::Failure {
-                                message: message.clone(),
-                            })
+                            push_toast(
+                                state,
+                                ToastVariant::Error,
+                                clean.clone(),
+                                Duration::from_secs(6),
+                            );
+                            Some(ActivityItem::Failure { message: clean })
                         }
                         EventPayload::Completed => {
                             chat.running = None;
-                            refresh = true;
-                            chat.live_assistant.clear();
-                            chat.live_reasoning.clear();
+                            chat.composer_cleared_by_ctrl_c = false;
                             push_toast(
                                 state,
                                 ToastVariant::Success,
@@ -420,6 +422,10 @@ pub(super) fn drain_messages(state: &mut AppState) {
                         EventPayload::ServeRequest { .. } => None,
                     };
 
+                    let was_at_tail =
+                        chat.activity_selected >= chat.activity.len().saturating_sub(1);
+                    let auto_follow_tail = chat.focus != ChatFocus::Activity || was_at_tail;
+
                     if let Some(item) = item {
                         chat.activity.push(item);
                     }
@@ -429,20 +435,10 @@ pub(super) fn drain_messages(state: &mut AppState) {
                             chat.activity_selected -= 1;
                         }
                     }
-                    if chat.activity_selected >= chat.activity.len() {
+                    if auto_follow_tail && !chat.activity.is_empty() {
                         chat.activity_selected = chat.activity.len().saturating_sub(1);
-                    }
-
-                    if refresh {
-                        match state.backend.load_messages(&chat.session.id) {
-                            Ok(messages) => {
-                                chat.messages = messages;
-                                chat.scroll = 0;
-                            }
-                            Err(err) => {
-                                state.status = Some(format!("failed to load transcript: {err}"));
-                            }
-                        }
+                    } else if chat.activity_selected >= chat.activity.len() {
+                        chat.activity_selected = chat.activity.len().saturating_sub(1);
                     }
                 }
             }
@@ -459,9 +455,7 @@ pub(super) fn drain_messages(state: &mut AppState) {
                         chat.last_run_elapsed = Some(started.elapsed());
                     }
                     chat.running = None;
-                    chat.pending_prompt = None;
-                    chat.live_assistant.clear();
-                    chat.live_reasoning.clear();
+                    chat.composer_cleared_by_ctrl_c = false;
                     if ok {
                         // Persist accumulated token usage so it survives restarts.
                         let _ = state.backend.update_session_usage(
@@ -475,6 +469,15 @@ pub(super) fn drain_messages(state: &mut AppState) {
                         let clean = message.as_deref().map(clean_failure_message);
                         state.status = clean.clone();
                         if let Some(msg) = clean {
+                            let has_failure = chat
+                                .activity
+                                .iter()
+                                .any(|item| matches!(item, ActivityItem::Failure { .. }));
+                            if !has_failure {
+                                chat.activity.push(ActivityItem::Failure {
+                                    message: msg.clone(),
+                                });
+                            }
                             push_toast(state, ToastVariant::Error, msg, Duration::from_secs(6));
                         }
                     }
@@ -482,6 +485,11 @@ pub(super) fn drain_messages(state: &mut AppState) {
                         Ok(messages) => {
                             chat.messages = messages;
                             chat.scroll = 0;
+                            chat.pending_prompt = None;
+                            if ok {
+                                chat.live_assistant.clear();
+                                chat.live_reasoning.clear();
+                            }
 
                             // Auto-rename untitled sessions from the first user message.
                             if ok && chat.session.title.is_none() {
@@ -503,10 +511,12 @@ pub(super) fn drain_messages(state: &mut AppState) {
                                             } else {
                                                 clean
                                             };
-                                            if let Ok(info) = state
+                                            if let Ok(mut info) = state
                                                 .backend
                                                 .update_session_title(&chat.session.id, Some(title))
                                             {
+                                                // Renaming must never alter the active model label.
+                                                info.model = chat.session.model.clone();
                                                 chat.session = info;
                                             }
                                         }
@@ -572,12 +582,10 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
     };
 
     let cancellation = CancellationToken::new();
-    chat.running = Some(RunningCommand {
-        cancellation: cancellation.clone(),
-    });
     chat.run_started_at = Some(std::time::Instant::now());
     chat.last_run_elapsed = None;
     chat.pending_prompt = Some(prompt.clone());
+    chat.composer_cleared_by_ctrl_c = false;
     chat.scroll = 0; // auto-scroll to bottom on new prompt
     state.status = None;
     chat.live_assistant.clear();
@@ -609,8 +617,9 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
     let publisher: Arc<dyn EventPublisher> = Arc::new(TuiPublisher::new(tx.clone()));
     let runtime = state.runtime.clone();
     let submit_mode = state.submit_mode;
-    runtime.spawn(async move {
-        let cancel_timeout = cancellation.clone();
+    let cancellation_for_task = cancellation.clone();
+    let run_task = runtime.spawn(async move {
+        let cancel_timeout = cancellation_for_task.clone();
         let tx_timeout = tx.clone();
 
         let context = CommandContext::with_cancellation(
@@ -620,7 +629,7 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
                 request_id,
                 started_at: SystemTime::now(),
             },
-            cancellation,
+            cancellation_for_task,
         );
 
         let command = match submit_mode {
@@ -656,6 +665,10 @@ pub(super) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
                 });
             }
         }
+    });
+    chat.running = Some(RunningCommand {
+        cancellation,
+        abort_handle: run_task.abort_handle(),
     });
 }
 

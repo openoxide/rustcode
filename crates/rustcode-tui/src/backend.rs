@@ -30,6 +30,8 @@ pub trait SessionBackend: Send + Sync {
         title: Option<String>,
     ) -> Result<SessionInfo, String>;
 
+    fn update_session_model(&self, session_id: &str, model: String) -> Result<SessionInfo, String>;
+
     /// Persist cumulative token usage and cost to the session metadata.
     ///
     /// Called when a run completes so the data survives across restarts.
@@ -99,6 +101,12 @@ impl SessionBackend for LocalSessionBackend {
     ) -> Result<SessionInfo, String> {
         self.store
             .update_session_title(session_id, title)
+            .map_err(|err| err.to_string())
+    }
+
+    fn update_session_model(&self, session_id: &str, model: String) -> Result<SessionInfo, String> {
+        self.store
+            .update_session_model(session_id, &model)
             .map_err(|err| err.to_string())
     }
 
@@ -248,6 +256,14 @@ impl SessionBackend for RemoteSessionBackend {
         _title: Option<String>,
     ) -> Result<SessionInfo, String> {
         Err("rename is not supported in tui attach mode".to_string())
+    }
+
+    fn update_session_model(
+        &self,
+        _session_id: &str,
+        _model: String,
+    ) -> Result<SessionInfo, String> {
+        Err("model update is not supported in tui attach mode".to_string())
     }
 
     fn update_session_usage(

@@ -331,60 +331,58 @@ fn render_tool_output(
             let mut add_no = 0usize;
             let mut del_no = 0usize;
             for raw in diff_body.lines() {
-                let (gutter, content_style, pipe_color) =
-                    if raw.starts_with("+++") || raw.starts_with("---") {
-                        (
-                            "    ".to_string(),
-                            Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
-                            Color::DarkGray,
-                        )
-                    } else if raw.starts_with("@@") {
-                        if let Some(range) = parse_hunk_header(raw) {
-                            add_no = range.0;
-                            del_no = range.1;
-                        }
-                        (
-                            "    ".to_string(),
-                            Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
-                            Color::DarkGray,
-                        )
-                    } else if raw.starts_with('+') {
-                        add_no += 1;
-                        (
-                            format!("{:>3} ", add_no),
-                            Style::default()
-                                .fg(Color::Rgb(80, 200, 80))
-                                .bg(Color::Rgb(3, 40, 0)),
-                            Color::Rgb(80, 200, 80),
-                        )
-                    } else if raw.starts_with('-') {
-                        del_no += 1;
-                        (
-                            format!("{:>3} ", del_no),
-                            Style::default()
-                                .fg(Color::Rgb(200, 80, 80))
-                                .bg(Color::Rgb(61, 1, 0)),
-                            Color::Rgb(200, 80, 80),
-                        )
-                    } else {
-                        add_no += 1;
-                        del_no += 1;
-                        (
-                            format!("{:>3} ", add_no),
-                            Style::default().add_modifier(Modifier::DIM),
-                            Color::DarkGray,
-                        )
-                    };
+                // @@ hunk headers: extract line numbers, render as a subtle separator
+                if raw.starts_with("@@") {
+                    if let Some(range) = parse_hunk_header(raw) {
+                        add_no = range.0;
+                        del_no = range.1;
+                    }
+                    lines.push(Line::from(Span::styled(
+                        "  │ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄".to_string(),
+                        Style::default().fg(Color::Rgb(40, 50, 65)),
+                    )));
+                    continue;
+                }
+                // Skip file header lines that may appear inside the diff body
+                if raw.starts_with("+++") || raw.starts_with("---") {
+                    continue;
+                }
+
+                let is_add = raw.starts_with('+');
+                let is_del = raw.starts_with('-');
+                let is_diff_line = is_add || is_del;
+
+                let (gutter, content_style, pipe_color) = if is_add {
+                    add_no += 1;
+                    (
+                        format!("{:>3} ", add_no),
+                        Style::default()
+                            .fg(Color::Rgb(80, 200, 80))
+                            .bg(Color::Rgb(3, 40, 0)),
+                        Color::Rgb(80, 200, 80),
+                    )
+                } else if is_del {
+                    del_no += 1;
+                    (
+                        format!("{:>3} ", del_no),
+                        Style::default()
+                            .fg(Color::Rgb(200, 80, 80))
+                            .bg(Color::Rgb(61, 1, 0)),
+                        Color::Rgb(200, 80, 80),
+                    )
+                } else {
+                    // Context line — visible but slightly muted (not dim/commented)
+                    add_no += 1;
+                    del_no += 1;
+                    (
+                        format!("{:>3} ", add_no),
+                        Style::default().fg(Color::Rgb(160, 165, 178)),
+                        Color::DarkGray,
+                    )
+                };
 
                 let code_text = raw.get(1..).unwrap_or(raw);
-                let is_diff_line = raw.starts_with('+') || raw.starts_with('-');
-                let sign = if raw.starts_with('+') {
-                    "+"
-                } else if raw.starts_with('-') {
-                    "-"
-                } else {
-                    ""
-                };
+                let sign = if is_add { "+" } else if is_del { "-" } else { "" };
 
                 if is_diff_line {
                     let mut line_spans = vec![
@@ -402,30 +400,29 @@ fn render_tool_output(
                     } else {
                         line_spans.push(Span::styled(code_text.to_string(), content_style));
                     }
-                    let bg = if raw.starts_with('+') {
+                    let bg = if is_add {
                         Style::default().bg(Color::Rgb(3, 40, 0))
                     } else {
                         Style::default().bg(Color::Rgb(61, 1, 0))
                     };
                     lines.push(Line::from(line_spans).style(bg));
                 } else {
+                    // Context line
                     let mut line_spans = vec![
                         Span::styled("  │ ", Style::default().fg(pipe_color)),
-                        Span::styled(gutter, Style::default().add_modifier(Modifier::DIM)),
+                        Span::styled(gutter, Style::default().fg(Color::Rgb(90, 95, 110))),
                     ];
                     if let Some(rest) = raw.strip_prefix(' ') {
-                        line_spans.push(Span::styled(
-                            " ",
-                            Style::default()
-                                .fg(Color::DarkGray)
-                                .add_modifier(Modifier::DIM),
-                        ));
+                        line_spans.push(Span::styled(" ", Style::default()));
                         if let Some(ref mut state) = hl {
                             let hl_spans = highlight_code_line(rest, state);
                             if !hl_spans.is_empty() {
                                 line_spans.extend(hl_spans);
                             } else {
-                                line_spans.push(Span::styled(rest.to_string(), content_style));
+                                line_spans.push(Span::styled(
+                                    rest.to_string(),
+                                    content_style,
+                                ));
                             }
                         } else {
                             line_spans.push(Span::styled(rest.to_string(), content_style));
@@ -803,17 +800,36 @@ fn emit_combined_tool_summary(
             format!("  \u{25b6} {latest_label}{count_part}{fail_part}  (ctrl+o to expand)"),
             Style::default().fg(Color::Rgb(160, 165, 180)),
         )));
-        if let Some(latest_msg) = latest {
-            if is_editing_tool(latest_name) {
-                let content = latest_msg.content.as_str().unwrap_or("");
+        // Show diffs for ALL editing tools in the batch (not just the latest).
+        for msg in pending.iter() {
+            let msg_name = msg.tool_name.as_deref().unwrap_or("tool");
+            if is_editing_tool(msg_name) {
+                let content = msg.content.as_str().unwrap_or("");
                 if let Some((ok, _truncated, output)) = parse_tool_payload(content) {
                     if ok && output.contains("\n@@diff\n") {
-                        render_tool_output(lines, latest_name, &output, true, ok);
+                        render_tool_output(lines, msg_name, &output, true, ok);
                     }
                 }
             }
         }
         lines.push(Line::raw(""));
+    }
+}
+
+/// Emit diff output for every editing tool in `pending` without any summary
+/// header.  Used for earlier tool batches in collapsed mode so file changes
+/// are always visible in the transcript regardless of expand/collapse state.
+fn emit_editing_diffs(lines: &mut Vec<Line<'static>>, pending: &[&StoredMessage]) {
+    for msg in pending {
+        let name = msg.tool_name.as_deref().unwrap_or("tool");
+        if is_editing_tool(name) {
+            let content = msg.content.as_str().unwrap_or("");
+            if let Some((ok, _, output)) = parse_tool_payload(content) {
+                if ok && output.contains("\n@@diff\n") {
+                    render_tool_output(lines, name, &output, true, ok);
+                }
+            }
+        }
     }
 }
 
@@ -1029,11 +1045,14 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
                     append_tool_message_lines(&mut lines, m, chat.output_details, &tool_args_map);
                 }
             } else if pending_includes_last && !collapsed_summary_shown {
-                // Collapsed: this is the last batch — show ONE combined summary.
+                // Collapsed: this is the last batch — show combined summary + all diffs.
                 emit_combined_tool_summary(&mut lines, &pending_tools, false, &tool_args_map);
                 collapsed_summary_shown = true;
+            } else {
+                // Earlier batch in collapsed mode: don't show the summary header, but
+                // always surface any editing-tool diffs so changes stay visible in chat.
+                emit_editing_diffs(&mut lines, &pending_tools);
             }
-            // Earlier batches in collapsed mode are silently dropped (combined).
             pending_tools.clear();
             pending_includes_last = false;
         }
@@ -1054,6 +1073,8 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
             }
         } else if !collapsed_summary_shown {
             emit_combined_tool_summary(&mut lines, &pending_tools, false, &tool_args_map);
+        } else {
+            emit_editing_diffs(&mut lines, &pending_tools);
         }
     }
     // Show the in-flight user prompt immediately (before backend confirms it)

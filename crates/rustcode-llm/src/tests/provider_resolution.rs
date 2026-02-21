@@ -77,7 +77,7 @@ fn resolves_oauth_access_from_auth_store_when_env_missing() {
             "openai",
             "oauth-access-token",
             Some("oauth-refresh-token"),
-            Some(1234567890),
+            Some(1_234_567_890),
             Some("acct_123"),
         )
         .expect("must write oauth credential");

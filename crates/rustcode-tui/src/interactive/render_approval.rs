@@ -391,6 +391,9 @@ fn render_approval_preview(
     out
 }
 
+/// Render a patch preview using the same `  NNN +/-/  code` style as the
+/// `write` and `edit` approval previews.  Accepts unified diff and Codex
+/// `*** Update File:` format.
 fn render_patch_text_preview(
     out: &mut Vec<Line<'static>>,
     patch_text: &str,
@@ -403,9 +406,9 @@ fn render_patch_text_preview(
     const MAX_LINES: usize = 120;
     let mut current_ext = default_ext.to_string();
     let mut hl = HighlightState::new(&current_ext);
-    let mut old_line = 1usize;
-    let mut new_line = 1usize;
-    let mut has_hunk_numbers = false;
+    // del_no / add_no track old-file / new-file line numbers.
+    let mut add_no = 0usize;
+    let mut del_no = 0usize;
     let mut rendered = 0usize;
     let mut truncated = false;
 
@@ -417,14 +420,17 @@ fn render_patch_text_preview(
         let raw = raw.trim_end_matches('\r');
         let trimmed = raw.trim_start();
 
+        // Skip code-fence markers from markdown-wrapped patches
         if trimmed.starts_with("```") {
             continue;
         }
 
+        // `+++ b/path` → file header, reset highlighter
         if let Some(path) = patch_file_path_from_header(trimmed) {
             current_ext = file_ext(&path);
             hl = HighlightState::new(&current_ext);
-            has_hunk_numbers = false;
+            add_no = 0;
+            del_no = 0;
             out.push(Line::from(vec![
                 Span::styled("  file: ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
@@ -437,110 +443,127 @@ fn render_patch_text_preview(
             rendered += 1;
             continue;
         }
-        if trimmed.starts_with("--- ") {
+
+        // Codex `*** Update File:` / `*** Add File:` → file header, reset highlighter
+        if let Some(path) = trimmed
+            .strip_prefix("*** Update File: ")
+            .or_else(|| trimmed.strip_prefix("*** Add File: "))
+        {
+            let path = path.trim();
+            current_ext = file_ext(path);
+            hl = HighlightState::new(&current_ext);
+            add_no = 0;
+            del_no = 0;
+            out.push(Line::from(vec![
+                Span::styled("  file: ", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    path.to_string(),
+                    Style::default()
+                        .fg(Color::White)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            ]));
+            rendered += 1;
             continue;
         }
 
+        // Skip all other `***` Codex markers and `---` file header lines
+        if trimmed.starts_with("*** ") || trimmed.starts_with("--- ") {
+            continue;
+        }
+
+        // Bare Codex `@@` — hunk separator without line numbers
+        if trimmed == "@@" {
+            continue;
+        }
+
+        // Unified diff hunk header — update line counters, show a dim separator
         if let Some((old_start, new_start)) = parse_unified_hunk_starts(trimmed) {
-            old_line = old_start;
-            new_line = new_start;
-            has_hunk_numbers = true;
+            del_no = old_start.saturating_sub(1);
+            add_no = new_start.saturating_sub(1);
             out.push(Line::from(Span::styled(
-                format!("  {trimmed}"),
-                Style::default().fg(Color::Cyan).add_modifier(Modifier::DIM),
-            )));
-            rendered += 1;
-            continue;
-        }
-
-        if trimmed.starts_with('+') && !trimmed.starts_with("+++") {
-            let mut spans = vec![Span::styled("  ", Style::default())];
-            if has_hunk_numbers {
-                spans.push(Span::styled(
-                    format!("{new_line:>3} "),
-                    Style::default().fg(Color::Rgb(80, 200, 80)),
-                ));
-            } else {
-                spans.push(Span::styled("    ", Style::default().fg(Color::DarkGray)));
-            }
-            spans.push(Span::styled(
-                "+ ",
-                Style::default().fg(Color::Rgb(80, 200, 80)),
-            ));
-            spans.extend(code_spans(trimmed.trim_start_matches('+'), &mut hl));
-            out.push(padded_line(
-                spans,
-                Style::default().bg(Color::Rgb(3, 40, 0)),
-                width,
-            ));
-            if has_hunk_numbers {
-                new_line += 1;
-            }
-            rendered += 1;
-        } else if trimmed.starts_with('-') && !trimmed.starts_with("---") {
-            let mut spans = vec![Span::styled("  ", Style::default())];
-            if has_hunk_numbers {
-                spans.push(Span::styled(
-                    format!("{old_line:>3} "),
-                    Style::default().fg(Color::Rgb(200, 80, 80)),
-                ));
-            } else {
-                spans.push(Span::styled("    ", Style::default().fg(Color::DarkGray)));
-            }
-            spans.push(Span::styled(
-                "- ",
-                Style::default().fg(Color::Rgb(200, 80, 80)),
-            ));
-            spans.extend(code_spans(trimmed.trim_start_matches('-'), &mut hl));
-            out.push(padded_line(
-                spans,
-                Style::default().bg(Color::Rgb(61, 1, 0)),
-                width,
-            ));
-            if has_hunk_numbers {
-                old_line += 1;
-            }
-            rendered += 1;
-        } else if trimmed.starts_with("+++ ") || trimmed.starts_with("--- ") {
-            out.push(Line::from(Span::styled(
-                format!("  {trimmed}"),
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            )));
-            rendered += 1;
-        } else if trimmed.starts_with("*** ") {
-            continue;
-        } else if let Some(rest) = trimmed.strip_prefix(' ') {
-            let mut spans = vec![Span::styled("  ", Style::default())];
-            if has_hunk_numbers {
-                spans.push(Span::styled(
-                    format!("{old_line:>3} "),
-                    Style::default().fg(Color::DarkGray),
-                ));
-            } else {
-                spans.push(Span::styled("    ", Style::default().fg(Color::DarkGray)));
-            }
-            spans.push(Span::styled("  ", Style::default()));
-            spans.extend(code_spans(rest, &mut hl));
-            out.push(padded_line(spans, Style::default(), width));
-            if has_hunk_numbers {
-                old_line += 1;
-                new_line += 1;
-            }
-            rendered += 1;
-        } else if trimmed.starts_with("\\ No newline") {
-            continue;
-        } else {
-            out.push(Line::from(Span::styled(
-                format!("  {trimmed}"),
+                format!("     … line {new_start}"),
                 Style::default()
                     .fg(Color::DarkGray)
                     .add_modifier(Modifier::DIM),
             )));
             rendered += 1;
+            continue;
         }
+
+        // Skip `\\ No newline at end of file`
+        if trimmed.starts_with("\\ No newline") {
+            continue;
+        }
+
+        // Added line — raw starts with `+`
+        if raw.starts_with('+') {
+            add_no += 1;
+            let code_text = raw.get(1..).unwrap_or("");
+            let n = add_no;
+            let mut spans = vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    format!("{n:>3} "),
+                    Style::default().fg(Color::Rgb(80, 200, 80)),
+                ),
+                Span::styled("+ ", Style::default().fg(Color::Rgb(80, 200, 80))),
+            ];
+            spans.extend(code_spans(code_text, &mut hl));
+            out.push(padded_line(
+                spans,
+                Style::default().bg(Color::Rgb(3, 40, 0)),
+                width,
+            ));
+            rendered += 1;
+            continue;
+        }
+
+        // Removed line — raw starts with `-`
+        if raw.starts_with('-') {
+            del_no += 1;
+            let code_text = raw.get(1..).unwrap_or("");
+            let n = del_no;
+            let mut spans = vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    format!("{n:>3} "),
+                    Style::default().fg(Color::Rgb(200, 80, 80)),
+                ),
+                Span::styled("- ", Style::default().fg(Color::Rgb(200, 80, 80))),
+            ];
+            spans.extend(code_spans(code_text, &mut hl));
+            out.push(padded_line(
+                spans,
+                Style::default().bg(Color::Rgb(61, 1, 0)),
+                width,
+            ));
+            rendered += 1;
+            continue;
+        }
+
+        // Context line — raw starts with ` ` (space prefix in unified diff)
+        if raw.starts_with(' ') {
+            add_no += 1;
+            del_no += 1;
+            let code_text = &raw[1..]; // strip the single diff-prefix space
+            let n = add_no;
+            let mut spans = vec![
+                Span::styled("  ", Style::default()),
+                Span::styled(
+                    format!("{n:>3} "),
+                    Style::default().fg(Color::DarkGray),
+                ),
+                Span::styled("  ", Style::default()),
+            ];
+            spans.extend(code_spans(code_text, &mut hl));
+            out.push(padded_line(spans, Style::default(), width));
+            rendered += 1;
+            continue;
+        }
+        // Skip any other unrecognised lines (no noise in the preview)
     }
+
     if truncated {
         out.push(Line::from(Span::styled(
             format!(
@@ -783,10 +806,12 @@ mod tests {
 
         let lines = render_approval_inline(&req, 120, Path::new("."));
         let text = lines_to_text(&lines);
-        assert!(text.contains("@@ -1,2 +1,2 @@"), "text={text}");
+        // @@ hunk header is shown as "… line N" separator
+        assert!(text.contains("… line"), "expected separator in text={text}");
+        // same style as write/edit: "  NNN - code" and "  NNN + code"
         assert!(text.contains("- old"), "text={text}");
         assert!(text.contains("+ new"), "text={text}");
-        assert!(text.contains("file: src/main.rs"), "text={text}");
+        assert!(text.contains("src/main.rs"), "text={text}");
     }
 
     #[test]

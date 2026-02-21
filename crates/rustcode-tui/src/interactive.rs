@@ -17,6 +17,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
 use ratatui::Terminal;
 
+use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
 
 use rustcode_core::command::AgentOptions;
@@ -67,7 +68,10 @@ use provider_manager::{
     provider_display_name, provider_env_hint,
 };
 use render_activity::{render_activity, render_activity_details_modal};
-use render_approval::{render_approval_inline, render_approval_selector};
+use render_approval::{
+    approval_is_command_permission, approval_options_count, render_approval_inline,
+    render_approval_selector,
+};
 use render_main::render;
 use render_modals::{centered_rect, render_help_modal, render_modal};
 use render_provider::render_provider_manager_modal;

@@ -1,6 +1,7 @@
 use super::{
-    build_prompt_history, build_provider_entries, composer_backspace, composer_clear,
-    composer_delete, composer_insert_str, composer_kill_line_backward, composer_kill_line_forward,
+    approval_is_command_permission, approval_options_count, build_prompt_history,
+    build_provider_entries, composer_backspace, composer_clear, composer_delete,
+    composer_insert_str, composer_kill_line_backward, composer_kill_line_forward,
     composer_move_down, composer_move_end, composer_move_home, composer_move_left,
     composer_move_right, composer_move_up, composer_word_left, composer_word_right,
     compute_palette_view, compute_sessions_view, execute_command, filter_files, filter_models,
@@ -21,15 +22,9 @@ use self::input_sessions::handle_sessions_key;
 
 pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
     if state.pending_approval.is_some() {
-        let perm = state
-            .pending_approval
-            .as_ref()
-            .unwrap()
-            .request
-            .permission
-            .to_lowercase();
-        let is_command = matches!(perm.as_str(), "exec" | "bash" | "pty_exec");
-        let options_count: usize = 3;
+        let request = &state.pending_approval.as_ref().unwrap().request;
+        let is_command = approval_is_command_permission(&request.permission);
+        let options_count = approval_options_count(request);
 
         match key.code {
             KeyCode::Left | KeyCode::Up => {
@@ -46,19 +41,20 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
                 let pending = state.pending_approval.take().unwrap();
                 let response = match state.approval_selection {
                     0 => ApprovalResponse::AllowOnce,
-                    1 if is_command => ApprovalResponse::AllowAllCommandsInDirectory,
-                    1 => ApprovalResponse::AllowAllToolsInDirectory,
+                    1 if is_command => ApprovalResponse::AllowAllCommands,
+                    1 => ApprovalResponse::AllowAllToolsAutopilot,
+                    2 if is_command => ApprovalResponse::AllowAllToolsAutopilot,
                     _ => ApprovalResponse::Deny,
                 };
                 let label = match response {
                     ApprovalResponse::AllowOnce => {
                         format!("approved once [{}]", pending.request.tool)
                     }
-                    ApprovalResponse::AllowAllToolsInDirectory => {
-                        "approved all tools in this directory".to_string()
+                    ApprovalResponse::AllowAllCommands => {
+                        "allowed all executionary commands".to_string()
                     }
-                    ApprovalResponse::AllowAllCommandsInDirectory => {
-                        "approved all commands in this directory".to_string()
+                    ApprovalResponse::AllowAllToolsAutopilot => {
+                        "approved all tools (auto-pilot mode)".to_string()
                     }
                     ApprovalResponse::Deny => format!("denied [{}]", pending.request.tool),
                 };
@@ -649,9 +645,40 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
                             state.config = Some(Arc::new(updated));
                         }
 
-                        // 3. Update current session model so footer reflects change immediately
+                        // 3. Persist the current session model (local backend) and
+                        // update in-memory session so the composer label stays stable.
+                        let current_session_id = match &state.screen {
+                            Screen::Chat(chat) => Some(chat.session.id.clone()),
+                            _ => None,
+                        };
+                        let mut persisted_session = None;
+                        if let Some(session_id) = current_session_id {
+                            if let Ok(updated) = state
+                                .backend
+                                .update_session_model(&session_id, new_model.clone())
+                            {
+                                if let Some(idx) =
+                                    state.sessions.iter().position(|s| s.id == updated.id)
+                                {
+                                    state.sessions[idx] = updated.clone();
+                                    sort_sessions(&mut state.sessions);
+                                    state.sessions_view = compute_sessions_view(
+                                        &state.sessions,
+                                        &state.sessions_filter,
+                                    );
+                                    state.selected = state
+                                        .selected
+                                        .min(state.sessions_view.len().saturating_sub(1));
+                                }
+                                persisted_session = Some(updated);
+                            }
+                        }
                         if let Screen::Chat(ref mut chat) = state.screen {
-                            chat.session.model = new_model.clone();
+                            if let Some(updated) = persisted_session {
+                                chat.session = updated;
+                            } else {
+                                chat.session.model = new_model.clone();
+                            }
                         }
 
                         push_toast(

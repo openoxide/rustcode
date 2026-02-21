@@ -120,6 +120,8 @@ pub(crate) fn normalize_endpoint_for_provider(
 }
 
 pub(crate) fn truncate_for_error(body: &str) -> String {
+    const LIMIT: usize = 200;
+
     // Prefer a human-readable "message" field from JSON error bodies so we
     // never embed raw JSON in user-visible error strings.
     //
@@ -147,7 +149,6 @@ pub(crate) fn truncate_for_error(body: &str) -> String {
         }
     }
     // Fallback: plain-text body, truncated
-    const LIMIT: usize = 200;
     if body.chars().count() <= LIMIT {
         body.to_string()
     } else {

@@ -27,8 +27,6 @@ pub(super) const SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     ("/sessions", "Go to sessions screen  (Ctrl+Q)"),
     ("/skill", "List or inject a skill  (Ctrl+S)"),
-    ("/thinking", "Toggle thinking/reasoning visibility  (Ctrl+Y)"),
-    ("/tools", "Toggle tool call details  (Ctrl+D)"),
 ];
 
 /// Filter `entries` (each a `"provider/model"` string) by case-insensitive substring match.
@@ -109,7 +107,8 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                         activity_selected: 0,
                         details_open: false,
                         activity_hidden: false,
-                        tool_details: true,
+                        tool_details: false,
+                        output_details: false,
                         find: None,
                         running: None,
                         pending_prompt: None,
@@ -173,7 +172,8 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                     chat.activity.clear();
                     chat.activity_selected = 0;
                     chat.details_open = false;
-                    chat.tool_details = true;
+                    chat.tool_details = false;
+                    chat.output_details = false;
                     chat.find = None;
                     chat.running = None;
                     push_toast(
@@ -281,14 +281,17 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                 );
                 return;
             };
-            chat.tool_details = !chat.tool_details;
+            let expand = !chat.tool_details;
+            chat.tool_details = expand;
+            chat.output_details = expand;
+            chat.show_reasoning = expand;
             push_toast(
                 state,
                 ToastVariant::Info,
-                if chat.tool_details {
-                    "tools: details"
+                if expand {
+                    "details: expanded"
                 } else {
-                    "tools: summary"
+                    "details: collapsed"
                 },
                 Duration::from_secs(2),
             );
@@ -364,12 +367,18 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
         }
         CommandId::CancelRun => {
             if let Screen::Chat(chat) = &mut state.screen {
-                if let Some(running) = &chat.running {
+                if let Some(running) = chat.running.take() {
                     running.cancellation.cancel();
+                    running.abort_handle.abort();
+                    if let Some(started) = chat.run_started_at.take() {
+                        chat.last_run_elapsed = Some(started.elapsed());
+                    }
+                    chat.pending_prompt = None;
+                    chat.composer_cleared_by_ctrl_c = false;
                     push_toast(
                         state,
                         ToastVariant::Warning,
-                        "cancel requested",
+                        "force cancelled",
                         Duration::from_secs(2),
                     );
                 }
@@ -552,7 +561,9 @@ pub(super) fn handle_slash_command(
                 .backend
                 .update_session_title(&chat.session.id, Some(title.to_string()))
             {
-                Ok(updated) => {
+                Ok(mut updated) => {
+                    // Renaming must never alter the active model label.
+                    updated.model = chat.session.model.clone();
                     chat.session = updated.clone();
                     if let Some(idx) = state.sessions.iter().position(|s| s.id == updated.id) {
                         state.sessions[idx] = updated;
@@ -587,14 +598,17 @@ pub(super) fn handle_slash_command(
             ChatNav::Stay
         }
         "tools" => {
-            chat.tool_details = !chat.tool_details;
+            let expand = !chat.tool_details;
+            chat.tool_details = expand;
+            chat.output_details = expand;
+            chat.show_reasoning = expand;
             push_toast(
                 state,
                 ToastVariant::Info,
-                if chat.tool_details {
-                    "tools: details"
+                if expand {
+                    "details: expanded"
                 } else {
-                    "tools: summary"
+                    "details: collapsed"
                 },
                 Duration::from_secs(2),
             );
@@ -686,7 +700,8 @@ pub(super) fn handle_slash_command(
                     chat.activity.clear();
                     chat.activity_selected = 0;
                     chat.details_open = false;
-                    chat.tool_details = true;
+                    chat.tool_details = false;
+                    chat.output_details = false;
                     chat.running = None;
                     push_toast(
                         state,
@@ -737,7 +752,8 @@ pub(super) fn handle_slash_command(
                     chat.activity.clear();
                     chat.activity_selected = 0;
                     chat.details_open = false;
-                    chat.tool_details = true;
+                    chat.tool_details = false;
+                    chat.output_details = false;
                     chat.running = None;
                     push_toast(
                         state,
@@ -1000,7 +1016,8 @@ fn open_session(state: &mut AppState, session: rustcode_core::SessionInfo) {
         activity_selected: 0,
         details_open: false,
         activity_hidden: false,
-        tool_details: true,
+        tool_details: false,
+        output_details: false,
         find: None,
         running: None,
         pending_prompt: None,

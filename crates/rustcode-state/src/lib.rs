@@ -245,6 +245,28 @@ impl SessionStore {
         Ok(info)
     }
 
+    pub fn update_session_model(
+        &self,
+        session_id: &str,
+        model: &str,
+    ) -> Result<SessionInfo, StateError> {
+        let next_model = model.trim();
+        if next_model.is_empty() {
+            return Err(StateError::Validation(
+                "model must not be empty".to_string(),
+            ));
+        }
+        let dir = self.session_dir(session_id);
+        if !dir.exists() {
+            return Err(StateError::NotFound(session_id.to_string()));
+        }
+        let mut info = self.get_session(session_id)?;
+        info.model = next_model.to_string();
+        info.updated_at_unix_ms = now_unix_ms()?;
+        write_json_atomic(&dir.join("meta.json"), &info)?;
+        Ok(info)
+    }
+
     /// Persist accumulated token usage and cost for a session.
     ///
     /// Called when a run completes successfully so that the data is available
@@ -596,5 +618,28 @@ mod tests {
         assert!(session.id["rc-".len()..]
             .chars()
             .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit()));
+    }
+
+    #[test]
+    fn update_session_model_round_trips() {
+        let root = temp_dir("update-model");
+        let store = SessionStore::with_root(root.join("sessions"));
+        let session = store
+            .create_session(
+                None,
+                None,
+                Path::new("/tmp"),
+                Path::new("/tmp"),
+                "openai/gpt-5",
+            )
+            .expect("create");
+
+        let updated = store
+            .update_session_model(&session.id, "openai/gpt-5.3-codex")
+            .expect("update model");
+        assert_eq!(updated.model, "openai/gpt-5.3-codex");
+
+        let loaded = store.get_session(&session.id).expect("get");
+        assert_eq!(loaded.model, "openai/gpt-5.3-codex");
     }
 }

@@ -54,7 +54,13 @@ pub fn resolve_auth_method_rows() -> (Vec<AuthMethodRow>, Option<String>) {
         }
         Err(err) => {
             warning = Some(format!("models index unavailable: {err}"));
-            for id in ["openai", "anthropic", "github-copilot", "gitlab"] {
+            for id in [
+                "openai",
+                "openrouter",
+                "anthropic",
+                "github-copilot",
+                "gitlab",
+            ] {
                 rows.push(AuthMethodRow {
                     id: id.to_string(),
                     name: fallback_provider_name(id).to_string(),
@@ -196,6 +202,7 @@ fn parse_auth_methods(methods: &[String]) -> Vec<AuthMethod> {
 fn fallback_provider_name(id: &str) -> &'static str {
     match id {
         "openai" => "OpenAI",
+        "openrouter" => "OpenRouter",
         "anthropic" => "Anthropic",
         "github-copilot" => "GitHub Copilot",
         "gitlab" => "GitLab",

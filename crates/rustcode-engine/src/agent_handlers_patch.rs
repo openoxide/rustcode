@@ -1,4 +1,5 @@
 use super::{AgentOptions, AgentState, CommandContext, Engine, ExecutionError, PathOperation};
+use crate::agent_handlers_fs::diff_output;
 
 impl Engine {
     /// Apply a unified diff patch to workspace files.
@@ -23,52 +24,115 @@ impl Engine {
     ) -> Result<String, ExecutionError> {
         // Auto-snapshot before the first mutation this session
         self.auto_snapshot_before_mutation(state, context).await;
-        let patches = parse_unified_diff(patch_text)?;
-        if patches.is_empty() {
-            return Err(ExecutionError::Dispatch(
-                "no valid patches found in patch text".to_string(),
-            ));
-        }
-
         let mut applied = Vec::new();
-        for patch in &patches {
-            let resolved =
-                self.resolve_workspace_path(context, &patch.path, PathOperation::Edit)?;
+        let mut rendered_diffs = Vec::new();
+        let patches = parse_unified_diff(patch_text)?;
+        if !patches.is_empty() {
+            for patch in &patches {
+                let resolved =
+                    self.resolve_workspace_path(context, &patch.path, PathOperation::Edit)?;
+                if !patch.is_new_file && !state.read_paths.contains(&resolved) {
+                    return Err(ExecutionError::Dispatch(format!(
+                        "apply_patch requires reading {} first",
+                        patch.path
+                    )));
+                }
 
-            // For new files (--- /dev/null), skip the read check
-            let is_new_file = patch.is_new_file;
-            if !is_new_file && !state.read_paths.contains(&resolved) {
-                return Err(ExecutionError::Dispatch(format!(
-                    "apply_patch requires reading {} first",
-                    patch.path
-                )));
-            }
+                let original = if patch.is_new_file {
+                    String::new()
+                } else {
+                    self.fs
+                        .read_to_string_limited(&resolved, options.max_read_bytes)
+                        .await
+                        .map_err(|err| ExecutionError::Executor(err.to_string()))?
+                };
 
-            let original = if is_new_file {
-                String::new()
-            } else {
+                let result = apply_hunks(&original, &patch.hunks)?;
                 self.fs
-                    .read_to_string_limited(&resolved, options.max_read_bytes)
+                    .write_string(&resolved, &result)
                     .await
-                    .map_err(|err| ExecutionError::Executor(err.to_string()))?
-            };
+                    .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+                let diff = diff_output(&original, &result, 40);
+                if !diff.is_empty() {
+                    rendered_diffs.push((patch.path.clone(), diff));
+                }
 
-            let result = apply_hunks(&original, &patch.hunks)?;
-            self.fs
-                .write_string(&resolved, &result)
-                .await
-                .map_err(|err| ExecutionError::Executor(err.to_string()))?;
-
-            // Track as read so subsequent patches/edits can operate
-            state.read_paths.insert(resolved);
-            applied.push(patch.path.clone());
+                // Track as read so subsequent patches/edits can operate
+                state.read_paths.insert(resolved);
+                applied.push(patch.path.clone());
+            }
+        } else {
+            let codex_ops = parse_codex_patch(patch_text)?;
+            if codex_ops.is_empty() {
+                return Err(ExecutionError::Dispatch(
+                    "no valid patches found in patch text".to_string(),
+                ));
+            }
+            for op in &codex_ops {
+                match op {
+                    CodexPatchOp::Update { path, hunks } => {
+                        let resolved =
+                            self.resolve_workspace_path(context, path, PathOperation::Edit)?;
+                        if !state.read_paths.contains(&resolved) {
+                            return Err(ExecutionError::Dispatch(format!(
+                                "apply_patch requires reading {path} first"
+                            )));
+                        }
+                        let original = self
+                            .fs
+                            .read_to_string_limited(&resolved, options.max_read_bytes)
+                            .await
+                            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+                        let result = apply_codex_hunks(&original, hunks, path)?;
+                        self.fs
+                            .write_string(&resolved, &result)
+                            .await
+                            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+                        let diff = diff_output(&original, &result, 40);
+                        if !diff.is_empty() {
+                            rendered_diffs.push((path.clone(), diff));
+                        }
+                        state.read_paths.insert(resolved);
+                        applied.push(path.clone());
+                    }
+                    CodexPatchOp::Add { path, lines } => {
+                        let resolved =
+                            self.resolve_workspace_path(context, path, PathOperation::Write)?;
+                        let result = lines.join("\n");
+                        self.fs
+                            .write_string(&resolved, &result)
+                            .await
+                            .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+                        let diff = diff_output("", &result, 40);
+                        if !diff.is_empty() {
+                            rendered_diffs.push((path.clone(), diff));
+                        }
+                        state.read_paths.insert(resolved);
+                        applied.push(path.clone());
+                    }
+                    CodexPatchOp::Delete { path } => {
+                        return Err(ExecutionError::Dispatch(format!(
+                            "apply_patch delete-file block is not supported yet: {path}"
+                        )));
+                    }
+                }
+            }
         }
 
-        Ok(format!(
+        let base_msg = format!(
             "applied {} patch(es) to: {}",
             applied.len(),
             applied.join(", ")
-        ))
+        );
+        if rendered_diffs.is_empty() {
+            return Ok(base_msg);
+        }
+
+        let mut out = base_msg;
+        for (path, diff) in rendered_diffs {
+            out.push_str(&format!("\nfile: {path}\n{diff}"));
+        }
+        Ok(out)
     }
 }
 
@@ -89,6 +153,20 @@ struct Hunk {
 enum HunkLine {
     Context(String),
     Remove(()),
+    Add(String),
+}
+
+enum CodexPatchOp {
+    Update { path: String, hunks: Vec<CodexHunk> },
+    Add { path: String, lines: Vec<String> },
+    Delete { path: String },
+}
+
+type CodexHunk = Vec<CodexHunkLine>;
+
+enum CodexHunkLine {
+    Context(String),
+    Remove(String),
     Add(String),
 }
 
@@ -133,6 +211,169 @@ fn parse_unified_diff(text: &str) -> Result<Vec<FilePatch>, ExecutionError> {
     }
 
     Ok(patches)
+}
+
+fn parse_codex_patch(text: &str) -> Result<Vec<CodexPatchOp>, ExecutionError> {
+    let lines: Vec<&str> = text.lines().collect();
+    let Some(begin_idx) = lines
+        .iter()
+        .position(|line| line.trim() == "*** Begin Patch")
+    else {
+        return Ok(Vec::new());
+    };
+
+    let mut ops = Vec::new();
+    let mut i = begin_idx + 1;
+    while i < lines.len() {
+        let line = lines[i].trim_end();
+        if line == "*** End Patch" {
+            break;
+        }
+        if let Some(path) = line.strip_prefix("*** Update File: ") {
+            let path = path.trim().to_string();
+            i += 1;
+            let start = i;
+            while i < lines.len() && !lines[i].starts_with("*** ") {
+                i += 1;
+            }
+            let body = &lines[start..i];
+            let hunks = parse_codex_update_hunks(body);
+            if hunks.is_empty() {
+                return Err(ExecutionError::Dispatch(format!(
+                    "apply_patch update block has no valid hunks for {path}"
+                )));
+            }
+            ops.push(CodexPatchOp::Update { path, hunks });
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("*** Add File: ") {
+            let path = path.trim().to_string();
+            i += 1;
+            let start = i;
+            while i < lines.len() && !lines[i].starts_with("*** ") {
+                i += 1;
+            }
+            let body = &lines[start..i];
+            let added_lines = body
+                .iter()
+                .map(|raw| raw.strip_prefix('+').unwrap_or(raw).to_string())
+                .collect::<Vec<_>>();
+            ops.push(CodexPatchOp::Add {
+                path,
+                lines: added_lines,
+            });
+            continue;
+        }
+        if let Some(path) = line.strip_prefix("*** Delete File: ") {
+            ops.push(CodexPatchOp::Delete {
+                path: path.trim().to_string(),
+            });
+            i += 1;
+            continue;
+        }
+        i += 1;
+    }
+    Ok(ops)
+}
+
+fn parse_codex_update_hunks(lines: &[&str]) -> Vec<CodexHunk> {
+    let mut hunks = Vec::new();
+    let mut current = Vec::new();
+
+    for raw in lines {
+        if raw.starts_with("@@") {
+            if !current.is_empty() {
+                hunks.push(current);
+                current = Vec::new();
+            }
+            continue;
+        }
+        if raw.starts_with("*** End of File") || raw.starts_with("\\ No newline") {
+            continue;
+        }
+        if let Some(rest) = raw.strip_prefix('+') {
+            current.push(CodexHunkLine::Add(rest.to_string()));
+        } else if let Some(rest) = raw.strip_prefix('-') {
+            current.push(CodexHunkLine::Remove(rest.to_string()));
+        } else if let Some(rest) = raw.strip_prefix(' ') {
+            current.push(CodexHunkLine::Context(rest.to_string()));
+        } else {
+            current.push(CodexHunkLine::Context((*raw).to_string()));
+        }
+    }
+
+    if !current.is_empty() {
+        hunks.push(current);
+    }
+    hunks
+}
+
+fn apply_codex_hunks(
+    original: &str,
+    hunks: &[CodexHunk],
+    path: &str,
+) -> Result<String, ExecutionError> {
+    let had_trailing_newline = original.ends_with('\n');
+    let mut lines: Vec<String> = original.lines().map(ToString::to_string).collect();
+    let mut search_from = 0usize;
+
+    for (hunk_idx, hunk) in hunks.iter().enumerate() {
+        let mut old_seq = Vec::new();
+        let mut new_seq = Vec::new();
+        for line in hunk {
+            match line {
+                CodexHunkLine::Context(text) => {
+                    old_seq.push(text.clone());
+                    new_seq.push(text.clone());
+                }
+                CodexHunkLine::Remove(text) => old_seq.push(text.clone()),
+                CodexHunkLine::Add(text) => new_seq.push(text.clone()),
+            }
+        }
+
+        if old_seq.is_empty() {
+            return Err(ExecutionError::Dispatch(format!(
+                "apply_patch hunk {} for {} has no anchor/context",
+                hunk_idx + 1,
+                path
+            )));
+        }
+
+        let start = find_subsequence(&lines, &old_seq, search_from)
+            .or_else(|| find_subsequence(&lines, &old_seq, 0))
+            .ok_or_else(|| {
+                ExecutionError::Dispatch(format!(
+                    "apply_patch hunk {} for {} could not be applied (context not found)",
+                    hunk_idx + 1,
+                    path
+                ))
+            })?;
+
+        let end = start + old_seq.len();
+        lines.splice(start..end, new_seq.into_iter());
+        search_from = start.saturating_add(1);
+    }
+
+    let mut output = lines.join("\n");
+    if had_trailing_newline && !output.ends_with('\n') {
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+fn find_subsequence(haystack: &[String], needle: &[String], start: usize) -> Option<usize> {
+    if needle.is_empty() {
+        return Some(start.min(haystack.len()));
+    }
+    if needle.len() > haystack.len() || start > haystack.len().saturating_sub(needle.len()) {
+        return None;
+    }
+    for idx in start..=haystack.len() - needle.len() {
+        if haystack[idx..idx + needle.len()] == *needle {
+            return Some(idx);
+        }
+    }
+    None
 }
 
 /// Parse a single hunk starting with @@ -`old_start,old_count` +`new_start,new_count` @@
@@ -323,5 +564,81 @@ mod tests {
         assert_eq!(normalize_diff_path("a/src/main.rs"), "src/main.rs");
         assert_eq!(normalize_diff_path("b/src/main.rs"), "src/main.rs");
         assert_eq!(normalize_diff_path("src/main.rs"), "src/main.rs");
+    }
+
+    #[test]
+    fn parse_codex_update_and_add_patch() {
+        let patch = "\
+*** Begin Patch
+*** Update File: src/main.rs
+@@
+-fn main() {
+-    println!(\"hello\");
++fn main() {
++    println!(\"world\");
+ }
+*** Add File: notes.txt
++line one
++line two
+*** End Patch
+";
+
+        let ops = parse_codex_patch(patch).unwrap();
+        assert_eq!(ops.len(), 2);
+        match &ops[0] {
+            CodexPatchOp::Update { path, hunks } => {
+                assert_eq!(path, "src/main.rs");
+                assert_eq!(hunks.len(), 1);
+            }
+            _ => panic!("expected update op"),
+        }
+        match &ops[1] {
+            CodexPatchOp::Add { path, lines } => {
+                assert_eq!(path, "notes.txt");
+                assert_eq!(lines, &vec!["line one".to_string(), "line two".to_string()]);
+            }
+            _ => panic!("expected add op"),
+        }
+    }
+
+    #[test]
+    fn apply_codex_hunks_replaces_expected_block() {
+        let original = "fn main() {\n    println!(\"hello\");\n}\n";
+        let patch = "\
+*** Begin Patch
+*** Update File: src/main.rs
+@@
+ fn main() {
+-    println!(\"hello\");
++    println!(\"world\");
+ }
+*** End Patch
+";
+        let ops = parse_codex_patch(patch).unwrap();
+        let CodexPatchOp::Update { path, hunks } = &ops[0] else {
+            panic!("expected update op");
+        };
+        let result = apply_codex_hunks(original, hunks, path).unwrap();
+        assert_eq!(result, "fn main() {\n    println!(\"world\");\n}\n");
+    }
+
+    #[test]
+    fn apply_codex_hunks_errors_when_context_not_found() {
+        let original = "a\nb\nc\n";
+        let patch = "\
+*** Begin Patch
+*** Update File: sample.txt
+@@
+ x
+-y
++z
+*** End Patch
+";
+        let ops = parse_codex_patch(patch).unwrap();
+        let CodexPatchOp::Update { path, hunks } = &ops[0] else {
+            panic!("expected update op");
+        };
+        let err = apply_codex_hunks(original, hunks, path).unwrap_err();
+        assert!(format!("{err}").contains("could not be applied"));
     }
 }

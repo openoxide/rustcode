@@ -1,4 +1,5 @@
 use super::{AgentOptions, AgentState, CommandContext, Engine, ExecutionError, PathOperation};
+use crate::agent_handlers_fs::diff_output;
 
 impl Engine {
     /// Apply multiple sequential edits to a single file.
@@ -34,6 +35,7 @@ impl Engine {
             .read_to_string_limited(&resolved, options.max_read_bytes)
             .await
             .map_err(|err| ExecutionError::Executor(err.to_string()))?;
+        let original = content.clone();
 
         if content.contains("[rustcode:truncated]") {
             return Err(ExecutionError::Dispatch(
@@ -88,12 +90,18 @@ impl Engine {
             .await
             .map_err(|err| ExecutionError::Executor(err.to_string()))?;
 
-        Ok(format!(
+        let base_msg = format!(
             "multiedit applied ({} edits, {} replacements) to {}",
             edits.len(),
             total_replacements,
             resolved.display()
-        ))
+        );
+        let diff = diff_output(&original, &content, 40);
+        if diff.is_empty() {
+            Ok(base_msg)
+        } else {
+            Ok(format!("{base_msg}\n{diff}"))
+        }
     }
 }
 

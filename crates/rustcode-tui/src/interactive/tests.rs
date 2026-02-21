@@ -158,6 +158,7 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
             details_open: false,
             activity_hidden: true,
             tool_details: false,
+            output_details: false,
             find: None,
             running: None,
             pending_prompt: None,
@@ -208,8 +209,8 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
     // Collapsed mode (tool_details=false): tool calls show as batch summary
-    assert!(text.contains("tool call"), "text={text}");
-    assert!(text.contains("to expand"), "text={text}");
+    assert!(text.contains("read"), "text={text}");
+    assert!(text.contains("(ctrl+o to expand)"), "text={text}");
     assert!(text.contains("model:null"), "text={text}");
     assert!(text.contains("mode:agent"), "text={text}");
     // "ok=true" and "Output:" were removed in the new compact rendering
@@ -219,12 +220,13 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
     let mut state = state;
     if let Screen::Chat(chat) = &mut state.screen {
         chat.tool_details = true;
+        chat.output_details = true;
     }
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
     // Expanded mode: tool name and output are shown
     assert!(text.contains("read"), "text={text}");
-    assert!(text.contains("tool output"), "text={text}");
+    assert!(text.contains("Read 1 line"), "text={text}");
 }
 
 #[test]
@@ -294,6 +296,7 @@ fn chat_screen_hides_system_messages() {
             details_open: false,
             activity_hidden: true,
             tool_details: false,
+            output_details: false,
             find: None,
             running: None,
             pending_prompt: None,
@@ -390,6 +393,7 @@ fn approval_modal_renders_tool_name() {
             details_open: false,
             activity_hidden: true,
             tool_details: false,
+            output_details: false,
             find: None,
             running: None,
             pending_prompt: None,
@@ -452,7 +456,7 @@ fn approval_modal_renders_tool_name() {
     // and an explicit once option with tool name in brackets.
     assert!(text.contains("Approval"), "text={text}");
     assert!(text.contains("read"), "text={text}"); // tool name in transcript
-    assert!(text.contains("test"), "text={text}"); // reason in transcript
+    assert!(!text.contains("Reason:"), "text={text}"); // reason line hidden
     assert!(text.contains("Approve once [read]"), "text={text}"); // option in selector
 }
 
@@ -500,6 +504,7 @@ fn approval_modal_shows_allow_all_tools_in_directory_for_write() {
             details_open: false,
             activity_hidden: true,
             tool_details: false,
+            output_details: false,
             find: None,
             running: None,
             pending_prompt: None,
@@ -557,9 +562,9 @@ fn approval_modal_shows_allow_all_tools_in_directory_for_write() {
 
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
-    // Inline approval selector for write: directory-scoped tool approval option.
+    // Inline approval selector for write: auto-pilot option is visible.
     assert!(
-        text.contains("Approve all tools in this directory"),
+        text.contains("Approve all tools (auto-pilot mode)"),
         "text={text}"
     );
 }
@@ -609,6 +614,7 @@ fn approval_modal_keeps_actions_visible_with_long_arguments() {
             details_open: false,
             activity_hidden: true,
             tool_details: false,
+            output_details: false,
             find: None,
             running: None,
             pending_prompt: None,
@@ -670,7 +676,120 @@ fn approval_modal_keeps_actions_visible_with_long_arguments() {
     // (selector is in a fixed-height composer area, not inline with preview)
     assert!(text.contains("Approve once [write]"), "text={text}");
     assert!(
-        text.contains("Approve all tools in this directory"),
+        text.contains("Approve all tools (auto-pilot mode)"),
+        "text={text}"
+    );
+}
+
+#[test]
+fn approval_modal_shows_bash_and_autopilot_options_for_bash() {
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).expect("terminal");
+
+    let session = SessionInfo {
+        id: "s-1".to_string(),
+        title: Some("t1".to_string()),
+        created_at_unix_ms: 0,
+        updated_at_unix_ms: 0,
+        parent_id: None,
+        cwd: "/tmp".to_string(),
+        workspace_root: "/tmp".to_string(),
+        model: "null".to_string(),
+        total_input_tokens: 0,
+        total_output_tokens: 0,
+        cost_usd: 0.0,
+    };
+    let (reply_tx, _reply_rx) = tokio::sync::oneshot::channel();
+    let state = AppState {
+        sessions: vec![session.clone()],
+        sessions_view: vec![0],
+        selected: 0,
+        sessions_filter: String::new(),
+        sessions_filter_active: false,
+        screen: Screen::Chat(ChatState {
+            session,
+            messages: Vec::new(),
+            scroll: 0,
+            live_assistant: String::new(),
+            live_reasoning: String::new(),
+            show_reasoning: false,
+            composer: String::new(),
+            composer_cursor: 0,
+            paste_buffer: None,
+            prompt_history: Vec::new(),
+            history_cursor: None,
+            history_draft: String::new(),
+            focus: ChatFocus::Composer,
+            activity: Vec::new(),
+            activity_selected: 0,
+            details_open: false,
+            activity_hidden: true,
+            tool_details: false,
+            output_details: false,
+            find: None,
+            running: None,
+            pending_prompt: None,
+            composer_cleared_by_ctrl_c: false,
+            last_typing_time: None,
+            total_input_tokens: 0,
+            total_output_tokens: 0,
+            last_total_tokens: 0,
+            context_limit: 0,
+            cost_usd: 0.0,
+            last_max_scroll: std::cell::Cell::new(0),
+            run_started_at: None,
+            last_run_elapsed: None,
+        }),
+        status: None,
+        toasts: Vec::new(),
+        help_open: false,
+        modal: None,
+        defaults: InteractiveDefaults {
+            workspace_root: std::path::PathBuf::from("/tmp"),
+            model: "null".to_string(),
+            provider: String::new(),
+            skills: Vec::new(),
+        },
+        pending_approval: Some(PendingApproval {
+            request: ToolApprovalRequest {
+                tool: "bash".to_string(),
+                permission: "bash".to_string(),
+                pattern: "echo hi".to_string(),
+                arguments: serde_json::json!({"command":"echo hi"}),
+                reason: "test".to_string(),
+            },
+            reply: reply_tx,
+        }),
+        approval_selection: 0,
+        submit_mode: InteractiveSubmitMode::Agent,
+        backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
+            std::path::PathBuf::from("/tmp"),
+        ))),
+        config: None,
+        executor: None,
+        runtime: tokio::runtime::Runtime::new().unwrap().handle().clone(),
+        tx: tokio::sync::mpsc::unbounded_channel().0,
+        rx: tokio::sync::mpsc::unbounded_channel().1,
+        request_seq: 0,
+        last_area: Size {
+            width: 120,
+            height: 30,
+        },
+        provider_oauth_start_rx: None,
+        provider_oauth_done_rx: None,
+        llm_cell: None,
+        git_stat: None,
+    };
+
+    terminal.draw(|frame| render(frame, &state)).expect("draw");
+    let text = buffer_to_string(terminal.backend().buffer());
+    assert!(text.contains("Approve once [bash]"), "text={text}");
+    assert!(
+        text.contains("Allow all executionary commands"),
+        "text={text}"
+    );
+    assert!(
+        text.contains("Approve all tools (auto-pilot mode)"),
         "text={text}"
     );
 }
@@ -726,6 +845,7 @@ fn alt_tab_cycles_focus_in_chat() {
             details_open: false,
             activity_hidden: true,
             tool_details: false,
+            output_details: false,
             find: None,
             running: None,
             pending_prompt: None,
@@ -845,6 +965,7 @@ fn tab_does_not_change_focus_in_chat() {
             details_open: false,
             activity_hidden: true,
             tool_details: false,
+            output_details: false,
             find: None,
             running: None,
             pending_prompt: None,
@@ -948,6 +1069,7 @@ fn activity_details_modal_renders_tool_arguments() {
             details_open: true,
             activity_hidden: true,
             tool_details: false,
+            output_details: false,
             find: None,
             running: None,
             pending_prompt: None,

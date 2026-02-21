@@ -73,8 +73,8 @@ pub enum InteractiveMsg {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ApprovalResponse {
     AllowOnce,
-    AllowAllToolsInDirectory,
-    AllowAllCommandsInDirectory,
+    AllowAllCommands,
+    AllowAllToolsAutopilot,
     Deny,
 }
 
@@ -131,17 +131,14 @@ struct TuiToolApprover {
 
 #[derive(Debug, Default)]
 struct ApprovalPolicy {
-    allow_all_tools_in_directory: bool,
-    allow_all_commands_in_directory: bool,
+    allow_all_commands: bool,
+    allow_all_tools_autopilot: bool,
 }
 
 impl ApprovalPolicy {
     fn allows(&self, request: &ToolApprovalRequest) -> bool {
-        if is_command_permission(&request.permission) {
-            self.allow_all_commands_in_directory
-        } else {
-            self.allow_all_tools_in_directory
-        }
+        self.allow_all_tools_autopilot
+            || (is_command_permission(&request.permission) && self.allow_all_commands)
     }
 
     fn apply_response(
@@ -151,16 +148,14 @@ impl ApprovalPolicy {
     ) -> bool {
         match response {
             ApprovalResponse::AllowOnce => true,
-            ApprovalResponse::AllowAllToolsInDirectory => {
-                if !is_command_permission(&request.permission) {
-                    self.allow_all_tools_in_directory = true;
+            ApprovalResponse::AllowAllCommands => {
+                if is_command_permission(&request.permission) {
+                    self.allow_all_commands = true;
                 }
                 true
             }
-            ApprovalResponse::AllowAllCommandsInDirectory => {
-                if is_command_permission(&request.permission) {
-                    self.allow_all_commands_in_directory = true;
-                }
+            ApprovalResponse::AllowAllToolsAutopilot => {
+                self.allow_all_tools_autopilot = true;
                 true
             }
             ApprovalResponse::Deny => false,

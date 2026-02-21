@@ -697,13 +697,13 @@ pub(super) fn render_help_modal(frame: &mut ratatui::Frame<'_>, state: &AppState
     lines.push(Line::raw("  Ctrl+S: skill toggle overlay"));
     lines.push(Line::raw("  Ctrl+B: give feedback (thumbs up/down)"));
     lines.push(Line::raw("  Ctrl+W: toggle activity panel (show/hide)"));
-    lines.push(Line::raw("  Ctrl+Y: show/hide thinking"));
+    lines.push(Line::raw("  Ctrl+O: expand/collapse tool details"));
     lines.push(Line::raw(""));
     lines.push(Line::raw(
         "  Slash commands (type in composer, press Enter):",
     ));
     lines.push(Line::raw(
-        "  /help  /sessions  /new  /fork  /reload  /tools  /thinking  /find  /model  /providers  /clear  /skill  /memory",
+        "  /help  /sessions  /new  /fork  /reload  /find  /model  /providers  /clear  /skill  /memory",
     ));
 
     if state.submit_mode == InteractiveSubmitMode::Run {

@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn filters_non_conversational_messages() {
-        let messages = vec![
+        let messages = [
             ("system".to_string(), "You are rustcode".to_string()),
             ("user".to_string(), "hello".to_string()),
             ("tool".to_string(), "tool output".to_string()),

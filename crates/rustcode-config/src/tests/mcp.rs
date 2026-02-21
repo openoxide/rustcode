@@ -141,10 +141,10 @@ fn mcp_server_config_rejects_missing_transport() {
 
     write_config(
         &global,
-        r#"
+        r"
 [mcp.servers.invalid]
 oauth = true
-"#,
+",
     );
 
     let mut sources = ConfigSources::new(cwd);

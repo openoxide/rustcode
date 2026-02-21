@@ -143,7 +143,7 @@ mod tests {
         let status = SessionStatus::Retry {
             attempt: 2,
             message: "rate limit exceeded".to_string(),
-            next_retry_at: 1234567890,
+            next_retry_at: 1_234_567_890,
         };
         let json = serde_json::to_string(&status).unwrap();
         let deserialized: SessionStatus = serde_json::from_str(&json).unwrap();

@@ -158,6 +158,11 @@ pub fn is_retryable(error_msg: &str) -> bool {
     {
         return true;
     }
+    if lower.contains("timed out waiting for provider response chunk")
+        || (lower.contains("transport error") && lower.contains("timed out"))
+    {
+        return true;
+    }
 
     false
 }
@@ -276,6 +281,9 @@ mod tests {
         assert!(is_retryable("connection reset by peer"));
         assert!(is_retryable("connection refused"));
         assert!(is_retryable("connection timeout"));
+        assert!(is_retryable(
+            "transport error: timed out waiting for provider response chunk"
+        ));
     }
 
     #[test]

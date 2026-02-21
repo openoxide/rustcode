@@ -68,10 +68,12 @@ pub(crate) fn resolve_permission_action(
 
 /// Extract structured approval fields from a tool call for display to the user.
 pub(crate) fn approval_fields(tool: &str, args: &Value) -> (String, String, String) {
-    let permission = if tool.starts_with("mcp:") {
-        "mcp".to_string()
-    } else {
-        tool.to_string()
+    let permission = match tool {
+        _ if tool.starts_with("mcp:") => "mcp".to_string(),
+        // Treat patch/multi-edit under write permission so one write policy
+        // can cover all mutating file operations.
+        "multiedit" | "apply_patch" => "write".to_string(),
+        _ => tool.to_string(),
     };
     let (pattern, reason) = match tool {
         "write" => {
@@ -212,22 +214,20 @@ pub(crate) fn approval_match_targets(tool: &str, args: &Value) -> Vec<String> {
     match tool {
         _ if tool.starts_with("mcp:") => vec![tool.to_string()],
         "exec" => exec_match_targets(args),
-        "bash" | "pty_exec" => args
+        "bash" | "pty_exec" => vec![args
             .get("command")
             .and_then(Value::as_str)
-            .map(|command| vec![command.to_string()])
-            .unwrap_or_else(|| vec![String::new()]),
+            .map_or_else(String::new, ToString::to_string)],
         "write" | "edit" | "multiedit" | "worktree_remove" | "worktree_reset" => vec![args
             .get("path")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string()],
-        "apply_patch" => args
+        "apply_patch" => vec![args
             .get("patch_text")
             .and_then(Value::as_str)
             .and_then(extract_first_patch_target)
-            .map(|target| vec![target])
-            .unwrap_or_else(|| vec!["*".to_string()]),
+            .unwrap_or_else(|| "*".to_string())],
         "glob" | "grep" | "list" | "read" => vec![args
             .get("path")
             .and_then(Value::as_str)
@@ -352,6 +352,18 @@ fn extract_first_patch_target(patch_text: &str) -> Option<String> {
         if let Some(path) = line.strip_prefix("+++ ") {
             let trimmed = path.trim().trim_start_matches("b/");
             if !trimmed.is_empty() && trimmed != "/dev/null" {
+                return Some(trimmed.to_string());
+            }
+        }
+        if let Some(path) = line.strip_prefix("*** Update File: ") {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        if let Some(path) = line.strip_prefix("*** Add File: ") {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
                 return Some(trimmed.to_string());
             }
         }
@@ -484,7 +496,10 @@ mod tests {
             "grep",
             &serde_json::json!({"pattern":"todo"})
         ));
-        assert!(!is_mutating_tool("list", &serde_json::json!({"path":"src"})));
+        assert!(!is_mutating_tool(
+            "list",
+            &serde_json::json!({"path":"src"})
+        ));
         assert!(!is_mutating_tool(
             "grep",
             &serde_json::json!({"pattern":"todo","path":"src"})
@@ -521,5 +536,20 @@ mod tests {
             "read",
             &serde_json::json!({"path":"/tmp/main.rs"})
         ));
+    }
+
+    #[test]
+    fn multiedit_and_apply_patch_use_write_permission_bucket() {
+        let (perm_multiedit, _, _) = approval_fields(
+            "multiedit",
+            &serde_json::json!({"path":"src/main.rs","edits":[{"old_string":"a","new_string":"b"}]}),
+        );
+        assert_eq!(perm_multiedit, "write");
+
+        let (perm_patch, _, _) = approval_fields(
+            "apply_patch",
+            &serde_json::json!({"patch_text":"--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1,1 +1,1 @@\n-a\n+b\n"}),
+        );
+        assert_eq!(perm_patch, "write");
     }
 }

@@ -476,14 +476,21 @@ fn handle_double_interrupt_key(
     chat: &mut ChatState,
     key_name: &str,
 ) -> ChatNav {
-    if let Some(running) = &chat.running {
+    if chat.running.is_some() {
         if chat.composer_cleared_by_ctrl_c {
-            running.cancellation.cancel();
+            if let Some(running) = chat.running.take() {
+                running.cancellation.cancel();
+                running.abort_handle.abort();
+            }
+            if let Some(started) = chat.run_started_at.take() {
+                chat.last_run_elapsed = Some(started.elapsed());
+            }
+            chat.pending_prompt = None;
             chat.composer_cleared_by_ctrl_c = false;
             push_toast(
                 state,
                 ToastVariant::Warning,
-                "cancel requested",
+                "force cancelled",
                 Duration::from_secs(2),
             );
             return ChatNav::Stay;
@@ -492,7 +499,7 @@ fn handle_double_interrupt_key(
         push_toast(
             state,
             ToastVariant::Info,
-            format!("press {key_name} again to cancel"),
+            format!("press {key_name} again to force cancel"),
             Duration::from_secs(3),
         );
         return ChatNav::Stay;
