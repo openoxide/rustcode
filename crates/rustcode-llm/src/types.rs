@@ -369,7 +369,7 @@ pub(crate) fn llm_http_client() -> Result<reqwest::Client, LlmError> {
 pub(crate) fn extract_retry_after_header(headers: &reqwest::header::HeaderMap) -> Option<u64> {
     if let Some(val) = headers.get("retry-after-ms").and_then(|v| v.to_str().ok()) {
         if let Ok(ms) = val.parse::<u64>() {
-            return Some((ms + 999) / 1000);
+            return Some(ms.div_ceil(1000));
         }
     }
     if let Some(val) = headers.get("retry-after").and_then(|v| v.to_str().ok()) {

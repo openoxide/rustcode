@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+pub(super) static ASYNC_ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 pub(super) struct CancelledProcess;
 pub(super) struct StubProcess {
@@ -141,7 +141,7 @@ impl FileSystemPort for SearchFs {
         let content = match name {
             "a.txt" => "hello\nneedle here\n".to_string(),
             "b.md" => "needle too\n".to_string(),
-            _ => "".to_string(),
+            _ => String::new(),
         };
         Ok(content)
     }
@@ -301,41 +301,38 @@ impl LlmClient for ScriptedAgentLlm {
 
     async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, rustcode_llm::LlmError> {
         let mut step = self.step.lock().await;
-        match *step {
-            0 => {
-                *step = 1;
-                assert!(
-                    !request.tools.is_empty(),
-                    "agent request must include tools"
-                );
-                Ok(ChatResponse {
-                    text: String::new(),
-                    reasoning: None,
-                    reasoning_chunks: Vec::new(),
-                    tool_calls: vec![ToolCall {
-                        id: "call_1".to_string(),
-                        name: "list".to_string(),
-                        arguments: r#"{"path":"."}"#.to_string(),
-                    }],
-                    usage: None,
-                })
-            }
-            _ => {
-                assert!(
-                    request
-                        .messages
-                        .iter()
-                        .any(|msg| msg.tool_call_id.as_deref() == Some("call_1")),
-                    "expected tool result message for call_1"
-                );
-                Ok(ChatResponse {
-                    text: "done".to_string(),
-                    reasoning: None,
-                    reasoning_chunks: Vec::new(),
-                    tool_calls: Vec::new(),
-                    usage: None,
-                })
-            }
+        if *step == 0 {
+            *step = 1;
+            assert!(
+                !request.tools.is_empty(),
+                "agent request must include tools"
+            );
+            Ok(ChatResponse {
+                text: String::new(),
+                reasoning: None,
+                reasoning_chunks: Vec::new(),
+                tool_calls: vec![ToolCall {
+                    id: "call_1".to_string(),
+                    name: "list".to_string(),
+                    arguments: r#"{"path":"."}"#.to_string(),
+                }],
+                usage: None,
+            })
+        } else {
+            assert!(
+                request
+                    .messages
+                    .iter()
+                    .any(|msg| msg.tool_call_id.as_deref() == Some("call_1")),
+                "expected tool result message for call_1"
+            );
+            Ok(ChatResponse {
+                text: "done".to_string(),
+                reasoning: None,
+                reasoning_chunks: Vec::new(),
+                tool_calls: Vec::new(),
+                usage: None,
+            })
         }
     }
 }

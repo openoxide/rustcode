@@ -111,10 +111,7 @@ fn json_expected_for_command(args: &[String]) -> bool {
         break arg.as_str();
     };
 
-    match command {
-        "models" | "auth" | "mcp" => true,
-        _ => false,
-    }
+    matches!(command, "models" | "auth" | "mcp")
 }
 
 fn validate_json_shape(args: &[String], stdout: &str) {
@@ -126,8 +123,7 @@ fn validate_json_shape(args: &[String], stdout: &str) {
         .iter()
         .skip(1)
         .find(|arg| !arg.starts_with('-'))
-        .map(|s| s.as_str())
-        .unwrap_or("");
+        .map_or("", |s| s.as_str());
 
     if command == "models" {
         // summary: {schema_version, providers: [...]}
@@ -190,7 +186,7 @@ fn provider_docs_doctests() {
             };
 
             assert_eq!(
-                args.get(0).map(|s| s.as_str()),
+                args.first().map(|s| s.as_str()),
                 Some("rustcode"),
                 "only rustcode commands are allowed in doctest blocks (block={}, line={}, got={:?})",
                 block_i + 1,
@@ -280,7 +276,7 @@ fn provider_doctests_only_use_rustcode_commands() {
                 continue;
             };
             assert_eq!(
-                args.get(0).map(|s| s.as_str()),
+                args.first().map(|s| s.as_str()),
                 Some("rustcode"),
                 "non-rustcode command in doctest block (block={}, line={}, got={:?})",
                 block_i + 1,
@@ -314,9 +310,10 @@ fn provider_doctests_use_repo_relative_paths() {
 
     for block in blocks {
         for line in block.lines() {
-            if line.contains("/Users/") || line.contains("C:\\") {
-                panic!("doctest block must not hardcode absolute paths: {line}");
-            }
+            assert!(
+                !(line.contains("/Users/") || line.contains(r"C:\")),
+                "doctest block must not hardcode absolute paths: {line}"
+            );
         }
     }
     let _ = root; // keep for future extensions.

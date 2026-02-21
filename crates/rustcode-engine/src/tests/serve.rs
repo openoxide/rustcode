@@ -3,7 +3,7 @@ use super::*;
 
 #[tokio::test]
 async fn serve_v1_run_streams_events_over_sse() {
-    let _guard = ENV_LOCK.lock().expect("lock");
+    let _guard = ASYNC_ENV_LOCK.lock().await;
     let sessions_root = std::env::temp_dir().join(format!(
         "rustcode-engine-serve-sessions-{}-{}",
         std::process::id(),
@@ -117,7 +117,7 @@ async fn serve_v1_run_streams_events_over_sse() {
 
 #[tokio::test]
 async fn serve_sessions_endpoints_create_list_show_and_persist_run() {
-    let _guard = ENV_LOCK.lock().expect("lock");
+    let _guard = ASYNC_ENV_LOCK.lock().await;
     let sessions_root = std::env::temp_dir().join(format!(
         "rustcode-engine-serve-sessions-api-{}-{}",
         std::process::id(),
@@ -265,8 +265,7 @@ async fn serve_sessions_endpoints_create_list_show_and_persist_run() {
         serde_json::from_str(response[json_start..].trim()).expect("json");
     let message_count = payload["messages"]
         .as_array()
-        .map(|items| items.len())
-        .unwrap_or(0);
+        .map_or(0, |items| items.len());
     assert!(message_count >= 2, "payload={payload}");
 
     cancellation.cancel();

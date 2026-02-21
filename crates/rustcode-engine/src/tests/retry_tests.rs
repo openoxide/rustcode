@@ -19,11 +19,11 @@ fn delay_exponential_backoff_with_jitter() {
     let d3 = policy.delay(3).as_millis() as u64;
 
     // attempt 1: base = 1000 * 2^0 = 1000, jitter up to ~14%
-    assert!(d1 >= 1_000 && d1 <= 1_200, "d1={d1}");
+    assert!((1_000..=1_200).contains(&d1), "d1={d1}");
     // attempt 2: base = 1000 * 2^1 = 2000
-    assert!(d2 >= 2_000 && d2 <= 2_300, "d2={d2}");
+    assert!((2_000..=2_300).contains(&d2), "d2={d2}");
     // attempt 3: base = 1000 * 2^2 = 4000
-    assert!(d3 >= 4_000 && d3 <= 4_600, "d3={d3}");
+    assert!((4_000..=4_600).contains(&d3), "d3={d3}");
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn delay_capped_at_max() {
     };
     let d = policy.delay(5).as_millis() as u64;
     // base would be huge but capped at 30_000, jitter up to ~14%
-    assert!(d >= 30_000 && d <= 34_300, "d={d}");
+    assert!((30_000..=34_300).contains(&d), "d={d}");
 }
 
 // ── RetryPolicy::should_retry ───────────────────────────────────────────

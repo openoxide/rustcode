@@ -101,7 +101,7 @@ async fn webfetch_fetches_local_http_and_simplifies_html_by_default() {
         },
     );
 
-    let url = format!("http://{}/", addr);
+    let url = format!("http://{addr}/");
     let options = AgentOptions::default();
     let mut state = AgentState::default();
     let output = engine
@@ -173,7 +173,7 @@ async fn webfetch_format_html_returns_raw_html() {
         },
     );
 
-    let url = format!("http://{}/", addr);
+    let url = format!("http://{addr}/");
     let options = AgentOptions::default();
     let mut state = AgentState::default();
     let output = engine

@@ -195,7 +195,7 @@ mod tests {
     fn tracker_no_overflow_initially() {
         let tracker = ContextTracker::new("claude-3.5-sonnet");
         assert!(!tracker.is_overflow());
-        assert_eq!(tracker.usage_percent(), 0.0);
+        assert!(tracker.usage_percent().abs() < f64::EPSILON);
         assert_eq!(tracker.step_count(), 0);
     }
 

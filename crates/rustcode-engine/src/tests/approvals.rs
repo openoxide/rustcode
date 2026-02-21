@@ -86,7 +86,7 @@ async fn mcp_tools_require_approval_when_no_allow_rule_and_no_approver() {
     let options = AgentOptions::default();
     let mut state = AgentState::default();
     let result = engine
-        .execute_agent_tool_call("mcp:demo:tool", r#"{}"#, &context, &options, &mut state)
+        .execute_agent_tool_call("mcp:demo:tool", r"{}", &context, &options, &mut state)
         .await;
     match result {
         Err(ExecutionError::Dispatch(message)) => {
@@ -98,12 +98,14 @@ async fn mcp_tools_require_approval_when_no_allow_rule_and_no_approver() {
 
 #[tokio::test]
 async fn mutating_tools_can_be_allowed_by_permissions_without_prompt() {
-    let mut cfg = ResolvedConfig::default();
-    cfg.permission_rules = vec![rustcode_core::PermissionRule {
-        permission: "exec".to_string(),
-        action: PermissionAction::Allow,
-        pattern: "echo".to_string(),
-    }];
+    let cfg = ResolvedConfig {
+        permission_rules: vec![rustcode_core::PermissionRule {
+            permission: "exec".to_string(),
+            action: PermissionAction::Allow,
+            pattern: "echo".to_string(),
+        }],
+        ..ResolvedConfig::default()
+    };
     let context = CommandContext::new(
         Arc::new(cfg),
         SessionMeta {
@@ -154,12 +156,14 @@ async fn mutating_tools_can_be_allowed_by_permissions_without_prompt() {
 
 #[tokio::test]
 async fn exec_permission_rule_can_match_full_command_line() {
-    let mut cfg = ResolvedConfig::default();
-    cfg.permission_rules = vec![rustcode_core::PermissionRule {
-        permission: "exec".to_string(),
-        action: PermissionAction::Allow,
-        pattern: "echo hi".to_string(),
-    }];
+    let cfg = ResolvedConfig {
+        permission_rules: vec![rustcode_core::PermissionRule {
+            permission: "exec".to_string(),
+            action: PermissionAction::Allow,
+            pattern: "echo hi".to_string(),
+        }],
+        ..ResolvedConfig::default()
+    };
     let context = CommandContext::new(
         Arc::new(cfg),
         SessionMeta {
@@ -210,19 +214,21 @@ async fn exec_permission_rule_can_match_full_command_line() {
 
 #[tokio::test]
 async fn exec_permission_rule_precedence_prefers_last_match_across_targets() {
-    let mut cfg = ResolvedConfig::default();
-    cfg.permission_rules = vec![
-        rustcode_core::PermissionRule {
-            permission: "exec".to_string(),
-            action: PermissionAction::Allow,
-            pattern: "echo".to_string(),
-        },
-        rustcode_core::PermissionRule {
-            permission: "exec".to_string(),
-            action: PermissionAction::Deny,
-            pattern: "echo hi".to_string(),
-        },
-    ];
+    let cfg = ResolvedConfig {
+        permission_rules: vec![
+            rustcode_core::PermissionRule {
+                permission: "exec".to_string(),
+                action: PermissionAction::Allow,
+                pattern: "echo".to_string(),
+            },
+            rustcode_core::PermissionRule {
+                permission: "exec".to_string(),
+                action: PermissionAction::Deny,
+                pattern: "echo hi".to_string(),
+            },
+        ],
+        ..ResolvedConfig::default()
+    };
     let context = CommandContext::new(
         Arc::new(cfg),
         SessionMeta {
@@ -277,12 +283,14 @@ async fn exec_permission_rule_precedence_prefers_last_match_across_targets() {
 
 #[tokio::test]
 async fn mutating_tools_can_be_denied_by_permissions_without_prompt() {
-    let mut cfg = ResolvedConfig::default();
-    cfg.permission_rules = vec![rustcode_core::PermissionRule {
-        permission: "exec".to_string(),
-        action: PermissionAction::Deny,
-        pattern: "echo".to_string(),
-    }];
+    let cfg = ResolvedConfig {
+        permission_rules: vec![rustcode_core::PermissionRule {
+            permission: "exec".to_string(),
+            action: PermissionAction::Deny,
+            pattern: "echo".to_string(),
+        }],
+        ..ResolvedConfig::default()
+    };
     let context = CommandContext::new(
         Arc::new(cfg),
         SessionMeta {
@@ -337,12 +345,14 @@ async fn mutating_tools_can_be_denied_by_permissions_without_prompt() {
 
 #[tokio::test]
 async fn mutating_tools_ask_rule_triggers_approver() {
-    let mut cfg = ResolvedConfig::default();
-    cfg.permission_rules = vec![rustcode_core::PermissionRule {
-        permission: "exec".to_string(),
-        action: PermissionAction::Ask,
-        pattern: "echo".to_string(),
-    }];
+    let cfg = ResolvedConfig {
+        permission_rules: vec![rustcode_core::PermissionRule {
+            permission: "exec".to_string(),
+            action: PermissionAction::Ask,
+            pattern: "echo".to_string(),
+        }],
+        ..ResolvedConfig::default()
+    };
     let context = CommandContext::new(
         Arc::new(cfg),
         SessionMeta {

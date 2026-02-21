@@ -84,9 +84,9 @@ fn retry_policy_delays() {
     let d2 = policy.delay(2).as_millis() as u64;
     let d3 = policy.delay(3).as_millis() as u64;
 
-    assert!(d1 >= 2000 && d1 <= 2300, "attempt 1: {d1}ms");
-    assert!(d2 >= 4000 && d2 <= 4600, "attempt 2: {d2}ms");
-    assert!(d3 >= 8000 && d3 <= 9200, "attempt 3: {d3}ms");
+    assert!((2000..=2300).contains(&d1), "attempt 1: {d1}ms");
+    assert!((4000..=4600).contains(&d2), "attempt 2: {d2}ms");
+    assert!((8000..=9200).contains(&d3), "attempt 3: {d3}ms");
 }
 
 #[test]

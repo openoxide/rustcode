@@ -250,7 +250,7 @@ fn auth_set_oauth_parses_env_sources() {
             assert_eq!(provider, "openai");
             assert_eq!(access_env, "OPENAI_ACCESS_TOKEN");
             assert_eq!(refresh_env.as_deref(), Some("OPENAI_REFRESH_TOKEN"));
-            assert_eq!(expires_unix, Some(1234567890));
+            assert_eq!(expires_unix, Some(1_234_567_890));
             assert_eq!(account_id.as_deref(), Some("acct_123"));
         }
         _ => panic!("expected auth set-oauth command"),

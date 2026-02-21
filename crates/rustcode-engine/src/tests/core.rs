@@ -130,41 +130,38 @@ async fn agent_can_exec_when_allowed() {
 
         async fn chat(&self, request: ChatRequest) -> Result<ChatResponse, rustcode_llm::LlmError> {
             let mut step = self.step.lock().await;
-            match *step {
-                0 => {
-                    *step = 1;
-                    assert!(
-                        request.tools.iter().any(|tool| tool.name == "exec"),
-                        "expected exec tool spec when allow-exec is enabled"
-                    );
-                    Ok(ChatResponse {
-                        text: String::new(),
-                        reasoning: None,
-                        reasoning_chunks: Vec::new(),
-                        tool_calls: vec![ToolCall {
-                            id: "call_exec".to_string(),
-                            name: "exec".to_string(),
-                            arguments: r#"{"command":"echo","args":["hi"]}"#.to_string(),
-                        }],
-                        usage: None,
-                    })
-                }
-                _ => {
-                    assert!(
-                        request
-                            .messages
-                            .iter()
-                            .any(|msg| msg.tool_call_id.as_deref() == Some("call_exec")),
-                        "expected tool result message for call_exec"
-                    );
-                    Ok(ChatResponse {
-                        text: "done".to_string(),
-                        reasoning: None,
-                        reasoning_chunks: Vec::new(),
-                        tool_calls: Vec::new(),
-                        usage: None,
-                    })
-                }
+            if *step == 0 {
+                *step = 1;
+                assert!(
+                    request.tools.iter().any(|tool| tool.name == "exec"),
+                    "expected exec tool spec when allow-exec is enabled"
+                );
+                Ok(ChatResponse {
+                    text: String::new(),
+                    reasoning: None,
+                    reasoning_chunks: Vec::new(),
+                    tool_calls: vec![ToolCall {
+                        id: "call_exec".to_string(),
+                        name: "exec".to_string(),
+                        arguments: r#"{"command":"echo","args":["hi"]}"#.to_string(),
+                    }],
+                    usage: None,
+                })
+            } else {
+                assert!(
+                    request
+                        .messages
+                        .iter()
+                        .any(|msg| msg.tool_call_id.as_deref() == Some("call_exec")),
+                    "expected tool result message for call_exec"
+                );
+                Ok(ChatResponse {
+                    text: "done".to_string(),
+                    reasoning: None,
+                    reasoning_chunks: Vec::new(),
+                    tool_calls: Vec::new(),
+                    usage: None,
+                })
             }
         }
     }

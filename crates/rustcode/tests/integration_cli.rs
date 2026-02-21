@@ -111,7 +111,6 @@ fn spawn_hanging_http_server() -> Option<HangingHttpServer> {
                 Ok((socket, _)) => break socket,
                 Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(20));
-                    continue;
                 }
                 Err(_) => return,
             }
@@ -130,12 +129,11 @@ fn spawn_hanging_http_server() -> Option<HangingHttpServer> {
             }
             match socket.read(&mut buf) {
                 Ok(0) => break,
-                Ok(_) => continue,
+                Ok(_) => {}
                 Err(err)
                     if err.kind() == std::io::ErrorKind::WouldBlock
                         || err.kind() == std::io::ErrorKind::TimedOut =>
                 {
-                    continue;
                 }
                 Err(_) => break,
             }

@@ -74,12 +74,14 @@ async fn mcp_tool_call_executes_via_registry() {
         .await
         .expect("connect mcp registry");
 
-    let mut cfg = ResolvedConfig::default();
-    cfg.permission_rules = vec![rustcode_core::PermissionRule {
-        permission: "mcp".to_string(),
-        action: PermissionAction::Allow,
-        pattern: "mcp:demo:hello".to_string(),
-    }];
+    let cfg = ResolvedConfig {
+        permission_rules: vec![rustcode_core::PermissionRule {
+            permission: "mcp".to_string(),
+            action: PermissionAction::Allow,
+            pattern: "mcp:demo:hello".to_string(),
+        }],
+        ..ResolvedConfig::default()
+    };
     let context = CommandContext::new(
         Arc::new(cfg),
         SessionMeta {
@@ -104,7 +106,7 @@ async fn mcp_tool_call_executes_via_registry() {
     let output = engine
         .execute_agent_tool_call(
             "mcp:demo:hello",
-            r#"{}"#,
+            r"{}",
             &context,
             &AgentOptions::default(),
             &mut state,
@@ -192,12 +194,14 @@ async fn mcp_resource_read_executes_via_registry() {
         .await
         .expect("connect mcp registry");
 
-    let mut cfg = ResolvedConfig::default();
-    cfg.permission_rules = vec![rustcode_core::PermissionRule {
-        permission: "mcp".to_string(),
-        action: PermissionAction::Allow,
-        pattern: "mcp:demo:__resources_read".to_string(),
-    }];
+    let cfg = ResolvedConfig {
+        permission_rules: vec![rustcode_core::PermissionRule {
+            permission: "mcp".to_string(),
+            action: PermissionAction::Allow,
+            pattern: "mcp:demo:__resources_read".to_string(),
+        }],
+        ..ResolvedConfig::default()
+    };
     let context = CommandContext::new(
         Arc::new(cfg),
         SessionMeta {

@@ -25,7 +25,7 @@ const DEFAULT_STREAM_EXTRA_RETRIES: u32 = 2;
 pub struct RetryPolicy {
     /// Maximum retries for non-stream errors.
     pub max_retries: u32,
-    /// Extra retries for stream/transport errors (total = max_retries + stream_extra_retries).
+    /// Extra retries for stream/transport errors (total = `max_retries` + `stream_extra_retries`).
     pub stream_extra_retries: u32,
     pub initial_delay_ms: u64,
     pub backoff_factor: u64,
@@ -60,7 +60,7 @@ impl RetryPolicy {
         let jitter_range = capped / 7; // ~14%
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.subsec_nanos() as u64)
+            .map(|d| u64::from(d.subsec_nanos()))
             .unwrap_or(0);
         let jitter = if jitter_range > 0 {
             nanos % jitter_range
@@ -312,7 +312,7 @@ where
                     notify(&RetryInfo {
                         attempt,
                         max_retries: effective_max,
-                        delay: delay.clone(),
+                        delay,
                         error_reason: summarise_error(&err_msg),
                     });
                 }
