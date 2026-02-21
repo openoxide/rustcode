@@ -53,6 +53,7 @@ impl Engine {
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0),
                 content: Value::String(prompt.clone()),
+                reasoning: None,
                 tool_call_id: None,
                 tool_name: None,
                 tool_calls: Vec::new(),
@@ -94,6 +95,7 @@ impl Engine {
                         .map(|d| d.as_millis() as i64)
                         .unwrap_or(0),
                     content: Value::String(text),
+                    reasoning: None,
                     tool_call_id: None,
                     tool_name: None,
                     tool_calls: Vec::new(),
@@ -124,6 +126,7 @@ impl Engine {
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0),
                 content: Value::String(response.text),
+                reasoning: None,
                 tool_call_id: None,
                 tool_name: None,
                 tool_calls: Vec::new(),

@@ -216,6 +216,39 @@ fn parses_openai_stream_deltas() {
 }
 
 #[test]
+fn parses_openai_reasoning_from_content_parts() {
+    let payload = json!({
+        "choices": [{
+            "message": {
+                "content": [
+                    {"type":"reasoning","text":"step 1. "},
+                    {"type":"text","text":"final answer"}
+                ]
+            }
+        }]
+    });
+    assert_eq!(
+        extract_openai_reasoning(&payload).as_deref(),
+        Some("step 1. ")
+    );
+    assert_eq!(
+        extract_openai_text(&payload).as_deref(),
+        Some("final answer")
+    );
+}
+
+#[test]
+fn parses_openai_stream_reasoning_delta() {
+    let payload = json!({
+        "choices": [{"delta": {"reasoning_text": "considering options..."}}]
+    });
+    assert_eq!(
+        extract_openai_stream_reasoning_delta(&payload).as_deref(),
+        Some("considering options...")
+    );
+}
+
+#[test]
 fn parses_openai_tool_calls_from_response() {
     let payload = json!({
         "choices": [{
@@ -260,6 +293,51 @@ fn parses_anthropic_stream_deltas() {
         extract_anthropic_stream_delta(&delta).as_deref(),
         Some(" world")
     );
+}
+
+#[test]
+fn parses_anthropic_reasoning_blocks() {
+    let payload = json!({
+        "content": [
+            {"type":"thinking","thinking":"internal step"},
+            {"type":"text","text":"answer"}
+        ]
+    });
+    assert_eq!(
+        extract_anthropic_reasoning(&payload).as_deref(),
+        Some("internal step")
+    );
+}
+
+#[test]
+fn parses_anthropic_stream_reasoning_deltas() {
+    let payload = json!({
+        "type": "content_block_delta",
+        "delta": {"type":"thinking_delta","thinking":"step..."}
+    });
+    assert_eq!(
+        extract_anthropic_stream_reasoning_delta(&payload).as_deref(),
+        Some("step...")
+    );
+}
+
+#[test]
+fn parses_google_reasoning_parts() {
+    let payload = json!({
+        "candidates": [{
+            "content": {
+                "parts": [
+                    {"thought": true, "text":"internal"},
+                    {"text":"answer"}
+                ]
+            }
+        }]
+    });
+    assert_eq!(
+        extract_google_reasoning(&payload).as_deref(),
+        Some("internal")
+    );
+    assert_eq!(extract_google_text(&payload).as_deref(), Some("answer"));
 }
 
 #[test]

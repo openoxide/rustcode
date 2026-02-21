@@ -1,12 +1,16 @@
+use crossterm::event::{
+    DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+};
+
 use super::{
     build_prompt_history, composer_insert_str, compute_sessions_view, disable_raw_mode,
     drain_toasts, enable_raw_mode, event, execute, handle_key, io, push_toast, render,
     sort_sessions, ActivityItem, AgentOptions, AppState, Arc, CEvent, CancellationToken, ChatFocus,
     ChatState, Command, CommandContext, CrosstermBackend, Duration, EnterAlternateScreen,
-    EventPayload, EventPublisher, ExecutableCommand, InteractiveMsg, InteractiveServices,
-    InteractiveStart, InteractiveSubmitMode, KeyEventKind, LeaveAlternateScreen, MessageRole,
-    Modal, MouseEventKind, PendingApproval, ProviderManagerStep, RunningCommand, Screen,
-    SessionMeta, SystemTime, Terminal, ToastVariant, TuiError, TuiPublisher,
+    EventPayload, EventPublisher, InteractiveMsg, InteractiveServices, InteractiveStart,
+    InteractiveSubmitMode, KeyEventKind, LeaveAlternateScreen, MessageRole, Modal, MouseEventKind,
+    PendingApproval, ProviderManagerStep, RunningCommand, Screen, SessionMeta, SystemTime,
+    Terminal, ToastVariant, TuiError, TuiPublisher,
 };
 use rustcode_core::event::EventScope;
 
@@ -31,14 +35,24 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
         let mut stdout = io::stdout();
-        let _ = stdout.execute(LeaveAlternateScreen);
+        let _ = execute!(
+            stdout,
+            DisableMouseCapture,
+            DisableBracketedPaste,
+            LeaveAlternateScreen
+        );
         prev_panic_hook(info);
     }));
 
     let mut stdout = io::stdout();
     enable_raw_mode().map_err(|err| TuiError::Io(err.to_string()))?;
-    execute!(stdout, EnterAlternateScreen)
-        .map_err(|err| TuiError::Io(err.to_string()))?;
+    execute!(
+        stdout,
+        EnterAlternateScreen,
+        EnableMouseCapture,
+        EnableBracketedPaste
+    )
+    .map_err(|err| TuiError::Io(err.to_string()))?;
     let _cleanup = TerminalCleanup;
 
     let term_backend = CrosstermBackend::new(stdout);
@@ -76,12 +90,18 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
             } else {
                 prompt.clone().unwrap_or_default()
             };
+            let tokens_in = session.total_input_tokens;
+            let tokens_out = session.total_output_tokens;
+            let cost = session.cost_usd;
             screen = Screen::Chat(ChatState {
                 session,
                 messages,
                 scroll: 0,
                 live_assistant: String::new(),
+                live_reasoning: String::new(),
+                show_reasoning: false,
                 composer_cursor: initial_composer.len(),
+                paste_buffer: None,
                 composer: initial_composer,
                 prompt_history,
                 history_cursor: None,
@@ -91,17 +111,17 @@ pub(super) fn run_interactive(services: InteractiveServices) -> Result<(), TuiEr
                 activity_selected: 0,
                 details_open: false,
                 activity_hidden: false,
-                tool_details: false,
+                tool_details: true,
                 find: None,
                 running: None,
                 pending_prompt: None,
                 composer_cleared_by_ctrl_c: false,
                 last_typing_time: None,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                last_total_tokens: 0,
+                total_input_tokens: tokens_in,
+                total_output_tokens: tokens_out,
+                last_total_tokens: tokens_in + tokens_out,
                 context_limit: 0,
-                cost_usd: 0.0,
+                cost_usd: cost,
                 last_max_scroll: std::cell::Cell::new(0),
                 run_started_at: None,
                 last_run_elapsed: None,
@@ -230,7 +250,38 @@ pub(super) fn handle_paste(state: &mut AppState, text: &str) {
         return;
     };
     if chat.focus == ChatFocus::Composer {
-        composer_insert_str(&mut chat, &normalized);
+        const LARGE_PASTE_THRESHOLD: usize = 30; // words
+        let word_count = normalized.split_whitespace().count();
+        if word_count >= LARGE_PASTE_THRESHOLD {
+            // Build a short summary: "first two words +N words pasted"
+            let mut words = normalized.split_whitespace();
+            let w1 = words.next().unwrap_or("");
+            let w2 = words.next().unwrap_or("");
+            let preview = if w2.is_empty() {
+                w1.to_string()
+            } else {
+                format!("{w1} {w2}")
+            };
+            let shown = if w2.is_empty() { 1usize } else { 2usize };
+            let remaining = word_count.saturating_sub(shown);
+            let summary = format!("[{preview} +{remaining} words pasted]");
+
+            // Split composer at cursor so existing text is preserved.
+            let before = chat.composer[..chat.composer_cursor].to_string();
+            let after = chat.composer[chat.composer_cursor..].to_string();
+
+            // Full text that will be submitted: prefix + paste + suffix.
+            let full_text = format!("{before}{normalized}{after}");
+
+            // Displayed text: prefix + summary + suffix.
+            let new_cursor = before.len() + summary.len();
+            chat.composer = format!("{before}{summary}{after}");
+            chat.composer_cursor = new_cursor;
+            chat.paste_buffer = Some(full_text);
+        } else {
+            chat.paste_buffer = None;
+            composer_insert_str(&mut chat, &normalized);
+        }
     }
     state.screen = Screen::Chat(chat);
 }
@@ -296,6 +347,20 @@ pub(super) fn drain_messages(state: &mut AppState) {
                             }
                             Some(ActivityItem::OutputChunk { text: text.clone() })
                         }
+                        EventPayload::ReasoningChunk { text } => {
+                            chat.live_reasoning.push_str(text);
+                            if chat.live_reasoning.len() > 64 * 1024 {
+                                let keep = 48 * 1024;
+                                let mut start = chat.live_reasoning.len().saturating_sub(keep);
+                                while start < chat.live_reasoning.len()
+                                    && !chat.live_reasoning.is_char_boundary(start)
+                                {
+                                    start += 1;
+                                }
+                                chat.live_reasoning = chat.live_reasoning[start..].to_string();
+                            }
+                            Some(ActivityItem::ReasoningChunk { text: text.clone() })
+                        }
                         EventPayload::Warning { message } => {
                             push_toast(
                                 state,
@@ -316,6 +381,7 @@ pub(super) fn drain_messages(state: &mut AppState) {
                             push_toast(state, ToastVariant::Error, clean, Duration::from_secs(6));
                             refresh = true;
                             chat.live_assistant.clear();
+                            chat.live_reasoning.clear();
                             Some(ActivityItem::Failure {
                                 message: message.clone(),
                             })
@@ -324,6 +390,7 @@ pub(super) fn drain_messages(state: &mut AppState) {
                             chat.running = None;
                             refresh = true;
                             chat.live_assistant.clear();
+                            chat.live_reasoning.clear();
                             push_toast(
                                 state,
                                 ToastVariant::Success,
@@ -394,7 +461,15 @@ pub(super) fn drain_messages(state: &mut AppState) {
                     chat.running = None;
                     chat.pending_prompt = None;
                     chat.live_assistant.clear();
+                    chat.live_reasoning.clear();
                     if ok {
+                        // Persist accumulated token usage so it survives restarts.
+                        let _ = state.backend.update_session_usage(
+                            &chat.session.id,
+                            chat.total_input_tokens,
+                            chat.total_output_tokens,
+                            chat.cost_usd,
+                        );
                         state.status = None;
                     } else {
                         let clean = message.as_deref().map(clean_failure_message);
@@ -827,6 +902,11 @@ impl Drop for TerminalCleanup {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let mut stdout = io::stdout();
-        let _ = stdout.execute(LeaveAlternateScreen);
+        let _ = execute!(
+            stdout,
+            DisableMouseCapture,
+            DisableBracketedPaste,
+            LeaveAlternateScreen
+        );
     }
 }

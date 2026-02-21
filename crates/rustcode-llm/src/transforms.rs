@@ -78,10 +78,61 @@ pub(crate) fn extract_openai_text(value: &Value) -> Option<String> {
     let content_parts = content.as_array()?;
     let mut combined = String::new();
     for part in content_parts {
+        let is_reasoning = matches!(
+            part.get("type").and_then(Value::as_str),
+            Some("reasoning" | "thinking")
+        );
+        if is_reasoning {
+            continue;
+        }
         if let Some(text) = part.get("text").and_then(Value::as_str) {
             combined.push_str(text);
         }
     }
+    if combined.is_empty() {
+        None
+    } else {
+        Some(combined)
+    }
+}
+
+pub(crate) fn extract_openai_reasoning(value: &Value) -> Option<String> {
+    let choice = value.get("choices")?.get(0)?;
+    let mut combined = String::new();
+
+    if let Some(message) = choice.get("message") {
+        if let Some(text) = message.get("reasoning_text").and_then(Value::as_str) {
+            combined.push_str(text);
+        }
+        if let Some(text) = message.get("reasoning_content").and_then(Value::as_str) {
+            combined.push_str(text);
+        }
+        if let Some(reasoning) = message.get("reasoning") {
+            append_reasoning_text(reasoning, &mut combined);
+        }
+        if let Some(details) = message.get("reasoning_details") {
+            append_reasoning_text(details, &mut combined);
+        }
+        if let Some(parts) = message.get("content").and_then(Value::as_array) {
+            for part in parts {
+                let is_reasoning = matches!(
+                    part.get("type").and_then(Value::as_str),
+                    Some("reasoning" | "thinking")
+                );
+                if !is_reasoning {
+                    continue;
+                }
+                if let Some(text) = part.get("text").and_then(Value::as_str) {
+                    combined.push_str(text);
+                } else if let Some(text) = part.get("reasoning_text").and_then(Value::as_str) {
+                    combined.push_str(text);
+                } else if let Some(text) = part.get("thinking").and_then(Value::as_str) {
+                    combined.push_str(text);
+                }
+            }
+        }
+    }
+
     if combined.is_empty() {
         None
     } else {
@@ -141,6 +192,13 @@ pub(crate) fn extract_openai_stream_delta(value: &Value) -> Option<String> {
     if let Some(parts) = delta.get("content").and_then(Value::as_array) {
         let mut combined = String::new();
         for part in parts {
+            let is_reasoning = matches!(
+                part.get("type").and_then(Value::as_str),
+                Some("reasoning" | "thinking")
+            );
+            if is_reasoning {
+                continue;
+            }
             if let Some(text) = part.get("text").and_then(Value::as_str) {
                 combined.push_str(text);
             }
@@ -153,6 +211,46 @@ pub(crate) fn extract_openai_stream_delta(value: &Value) -> Option<String> {
     None
 }
 
+pub(crate) fn extract_openai_stream_reasoning_delta(value: &Value) -> Option<String> {
+    let choice = value.get("choices")?.get(0)?;
+    let delta = choice.get("delta")?;
+    let mut combined = String::new();
+
+    if let Some(text) = delta.get("reasoning_text").and_then(Value::as_str) {
+        combined.push_str(text);
+    }
+    if let Some(text) = delta.get("reasoning_content").and_then(Value::as_str) {
+        combined.push_str(text);
+    }
+    if let Some(reasoning) = delta.get("reasoning") {
+        append_reasoning_text(reasoning, &mut combined);
+    }
+    if let Some(parts) = delta.get("content").and_then(Value::as_array) {
+        for part in parts {
+            let is_reasoning = matches!(
+                part.get("type").and_then(Value::as_str),
+                Some("reasoning" | "thinking")
+            );
+            if !is_reasoning {
+                continue;
+            }
+            if let Some(text) = part.get("text").and_then(Value::as_str) {
+                combined.push_str(text);
+            } else if let Some(text) = part.get("reasoning_text").and_then(Value::as_str) {
+                combined.push_str(text);
+            } else if let Some(text) = part.get("thinking").and_then(Value::as_str) {
+                combined.push_str(text);
+            }
+        }
+    }
+
+    if combined.is_empty() {
+        None
+    } else {
+        Some(combined)
+    }
+}
+
 pub(crate) fn extract_anthropic_text(value: &Value) -> Option<String> {
     let content = value.get("content")?.as_array()?;
     let mut combined = String::new();
@@ -161,6 +259,30 @@ pub(crate) fn extract_anthropic_text(value: &Value) -> Option<String> {
             if let Some(text) = item.get("text").and_then(Value::as_str) {
                 combined.push_str(text);
             }
+        }
+    }
+    if combined.is_empty() {
+        None
+    } else {
+        Some(combined)
+    }
+}
+
+pub(crate) fn extract_anthropic_reasoning(value: &Value) -> Option<String> {
+    let content = value.get("content")?.as_array()?;
+    let mut combined = String::new();
+    for item in content {
+        let is_reasoning = matches!(
+            item.get("type").and_then(Value::as_str),
+            Some("thinking" | "reasoning")
+        );
+        if !is_reasoning {
+            continue;
+        }
+        if let Some(text) = item.get("text").and_then(Value::as_str) {
+            combined.push_str(text);
+        } else if let Some(text) = item.get("thinking").and_then(Value::as_str) {
+            combined.push_str(text);
         }
     }
     if combined.is_empty() {
@@ -201,13 +323,63 @@ pub(crate) fn extract_anthropic_stream_delta(value: &Value) -> Option<String> {
     match event_type {
         "content_block_delta" => value
             .get("delta")
+            .filter(|delta| {
+                matches!(
+                    delta.get("type").and_then(Value::as_str),
+                    Some("text_delta") | None
+                )
+            })
             .and_then(|delta| delta.get("text"))
             .and_then(Value::as_str)
             .map(ToOwned::to_owned),
         "content_block_start" => value
             .get("content_block")
+            .filter(|block| {
+                matches!(
+                    block.get("type").and_then(Value::as_str),
+                    Some("text") | None
+                )
+            })
             .and_then(|block| block.get("text"))
             .and_then(Value::as_str)
+            .map(ToOwned::to_owned),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn extract_anthropic_stream_reasoning_delta(value: &Value) -> Option<String> {
+    let event_type = value.get("type").and_then(Value::as_str)?;
+    match event_type {
+        "content_block_delta" => value
+            .get("delta")
+            .filter(|delta| {
+                matches!(
+                    delta.get("type").and_then(Value::as_str),
+                    Some("thinking_delta" | "reasoning_delta")
+                )
+            })
+            .and_then(|delta| {
+                delta
+                    .get("text")
+                    .or_else(|| delta.get("thinking"))
+                    .and_then(Value::as_str)
+            })
+            .map(ToOwned::to_owned),
+        "content_block_start" => value
+            .get("content_block")
+            .filter(|block| {
+                matches!(
+                    block.get("type").and_then(Value::as_str),
+                    Some("thinking" | "reasoning")
+                )
+            })
+            .and_then(|block| {
+                block
+                    .get("text")
+                    .or_else(|| block.get("thinking"))
+                    .and_then(Value::as_str)
+            })
             .map(ToOwned::to_owned),
         _ => None,
     }
@@ -314,6 +486,10 @@ pub(crate) fn extract_google_text(value: &Value) -> Option<String> {
     let parts = content.get("parts")?.as_array()?;
     let mut combined = String::new();
     for part in parts {
+        let is_reasoning = part.get("thought").and_then(Value::as_bool) == Some(true);
+        if is_reasoning {
+            continue;
+        }
         if let Some(text) = part.get("text").and_then(Value::as_str) {
             combined.push_str(text);
         }
@@ -327,6 +503,48 @@ pub(crate) fn extract_google_text(value: &Value) -> Option<String> {
 
 pub(crate) fn extract_google_text_delta(value: &Value) -> Option<String> {
     extract_google_text(value)
+}
+
+pub(crate) fn extract_google_reasoning(value: &Value) -> Option<String> {
+    let candidates = value.get("candidates")?.as_array()?;
+    let first = candidates.first()?;
+    let content = first.get("content")?;
+    let parts = content.get("parts")?.as_array()?;
+    let mut combined = String::new();
+    for part in parts {
+        let is_reasoning = part.get("thought").and_then(Value::as_bool) == Some(true)
+            || part.get("reasoning").and_then(Value::as_bool) == Some(true);
+        if !is_reasoning {
+            continue;
+        }
+        if let Some(text) = part.get("text").and_then(Value::as_str) {
+            combined.push_str(text);
+        }
+    }
+    if combined.is_empty() {
+        None
+    } else {
+        Some(combined)
+    }
+}
+
+fn append_reasoning_text(value: &Value, out: &mut String) {
+    match value {
+        Value::String(text) => out.push_str(text),
+        Value::Array(items) => {
+            for item in items {
+                append_reasoning_text(item, out);
+            }
+        }
+        Value::Object(map) => {
+            for key in ["text", "thinking", "reasoning_text", "content", "summary"] {
+                if let Some(value) = map.get(key) {
+                    append_reasoning_text(value, out);
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 pub(crate) fn extract_google_tool_calls(value: &Value) -> Vec<ToolCall> {

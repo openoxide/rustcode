@@ -37,6 +37,9 @@ pub enum EventPayload {
     OutputChunk {
         text: String,
     },
+    ReasoningChunk {
+        text: String,
+    },
     ServeRequest {
         method: String,
         path: String,

@@ -45,9 +45,9 @@ pub(super) fn handle_chat_key(
             KeyCode::Enter => {
                 // Determine whether the selected command takes arguments.
                 let has_args = if let Some(Modal::SlashHelp { query, selected }) = &state.modal {
-                    filter_slash_commands(query).get(*selected).map(|(cmd, _)| {
-                        cmd.trim_start_matches('/').contains(' ')
-                    })
+                    filter_slash_commands(query)
+                        .get(*selected)
+                        .map(|(cmd, _)| cmd.trim_start_matches('/').contains(' '))
                 } else {
                     None
                 };
@@ -162,7 +162,7 @@ pub(super) fn handle_chat_key(
                         chat.activity.clear();
                         chat.activity_selected = 0;
                         chat.details_open = false;
-                        chat.tool_details = false;
+                        chat.tool_details = true;
                         chat.find = None;
                         chat.running = None;
                         state.status = None;
@@ -213,7 +213,7 @@ pub(super) fn handle_chat_key(
                         chat.activity.clear();
                         chat.activity_selected = 0;
                         chat.details_open = false;
-                        chat.tool_details = false;
+                        chat.tool_details = true;
                         chat.find = None;
                         chat.running = None;
                         state.status = None;
@@ -269,6 +269,11 @@ pub(super) fn handle_chat_key(
                     },
                     Duration::from_secs(2),
                 );
+                return ChatNav::Stay;
+            }
+            // Ctrl+Y: toggle thinking/reasoning visibility
+            KeyCode::Char('y' | 'Y') => {
+                execute_command(state, CommandId::ToggleReasoning);
                 return ChatNav::Stay;
             }
             // Ctrl+Left/Right: word jump
@@ -345,6 +350,8 @@ pub(super) fn handle_chat_key(
     // This must come before any single-key shortcut matches.
     if chat.focus == ChatFocus::Composer && !ctrl && !alt {
         if let KeyCode::Char(ch) = key.code {
+            // Any manual typing invalidates a pending large-paste buffer.
+            chat.paste_buffer = None;
             composer_insert_str(chat, &ch.to_string());
             return ChatNav::Stay;
         }
@@ -404,11 +411,13 @@ pub(super) fn handle_chat_key(
         }
         KeyCode::Backspace => {
             if chat.focus == ChatFocus::Composer {
+                chat.paste_buffer = None;
                 composer_backspace(chat);
             }
         }
         KeyCode::Delete => {
             if chat.focus == ChatFocus::Composer {
+                chat.paste_buffer = None;
                 composer_delete(chat);
             }
         }
@@ -443,7 +452,11 @@ pub(super) fn handle_chat_key(
             if chat.running.is_some() {
                 return ChatNav::Stay;
             }
-            let prompt = chat.composer.trim().to_string();
+            // Use the full paste_buffer text if present (large paste shown as summary).
+            let prompt = chat
+                .paste_buffer
+                .take()
+                .unwrap_or_else(|| chat.composer.trim().to_string());
             if prompt.is_empty() {
                 // Empty Enter with an error status → show full error detail
                 if let Some(msg) = state.status.clone() {

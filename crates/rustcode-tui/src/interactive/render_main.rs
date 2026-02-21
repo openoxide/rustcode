@@ -656,6 +656,12 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::DIM),
         ));
+        spans.push(Span::styled(
+            "  Ctrl+Y:thinking",
+            Style::default()
+                .fg(Color::DarkGray)
+                .add_modifier(Modifier::DIM),
+        ));
         Line::from(spans)
     } else {
         // Compact hint — just enough to orient a new user

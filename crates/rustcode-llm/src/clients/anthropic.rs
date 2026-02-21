@@ -2,8 +2,8 @@ use crate::endpoints::{normalize_anthropic_messages_endpoint, truncate_for_error
 use crate::provider::model_for_provider;
 use crate::streaming::{extract_stream_error_message, read_sse_or_body, StreamedProviderBody};
 use crate::transforms::{
-    anthropic_messages_from_chat, extract_anthropic_stream_delta, extract_anthropic_text,
-    extract_anthropic_tool_calls, extract_anthropic_usage,
+    anthropic_messages_from_chat, extract_anthropic_reasoning, extract_anthropic_stream_delta,
+    extract_anthropic_text, extract_anthropic_tool_calls, extract_anthropic_usage,
 };
 use crate::types::{
     ChatRequest, ChatResponse, LlmClient, LlmError, LlmRequest, LlmResponse,
@@ -217,6 +217,7 @@ impl LlmClient for AnthropicClient {
         }
         let tool_calls = extract_anthropic_tool_calls(&parsed);
         let text = extract_anthropic_text(&parsed).unwrap_or_default();
+        let reasoning = extract_anthropic_reasoning(&parsed);
         if text.is_empty() && tool_calls.is_empty() {
             return Err(LlmError::Invalid(format!(
                 "provider response did not include content or tool calls: {}",
@@ -228,6 +229,8 @@ impl LlmClient for AnthropicClient {
 
         Ok(ChatResponse {
             text,
+            reasoning,
+            reasoning_chunks: Vec::new(),
             tool_calls,
             usage,
         })

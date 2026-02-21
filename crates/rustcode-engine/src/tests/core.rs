@@ -138,6 +138,8 @@ async fn agent_can_exec_when_allowed() {
                     );
                     Ok(ChatResponse {
                         text: String::new(),
+                        reasoning: None,
+                        reasoning_chunks: Vec::new(),
                         tool_calls: vec![ToolCall {
                             id: "call_exec".to_string(),
                             name: "exec".to_string(),
@@ -156,6 +158,8 @@ async fn agent_can_exec_when_allowed() {
                     );
                     Ok(ChatResponse {
                         text: "done".to_string(),
+                        reasoning: None,
+                        reasoning_chunks: Vec::new(),
                         tool_calls: Vec::new(),
                         usage: None,
                     })
@@ -454,6 +458,8 @@ async fn agent_compaction_triggers_on_high_token_usage() {
                     // Step 0: tool call with high usage approaching the limit
                     Ok(ChatResponse {
                         text: String::new(),
+                        reasoning: None,
+                        reasoning_chunks: Vec::new(),
                         tool_calls: vec![ToolCall {
                             id: "call_1".to_string(),
                             name: "list".to_string(),
@@ -474,6 +480,8 @@ async fn agent_compaction_triggers_on_high_token_usage() {
                         *step = 2;
                         Ok(ChatResponse {
                             text: "## Summary\nUser listed files.".to_string(),
+                            reasoning: None,
+                            reasoning_chunks: Vec::new(),
                             tool_calls: Vec::new(),
                             usage: Some(TokenUsage {
                                 input: 5_000,
@@ -488,6 +496,8 @@ async fn agent_compaction_triggers_on_high_token_usage() {
                         *step = 2;
                         Ok(ChatResponse {
                             text: "done after compaction".to_string(),
+                            reasoning: None,
+                            reasoning_chunks: Vec::new(),
                             tool_calls: Vec::new(),
                             usage: Some(TokenUsage {
                                 input: 10_000,
@@ -503,6 +513,8 @@ async fn agent_compaction_triggers_on_high_token_usage() {
                     // Final answer after compaction
                     Ok(ChatResponse {
                         text: "done after compaction".to_string(),
+                        reasoning: None,
+                        reasoning_chunks: Vec::new(),
                         tool_calls: Vec::new(),
                         usage: None,
                     })

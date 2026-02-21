@@ -1,7 +1,7 @@
 use super::{
-    build_prompt_history, build_transcript_lines, compute_find_matches, execute_command,
-    push_toast, set_find, transcript_area_height, AppState, ChatFocus, ChatState, CommandId,
-    CommandItem, Duration, InteractiveSubmitMode, Modal, Screen, ToastVariant,
+    build_transcript_lines, compute_find_matches, execute_command, open_session_by_id, push_toast,
+    set_find, transcript_area_height, AppState, ChatState, CommandId, CommandItem, Duration,
+    InteractiveSubmitMode, Modal, Screen, ToastVariant,
 };
 
 pub(super) fn open_command_palette(state: &mut AppState, current_chat: Option<&ChatState>) {
@@ -113,6 +113,14 @@ pub(super) fn build_command_items(
         id: CommandId::ToggleTools,
         title: "Toggle tools".to_string(),
         detail: "Expand/collapse tool call details (Ctrl+D)".to_string(),
+        enabled: in_chat,
+        disabled_reason: (!in_chat).then_some("Open a session first".to_string()),
+    });
+
+    items.push(CommandItem {
+        id: CommandId::ToggleReasoning,
+        title: "Toggle thinking".to_string(),
+        detail: "Show/hide reasoning blocks (Ctrl+Y)".to_string(),
         enabled: in_chat,
         disabled_reason: (!in_chat).then_some("Open a session first".to_string()),
     });
@@ -230,8 +238,12 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
             state.help_open = true;
             true
         }
-        "sessions" | "home" => {
-            state.screen = Screen::Sessions;
+        "sessions" | "home" | "resume" => {
+            if rest.is_empty() {
+                state.screen = Screen::Sessions;
+            } else {
+                open_session_by_id(state, rest);
+            }
             true
         }
         "new" => {
@@ -248,6 +260,10 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
         }
         "tools" => {
             execute_command(state, CommandId::ToggleTools);
+            true
+        }
+        "thinking" | "reasoning" => {
+            execute_command(state, CommandId::ToggleReasoning);
             true
         }
         "model" | "models" => {
@@ -288,8 +304,7 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
             true
         }
         "open" | "session" => {
-            let session_id = rest;
-            if session_id.is_empty() {
+            if rest.is_empty() {
                 push_toast(
                     state,
                     ToastVariant::Warning,
@@ -298,62 +313,7 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
                 );
                 return true;
             }
-            match state.backend.get_session(session_id) {
-                Ok(session) => {
-                    let messages = state
-                        .backend
-                        .load_messages(&session.id)
-                        .unwrap_or_else(|err| {
-                            push_toast(state, ToastVariant::Error, err, Duration::from_secs(4));
-                            Vec::new()
-                        });
-                    let prompt_history = build_prompt_history(&messages);
-                    state.screen = Screen::Chat(ChatState {
-                        session,
-                        messages,
-                        scroll: 0,
-                        live_assistant: String::new(),
-                        composer: String::new(),
-                        composer_cursor: 0,
-                        prompt_history,
-                        history_cursor: None,
-                        history_draft: String::new(),
-                        focus: ChatFocus::Composer,
-                        activity: Vec::new(),
-                        activity_selected: 0,
-                        details_open: false,
-                        activity_hidden: false,
-                        tool_details: false,
-                        find: None,
-                        running: None,
-                        pending_prompt: None,
-                        composer_cleared_by_ctrl_c: false,
-                        last_typing_time: None,
-                        total_input_tokens: 0,
-                        total_output_tokens: 0,
-                        last_total_tokens: 0,
-                        context_limit: 0,
-                        cost_usd: 0.0,
-                        last_max_scroll: std::cell::Cell::new(0),
-                        run_started_at: None,
-                        last_run_elapsed: None,
-                    });
-                    push_toast(
-                        state,
-                        ToastVariant::Success,
-                        "opened session",
-                        Duration::from_secs(2),
-                    );
-                }
-                Err(err) => {
-                    push_toast(
-                        state,
-                        ToastVariant::Error,
-                        format!("failed to open session: {err}"),
-                        Duration::from_secs(4),
-                    );
-                }
-            }
+            open_session_by_id(state, rest);
             true
         }
         "rename" => {

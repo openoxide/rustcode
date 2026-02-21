@@ -2,8 +2,9 @@ use crate::endpoints::{normalize_google_base_url, truncate_for_error};
 use crate::provider::model_for_provider;
 use crate::streaming::{extract_stream_error_message, read_sse_or_body, StreamedProviderBody};
 use crate::transforms::{
-    extract_google_text, extract_google_text_delta, extract_google_tool_calls,
-    extract_google_usage, google_contents_from_chat, google_tools_from_specs,
+    extract_google_reasoning, extract_google_text, extract_google_text_delta,
+    extract_google_tool_calls, extract_google_usage, google_contents_from_chat,
+    google_tools_from_specs,
 };
 use crate::types::{
     ChatRequest, ChatResponse, LlmClient, LlmError, LlmRequest, LlmResponse,
@@ -215,6 +216,7 @@ impl LlmClient for GoogleGenerativeAiClient {
         }
         let tool_calls = extract_google_tool_calls(&parsed);
         let text = extract_google_text(&parsed).unwrap_or_default();
+        let reasoning = extract_google_reasoning(&parsed);
         if text.is_empty() && tool_calls.is_empty() {
             return Err(LlmError::Invalid(format!(
                 "provider response did not include content or tool calls: {}",
@@ -224,6 +226,8 @@ impl LlmClient for GoogleGenerativeAiClient {
         let usage = extract_google_usage(&parsed);
         Ok(ChatResponse {
             text,
+            reasoning,
+            reasoning_chunks: Vec::new(),
             tool_calls,
             usage,
         })

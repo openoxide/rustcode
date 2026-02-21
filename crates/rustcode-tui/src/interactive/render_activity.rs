@@ -3,11 +3,7 @@ use super::{
     Line, List, ListItem, Modifier, Paragraph, Rect, Span, Style, SystemTime, Wrap,
 };
 
-pub(super) fn render_activity(
-    frame: &mut ratatui::Frame<'_>,
-    area: Rect,
-    chat: &ChatState,
-) {
+pub(super) fn render_activity(frame: &mut ratatui::Frame<'_>, area: Rect, chat: &ChatState) {
     let border = if chat.focus == ChatFocus::Activity {
         Style::default().fg(Color::Cyan)
     } else {
@@ -72,6 +68,9 @@ pub(super) fn render_activity(
                 }
                 ActivityItem::OutputChunk { .. } => {
                     ("out", Style::default().add_modifier(Modifier::DIM))
+                }
+                ActivityItem::ReasoningChunk { .. } => {
+                    ("think", Style::default().fg(Color::Blue).add_modifier(Modifier::DIM))
                 }
                 ActivityItem::Warning { .. } => ("warn", Style::default().fg(Color::Magenta)),
                 ActivityItem::Failure { .. } => ("error", Style::default().fg(Color::Red)),

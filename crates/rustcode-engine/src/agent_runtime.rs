@@ -127,6 +127,35 @@ impl Engine {
                 tool_calls: response.tool_calls.clone(),
             });
 
+            if !response.reasoning_chunks.is_empty() {
+                for chunk in &response.reasoning_chunks {
+                    if chunk.trim().is_empty() {
+                        continue;
+                    }
+                    self.emit(
+                        publisher.clone(),
+                        EventScope::Command,
+                        EventPayload::ReasoningChunk {
+                            text: chunk.clone(),
+                        },
+                        context,
+                    )
+                    .await?;
+                }
+            } else if let Some(reasoning) = response.reasoning.as_ref() {
+                if !reasoning.trim().is_empty() {
+                    self.emit(
+                        publisher.clone(),
+                        EventScope::Command,
+                        EventPayload::ReasoningChunk {
+                            text: reasoning.clone(),
+                        },
+                        context,
+                    )
+                    .await?;
+                }
+            }
+
             if !response.text.is_empty() {
                 self.emit(
                     publisher.clone(),
@@ -209,6 +238,7 @@ impl Engine {
                         .map(|d| d.as_millis() as i64)
                         .unwrap_or(0),
                     content: Value::String(system_prompt.to_string()),
+                    reasoning: None,
                     tool_call_id: None,
                     tool_name: None,
                     tool_calls: Vec::new(),
@@ -249,6 +279,7 @@ impl Engine {
                     .map(|d| d.as_millis() as i64)
                     .unwrap_or(0),
                 content: Value::String(prompt.to_string()),
+                reasoning: None,
                 tool_call_id: None,
                 tool_name: None,
                 tool_calls: Vec::new(),
@@ -313,6 +344,7 @@ impl Engine {
                 } else {
                     Value::String(response.text.clone())
                 },
+                reasoning: response.reasoning.clone(),
                 tool_call_id: None,
                 tool_name: None,
                 tool_calls: response
@@ -439,6 +471,7 @@ impl Engine {
                         .map(|d| d.as_millis() as i64)
                         .unwrap_or(0),
                     content: Value::String(result_payload.clone()),
+                    reasoning: None,
                     tool_call_id: Some(call.id.clone()),
                     tool_name: Some(call.name.clone()),
                     tool_calls: Vec::new(),

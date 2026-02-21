@@ -31,14 +31,14 @@ pub struct V1SessionCreateRequest {
     pub title: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct V1SessionCreateResponse {
     #[serde(default = "default_schema_version")]
     pub schema_version: u16,
     pub session: SessionInfo,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct V1SessionsListResponse {
     #[serde(default = "default_schema_version")]
     pub schema_version: u16,
@@ -46,7 +46,7 @@ pub struct V1SessionsListResponse {
     pub sessions: Vec<SessionInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct V1SessionShowResponse {
     #[serde(default = "default_schema_version")]
     pub schema_version: u16,
@@ -115,6 +115,9 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 workspace_root: "/tmp".to_string(),
                 model: "null".to_string(),
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                cost_usd: 0.0,
             }],
         };
         let sample_value = serde_json::to_value(sample).expect("to_value");
@@ -135,6 +138,9 @@ mod tests {
                 cwd: "/tmp".to_string(),
                 workspace_root: "/tmp".to_string(),
                 model: "null".to_string(),
+                total_input_tokens: 0,
+                total_output_tokens: 0,
+                cost_usd: 0.0,
             },
             messages: vec![
                 StoredMessage {
@@ -142,6 +148,7 @@ mod tests {
                     role: MessageRole::User,
                     created_at_unix_ms: 1500,
                     content: Value::String("hello".to_string()),
+                    reasoning: None,
                     tool_call_id: None,
                     tool_name: None,
                     tool_calls: Vec::<StoredToolCall>::new(),
@@ -151,6 +158,7 @@ mod tests {
                     role: MessageRole::Assistant,
                     created_at_unix_ms: 1600,
                     content: Value::String("hi".to_string()),
+                    reasoning: None,
                     tool_call_id: None,
                     tool_name: None,
                     tool_calls: Vec::<StoredToolCall>::new(),

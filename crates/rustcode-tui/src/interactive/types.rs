@@ -198,6 +198,7 @@ pub(super) enum CommandId {
     DeleteSession,
     Refresh,
     ToggleTools,
+    ToggleReasoning,
     Search,
     FileSearch,
     /// Toggle activity panel visibility.
@@ -248,6 +249,9 @@ pub(super) enum ActivityItem {
     OutputChunk {
         text: String,
     },
+    ReasoningChunk {
+        text: String,
+    },
     Warning {
         message: String,
     },
@@ -264,6 +268,7 @@ impl ActivityItem {
             ActivityItem::ToolCall { name, .. } => format!("tool: {name}"),
             ActivityItem::ToolResult { name, ok, .. } => format!("tool result: {name} ok={ok}"),
             ActivityItem::OutputChunk { .. } => "assistant".to_string(),
+            ActivityItem::ReasoningChunk { .. } => "thinking".to_string(),
             ActivityItem::Warning { .. } => "warning".to_string(),
             ActivityItem::Failure { .. } => "failure".to_string(),
             ActivityItem::Completed => "completed".to_string(),
@@ -340,6 +345,10 @@ impl ActivityItem {
                 }
             }
             ActivityItem::OutputChunk { text } => text.replace('\n', " "),
+            ActivityItem::ReasoningChunk { text } => {
+                let one_line = text.replace('\n', " ");
+                format!("thinking: {one_line}")
+            }
             ActivityItem::Warning { message } => message.clone(),
             ActivityItem::Failure { message } => message.clone(),
             ActivityItem::Completed => "done".to_string(),
@@ -403,6 +412,11 @@ impl ActivityItem {
                     out.push(Line::raw(line.to_string()));
                 }
             }
+            ActivityItem::ReasoningChunk { text } => {
+                for line in text.lines().take(64) {
+                    out.push(Line::raw(line.to_string()));
+                }
+            }
             ActivityItem::Warning { message } => {
                 for line in message.lines().take(64) {
                     out.push(Line::raw(line.to_string()));
@@ -425,8 +439,17 @@ pub(super) struct ChatState {
     pub(super) messages: Vec<StoredMessage>,
     pub(super) scroll: u16,
     pub(super) live_assistant: String,
+    pub(super) live_reasoning: String,
+    /// Whether reasoning/thinking blocks are visible in transcript.
+    pub(super) show_reasoning: bool,
     pub(super) composer: String,
     pub(super) composer_cursor: usize,
+    /// Full original text of a large paste — shown as a summary in `composer`.
+    ///
+    /// Set by `handle_paste` when the pasted text exceeds the display threshold.
+    /// Used by the submit handler so the AI receives the full text.
+    /// Cleared on any manual edit to the composer, or after submit.
+    pub(super) paste_buffer: Option<String>,
     pub(super) prompt_history: Vec<String>,
     pub(super) history_cursor: Option<usize>,
     pub(super) history_draft: String,

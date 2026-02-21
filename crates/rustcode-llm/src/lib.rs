@@ -135,12 +135,12 @@ use provider::model_for_provider;
 use streaming::{extract_stream_error_message, parse_sse_data_block, take_next_sse_block};
 #[cfg(test)]
 use transforms::{
-    error_http_status, extract_anthropic_stream_delta, extract_anthropic_text,
-    extract_anthropic_tool_calls, extract_anthropic_usage, extract_error_message,
-    extract_gateway_stream_delta, extract_google_text, extract_google_tool_calls,
-    extract_google_usage, extract_openai_stream_delta, extract_openai_text,
-    extract_openai_tool_calls, extract_openai_usage, is_content_filter_error,
-    sanitize_google_schema,
+    extract_anthropic_reasoning, extract_anthropic_stream_delta,
+    extract_anthropic_stream_reasoning_delta, extract_anthropic_text, extract_anthropic_tool_calls,
+    extract_anthropic_usage, extract_gateway_stream_delta, extract_google_reasoning,
+    extract_google_text, extract_google_tool_calls, extract_google_usage, extract_openai_reasoning,
+    extract_openai_stream_delta, extract_openai_stream_reasoning_delta, extract_openai_text,
+    extract_openai_tool_calls, extract_openai_usage, sanitize_google_schema,
 };
 
 #[cfg(test)]

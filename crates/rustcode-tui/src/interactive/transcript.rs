@@ -13,6 +13,7 @@ fn append_message_lines(
     msg: &StoredMessage,
     tool_details: bool,
     tool_args_map: &HashMap<String, String>,
+    show_reasoning: bool,
 ) {
     // Tool result messages are rendered inline without a role header — the ✓/✗
     // indicator and tool name are self-descriptive.
@@ -56,6 +57,46 @@ fn append_message_lines(
             }
         }
         MessageRole::Assistant => {
+            if let Some(reasoning) = msg.reasoning.as_deref().filter(|text| !text.trim().is_empty()) {
+                if show_reasoning {
+                    let rendered = render_markdown(reasoning);
+                    let mut truncated = if rendered.len() > 300 {
+                        let mut t = rendered[..300].to_vec();
+                        t.push(Line::raw("...[thinking truncated]..."));
+                        t
+                    } else {
+                        rendered
+                    };
+                    if !truncated.is_empty() {
+                        let idx = truncated.iter().position(|l| l.width() > 0).unwrap_or(0);
+                        if idx < truncated.len() {
+                            let mut spans = vec![Span::styled(
+                                "◦  ",
+                                Style::default()
+                                    .fg(Color::Blue)
+                                    .add_modifier(Modifier::DIM),
+                            )];
+                            spans.extend(truncated[idx].spans.iter().cloned());
+                            truncated[idx] = Line::from(spans);
+                        }
+                    }
+                    lines.extend(truncated.into_iter().map(|line| {
+                        line.style(
+                            Style::default()
+                                .fg(Color::Rgb(130, 140, 170))
+                                .add_modifier(Modifier::DIM),
+                        )
+                    }));
+                    lines.push(Line::raw(""));
+                } else {
+                    lines.push(Line::from(Span::styled(
+                        "[thinking hidden - Ctrl+Y or /thinking]",
+                        Style::default()
+                            .fg(Color::Rgb(105, 110, 130))
+                            .add_modifier(Modifier::DIM),
+                    )));
+                }
+            }
             match msg.content.as_str() {
                 Some(text) if !text.is_empty() => {
                     let rendered = render_markdown(text);
@@ -128,7 +169,11 @@ fn append_message_lines(
     // Empty assistant messages (with tool_calls but no text) should flow
     // directly into their tool result lines without a gap.
     let has_text = msg.content.as_str().is_some_and(|t| !t.trim().is_empty());
-    if has_text || msg.role != MessageRole::Assistant {
+    let has_reasoning = msg
+        .reasoning
+        .as_deref()
+        .is_some_and(|text| show_reasoning && !text.trim().is_empty());
+    if has_text || has_reasoning || msg.role != MessageRole::Assistant {
         lines.push(Line::raw(""));
     }
 }
@@ -862,7 +907,13 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
             pending_tools.clear();
             pending_includes_last = false;
         }
-        append_message_lines(&mut lines, msg, chat.tool_details, &tool_args_map);
+        append_message_lines(
+            &mut lines,
+            msg,
+            chat.tool_details,
+            &tool_args_map,
+            chat.show_reasoning,
+        );
     }
     // Handle trailing Tool messages (conversation ending with a tool result).
     if !pending_tools.is_empty() {
@@ -905,6 +956,38 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_else(|_| Duration::from_secs(0))
         .as_millis();
+
+    if chat.show_reasoning && !chat.live_reasoning.trim().is_empty() {
+        let rendered = render_markdown(chat.live_reasoning.as_str());
+        let mut truncated = if rendered.len() > 400 {
+            let mut t = rendered[..400].to_vec();
+            t.push(Line::raw("...[thinking truncated]..."));
+            t
+        } else {
+            rendered
+        };
+        if !truncated.is_empty() {
+            let idx = truncated.iter().position(|l| l.width() > 0).unwrap_or(0);
+            if idx < truncated.len() {
+                let mut spans = vec![Span::styled(
+                    "◦  ",
+                    Style::default()
+                        .fg(Color::Blue)
+                        .add_modifier(Modifier::DIM),
+                )];
+                spans.extend(truncated[idx].spans.iter().cloned());
+                truncated[idx] = Line::from(spans);
+            }
+        }
+        lines.extend(truncated.into_iter().map(|line| {
+            line.style(
+                Style::default()
+                    .fg(Color::Rgb(130, 140, 170))
+                    .add_modifier(Modifier::DIM),
+            )
+        }));
+        lines.push(Line::raw(""));
+    }
 
     if !chat.live_assistant.trim().is_empty() {
         let rendered = render_markdown(chat.live_assistant.as_str());
@@ -952,10 +1035,15 @@ pub(super) fn build_transcript_lines(chat: &ChatState) -> Vec<Line<'static>> {
             // Nothing streaming and no tool calls yet — show spinner with inline elapsed.
             const FRAMES: &[char] = &['◐', '◓', '◑', '◒'];
             let frame = FRAMES[(ms / 150 % 4) as usize];
+            let thinking_hint = if chat.show_reasoning {
+                "thinking…"
+            } else {
+                "thinking… [Ctrl+Y to show]"
+            };
             let mut thinking_spans = vec![
                 Span::styled("◆  ", Style::default().fg(Color::Cyan)),
                 Span::styled(
-                    format!("{frame} thinking\u{2026}"),
+                    format!("{frame} {thinking_hint}"),
                     Style::default()
                         .fg(Color::Magenta)
                         .add_modifier(Modifier::DIM),

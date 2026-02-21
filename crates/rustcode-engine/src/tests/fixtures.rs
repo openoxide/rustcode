@@ -310,6 +310,8 @@ impl LlmClient for ScriptedAgentLlm {
                 );
                 Ok(ChatResponse {
                     text: String::new(),
+                    reasoning: None,
+                    reasoning_chunks: Vec::new(),
                     tool_calls: vec![ToolCall {
                         id: "call_1".to_string(),
                         name: "list".to_string(),
@@ -328,6 +330,8 @@ impl LlmClient for ScriptedAgentLlm {
                 );
                 Ok(ChatResponse {
                     text: "done".to_string(),
+                    reasoning: None,
+                    reasoning_chunks: Vec::new(),
                     tool_calls: Vec::new(),
                     usage: None,
                 })

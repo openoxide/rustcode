@@ -30,13 +30,17 @@ pub struct StoredMessage {
     /// providers support structured content for multimodal.
     pub content: Value,
 
+    /// Optional provider reasoning/thinking text for assistant turns.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
+
     /// Tool-call messages set `tool_call_id` so the next turn can correlate outputs.
     pub tool_call_id: Option<String>,
     pub tool_name: Option<String>,
     pub tool_calls: Vec<StoredToolCall>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SessionInfo {
     pub id: SessionId,
     pub title: Option<String>,
@@ -53,4 +57,16 @@ pub struct SessionInfo {
 
     /// Model id as configured at runtime (e.g. "openai/gpt-4.1").
     pub model: String,
+
+    /// Cumulative input tokens from all LLM API responses in this session.
+    #[serde(default)]
+    pub total_input_tokens: u64,
+
+    /// Cumulative output tokens from all LLM API responses in this session.
+    #[serde(default)]
+    pub total_output_tokens: u64,
+
+    /// Estimated cumulative cost in USD based on actual API token counts.
+    #[serde(default)]
+    pub cost_usd: f64,
 }

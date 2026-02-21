@@ -27,6 +27,7 @@ pub(super) const SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     ("/sessions", "Go to sessions screen  (Ctrl+Q)"),
     ("/skill", "List or inject a skill  (Ctrl+S)"),
+    ("/thinking", "Toggle thinking/reasoning visibility  (Ctrl+Y)"),
     ("/tools", "Toggle tool call details  (Ctrl+D)"),
 ];
 
@@ -95,6 +96,8 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                         messages,
                         scroll: 0,
                         live_assistant: String::new(),
+                        live_reasoning: String::new(),
+                        show_reasoning: false,
                         composer: String::new(),
                         composer_cursor: 0,
                         paste_buffer: None,
@@ -286,6 +289,30 @@ pub(super) fn execute_command(state: &mut AppState, id: CommandId) {
                     "tools: details"
                 } else {
                     "tools: summary"
+                },
+                Duration::from_secs(2),
+            );
+            state.screen = Screen::Chat(chat);
+        }
+        CommandId::ToggleReasoning => {
+            let Screen::Chat(mut chat) = std::mem::replace(&mut state.screen, Screen::Sessions)
+            else {
+                push_toast(
+                    state,
+                    ToastVariant::Warning,
+                    "open a session first",
+                    Duration::from_secs(3),
+                );
+                return;
+            };
+            chat.show_reasoning = !chat.show_reasoning;
+            push_toast(
+                state,
+                ToastVariant::Info,
+                if chat.show_reasoning {
+                    "thinking: visible"
+                } else {
+                    "thinking: hidden"
                 },
                 Duration::from_secs(2),
             );
@@ -568,6 +595,20 @@ pub(super) fn handle_slash_command(
                     "tools: details"
                 } else {
                     "tools: summary"
+                },
+                Duration::from_secs(2),
+            );
+            ChatNav::Stay
+        }
+        "thinking" | "reasoning" => {
+            chat.show_reasoning = !chat.show_reasoning;
+            push_toast(
+                state,
+                ToastVariant::Info,
+                if chat.show_reasoning {
+                    "thinking: visible"
+                } else {
+                    "thinking: hidden"
                 },
                 Duration::from_secs(2),
             );
@@ -946,6 +987,8 @@ fn open_session(state: &mut AppState, session: rustcode_core::SessionInfo) {
         messages,
         scroll: 0,
         live_assistant: String::new(),
+        live_reasoning: String::new(),
+        show_reasoning: false,
         composer: String::new(),
         composer_cursor: 0,
         paste_buffer: None,

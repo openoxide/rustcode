@@ -42,13 +42,19 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                             Vec::new()
                         });
                     let prompt_history = build_prompt_history(&messages);
+                    let tokens_in = session.total_input_tokens;
+                    let tokens_out = session.total_output_tokens;
+                    let cost = session.cost_usd;
                     state.screen = Screen::Chat(ChatState {
                         session,
                         messages,
                         scroll: 0,
                         live_assistant: String::new(),
+                        live_reasoning: String::new(),
+                        show_reasoning: false,
                         composer: String::new(),
                         composer_cursor: 0,
+                        paste_buffer: None,
                         prompt_history,
                         history_cursor: None,
                         history_draft: String::new(),
@@ -57,17 +63,17 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         activity_selected: 0,
                         details_open: false,
                         activity_hidden: false,
-                        tool_details: false,
+                        tool_details: true,
                         find: None,
                         running: None,
                         pending_prompt: None,
                         composer_cleared_by_ctrl_c: false,
                         last_typing_time: None,
-                        total_input_tokens: 0,
-                        total_output_tokens: 0,
-                        last_total_tokens: 0,
+                        total_input_tokens: tokens_in,
+                        total_output_tokens: tokens_out,
+                        last_total_tokens: tokens_in + tokens_out,
                         context_limit: 0,
-                        cost_usd: 0.0,
+                        cost_usd: cost,
                         last_max_scroll: std::cell::Cell::new(0),
                         run_started_at: None,
                         last_run_elapsed: None,
@@ -159,13 +165,19 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                     Vec::new()
                 });
             let prompt_history = build_prompt_history(&messages);
+            let tokens_in = session.total_input_tokens;
+            let tokens_out = session.total_output_tokens;
+            let cost = session.cost_usd;
             state.screen = Screen::Chat(ChatState {
                 session,
                 messages,
                 scroll: 0,
                 live_assistant: String::new(),
+                live_reasoning: String::new(),
+                show_reasoning: false,
                 composer: String::new(),
                 composer_cursor: 0,
+                paste_buffer: None,
                 prompt_history,
                 history_cursor: None,
                 history_draft: String::new(),
@@ -174,17 +186,17 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 activity_selected: 0,
                 details_open: false,
                 activity_hidden: false,
-                tool_details: false,
+                tool_details: true,
                 find: None,
                 running: None,
                 pending_prompt: None,
                 composer_cleared_by_ctrl_c: false,
                 last_typing_time: None,
-                total_input_tokens: 0,
-                total_output_tokens: 0,
-                last_total_tokens: 0,
+                total_input_tokens: tokens_in,
+                total_output_tokens: tokens_out,
+                last_total_tokens: tokens_in + tokens_out,
                 context_limit: 0,
-                cost_usd: 0.0,
+                cost_usd: cost,
                 last_max_scroll: std::cell::Cell::new(0),
                 run_started_at: None,
                 last_run_elapsed: None,

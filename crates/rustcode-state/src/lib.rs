@@ -488,6 +488,7 @@ mod tests {
             role: MessageRole::User,
             created_at_unix_ms: now_unix_ms().expect("now"),
             content: serde_json::Value::String("hello".to_string()),
+            reasoning: None,
             tool_call_id: None,
             tool_name: None,
             tool_calls: vec![StoredToolCall {
@@ -518,6 +519,7 @@ mod tests {
             role: MessageRole::Assistant,
             created_at_unix_ms: now_unix_ms().expect("now"),
             content: serde_json::Value::String("hi".to_string()),
+            reasoning: None,
             tool_call_id: None,
             tool_name: None,
             tool_calls: Vec::new(),

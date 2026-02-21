@@ -61,6 +61,10 @@ pub struct TokenUsage {
 pub struct ChatResponse {
     /// The assistant's text reply (may be empty if only tool calls).
     pub text: String,
+    /// Optional model reasoning/thinking text for this turn.
+    pub reasoning: Option<String>,
+    /// Incremental reasoning chunks when provider emits deltas.
+    pub reasoning_chunks: Vec<String>,
     /// Tool calls requested by the assistant.
     pub tool_calls: Vec<ToolCall>,
     /// Token usage statistics, if reported by the provider.
