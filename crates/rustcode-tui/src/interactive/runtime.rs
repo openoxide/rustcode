@@ -100,9 +100,13 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
             {
                 selected = idx;
             }
-            let messages = session_backend
-                .load_messages(&session.id)
-                .map_err(TuiError::State)?;
+            let messages = if crate::is_draft_session_id(&session.id) {
+                Vec::new()
+            } else {
+                session_backend
+                    .load_messages(&session.id)
+                    .map_err(TuiError::State)?
+            };
             let prompt_history = build_prompt_history(&messages);
             let initial_composer = if should_submit {
                 String::new()
