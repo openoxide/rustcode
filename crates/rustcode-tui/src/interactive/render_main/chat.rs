@@ -181,8 +181,10 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         })
         .sum();
     let max_scroll = wrapped_count.saturating_sub(transcript_inner_h);
-    // Update Cell so the scroll event handler can clamp immediately.
+    // Update Cells so compute_desired_height and the scroll handler can
+    // read accurate values without re-running build_transcript_lines.
     chat.last_max_scroll.set(max_scroll);
+    chat.last_transcript_wrapped_count.set(wrapped_count);
     let from_bottom = chat.scroll.min(max_scroll);
     let scroll_top = max_scroll.saturating_sub(from_bottom);
 

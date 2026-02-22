@@ -1,5 +1,5 @@
 use super::{
-    approval_options_count, build_transcript_lines, AppState, ChatState, Duration, Screen,
+    approval_options_count, AppState, ChatState, Duration, Screen,
     SessionInfo, SystemTime, Toast, ToastVariant,
 };
 
@@ -110,26 +110,17 @@ fn chat_desired_height(state: &AppState, chat: &ChatState, term_height: u16) -> 
     // Status bar: always 3 rows.
     let status_h = 3u16;
 
-    // Transcript: count visual wrapped lines.
-    let transcript_lines = build_transcript_lines(chat);
-    let inner_w = width.saturating_sub(2).max(1) as usize;
-    let wrapped: usize = transcript_lines
-        .iter()
-        .map(|l| {
-            let w = l.width();
-            if w <= inner_w {
-                1
-            } else {
-                w.div_ceil(inner_w)
-            }
-        })
-        .sum();
-    // Transcript box = wrapped lines + 2 borders.
+    // Use the wrapped transcript line count cached from the last render pass
+    // (updated every frame in render_chat via Cell).  This avoids calling the
+    // expensive `build_transcript_lines` a second time each frame.
+    // On the very first frame (before any render), the cache is 0, so we
+    // fall back to the 40% minimum which is a safe default.
+    let wrapped = chat.last_transcript_wrapped_count.get() as u16;
     // Minimum height: ~40% of terminal height so the transcript is always
     // prominent relative to the composer, with a floor of 8 rows.
     let forty_pct = (term_height * 2 / 5).max(8);
     let transcript_min = forty_pct.max(bottom_h);
-    let transcript_h = (wrapped as u16 + 2).max(transcript_min);
+    let transcript_h = (wrapped + 2).max(transcript_min);
 
     // Mode bar: 1 row between transcript and composer.
     let mode_bar_h = 1u16;

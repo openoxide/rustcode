@@ -384,6 +384,9 @@ pub(super) struct ChatState {
     /// via `Cell` interior mutability so the scroll event handler can clamp
     /// `scroll` immediately without phantom over-scrolling.
     pub(super) last_max_scroll: std::cell::Cell<usize>,
+    /// Wrapped transcript line count from the last render pass — used by
+    /// `compute_desired_height` so it doesn't need to call `build_transcript_lines`.
+    pub(super) last_transcript_wrapped_count: std::cell::Cell<usize>,
     /// Instant when the current run started — cleared when the run ends.
     pub(super) run_started_at: Option<Instant>,
     /// Elapsed duration of the most recently completed run.

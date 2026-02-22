@@ -208,10 +208,8 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
         InteractiveMsg::ApprovalRequest { request, reply } => {
             match state.approval_mode {
                 ApprovalMode::Yolo => {
-                    // Auto-approve everything.
-                    if let Screen::Chat(chat) = &mut screen {
-                        chat.committed_approvals.push(request);
-                    }
+                    // Auto-approve everything — no committed_approvals push;
+                    // diffs are visible via the live_activity feed.
                     let _ = reply.send(crate::ApprovalResponse::AllowOnce);
                 }
                 ApprovalMode::Plan => {
@@ -231,10 +229,7 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
                         state.pending_approval = Some(PendingApproval { request, reply });
                         state.approval_selection = 0;
                     } else {
-                        // File/edit tool → auto-approve.
-                        if let Screen::Chat(chat) = &mut screen {
-                            chat.committed_approvals.push(request);
-                        }
+                        // File/edit tool → auto-approve; diffs visible via live_activity.
                         let _ = reply.send(crate::ApprovalResponse::AllowOnce);
                     }
                 }

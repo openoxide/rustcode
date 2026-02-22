@@ -18,7 +18,7 @@ pub(super) fn approval_is_command_permission(permission: &str) -> bool {
 pub(super) fn approval_option_labels(req: &ToolApprovalRequest) -> Vec<String> {
     let mut options = vec![format!("Approve once [{}]", req.tool)];
     if approval_is_command_permission(&req.permission) {
-        options.push("Allow all executionary commands".to_string());
+        options.push("Allow all edits".to_string());
     }
     options.push("Approve all tools (auto-pilot mode)".to_string());
     options.push("Deny".to_string());

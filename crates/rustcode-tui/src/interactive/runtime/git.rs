@@ -12,6 +12,8 @@ pub(super) fn refresh_git_stat_async(
     tx: tokio::sync::mpsc::UnboundedSender<InteractiveMsg>,
 ) {
     tokio::task::spawn_blocking(move || {
+        // Always publish a successful git-stat refresh, including the
+        // zero-diff case, so stale UI counters are cleared after commits.
         if let Some(stat) = compute_git_stat(&workspace_root) {
             let _ = tx.send(InteractiveMsg::GitStatUpdate {
                 files: stat.files,
@@ -40,8 +42,14 @@ fn compute_git_stat(workspace_root: &std::path::Path) -> Option<GitStat> {
 /// - `"15 files changed, 406 insertions(+), 269 deletions(-)"`
 /// - `"1 file changed, 1 insertion(+)"`
 fn parse_git_shortstat(text: &str) -> Option<GitStat> {
+    // `git diff --shortstat HEAD` prints an empty stdout when there is no
+    // diff. Treat that as a valid zero state so the composer badge can clear.
     if text.is_empty() {
-        return None;
+        return Some(GitStat {
+            files: 0,
+            insertions: 0,
+            deletions: 0,
+        });
     }
     let files: u32 = text
         .split_once(" file")
@@ -72,4 +80,26 @@ fn parse_git_shortstat(text: &str) -> Option<GitStat> {
         insertions,
         deletions,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_git_shortstat;
+
+    #[test]
+    fn parse_empty_shortstat_as_zero_diff() {
+        let stat = parse_git_shortstat("").expect("empty output should parse");
+        assert_eq!(stat.files, 0);
+        assert_eq!(stat.insertions, 0);
+        assert_eq!(stat.deletions, 0);
+    }
+
+    #[test]
+    fn parse_standard_shortstat() {
+        let stat = parse_git_shortstat("2 files changed, 3 insertions(+), 1 deletion(-)")
+            .expect("shortstat should parse");
+        assert_eq!(stat.files, 2);
+        assert_eq!(stat.insertions, 3);
+        assert_eq!(stat.deletions, 1);
+    }
 }

@@ -39,6 +39,7 @@ fn make_chat_state(session: SessionInfo) -> ChatState {
         context_limit: 0,
         cost_usd: 0.0,
         last_max_scroll: std::cell::Cell::new(0),
+                last_transcript_wrapped_count: std::cell::Cell::new(0),
         run_started_at: None,
         last_run_elapsed: None,
         plan_title: None,
@@ -233,7 +234,7 @@ fn approval_modal_shows_bash_and_autopilot_options_for_bash() {
     let text = buffer_to_string(terminal.backend().buffer());
     assert!(text.contains("Approve once [bash]"), "text={text}");
     assert!(
-        text.contains("Allow all executionary commands"),
+        text.contains("Allow all edits"),
         "text={text}"
     );
     assert!(

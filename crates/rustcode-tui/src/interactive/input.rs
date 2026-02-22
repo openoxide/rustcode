@@ -75,7 +75,7 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
                             format!("approved once [{}]", pending.request.tool)
                         }
                         ApprovalResponse::AllowAllCommands => {
-                            "allowed all executionary commands".to_string()
+                            "allowed all edits".to_string()
                         }
                         ApprovalResponse::AllowAllToolsAutopilot => {
                             "approved all tools (auto-pilot mode)".to_string()
@@ -88,6 +88,26 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
                     if matches!(response, ApprovalResponse::AllowOnce) {
                         if let Screen::Chat(chat) = &mut state.screen {
                             chat.committed_approvals.push(pending.request);
+                        }
+                    }
+                    // Switch TUI approval mode to match the selected policy.
+                    if matches!(response, ApprovalResponse::AllowAllToolsAutopilot) {
+                        let screen = std::mem::replace(&mut state.screen, Screen::Sessions);
+                        if let Screen::Chat(mut chat) = screen {
+                            set_approval_mode(state, super::ApprovalMode::Yolo, Some(&mut chat));
+                            state.screen = Screen::Chat(chat);
+                        } else {
+                            state.screen = screen;
+                            set_approval_mode(state, super::ApprovalMode::Yolo, None);
+                        }
+                    } else if matches!(response, ApprovalResponse::AllowAllCommands) {
+                        let screen = std::mem::replace(&mut state.screen, Screen::Sessions);
+                        if let Screen::Chat(mut chat) = screen {
+                            set_approval_mode(state, super::ApprovalMode::AcceptEdits, Some(&mut chat));
+                            state.screen = Screen::Chat(chat);
+                        } else {
+                            state.screen = screen;
+                            set_approval_mode(state, super::ApprovalMode::AcceptEdits, None);
                         }
                     }
                 }
