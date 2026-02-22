@@ -1,7 +1,7 @@
 use super::super::{
-    build_prompt_history, build_transcript_lines, composer_clear, composer_insert_str,
-    compute_find_matches, compute_sessions_view, open_command_palette, push_toast, sort_sessions,
-    AppState, ChatFocus, ChatNav, ChatState, CommandId, Duration, Modal, ToastVariant,
+    build_transcript_lines, composer_clear, composer_insert_str, compute_find_matches,
+    compute_sessions_view, open_command_palette, push_toast, sort_sessions, AppState, ChatFocus,
+    ChatNav, ChatState, CommandId, Duration, Modal, ToastVariant,
 };
 use super::execute::execute_command;
 use super::session_ops::{open_session_by_id, refresh_chat_messages};
@@ -179,9 +179,8 @@ pub(crate) fn handle_slash_command(
             chat.scroll = 0;
             chat.live_assistant.clear();
             composer_clear(chat);
-            chat.prompt_history = build_prompt_history(&chat.messages);
-            chat.history_cursor = None;
-            chat.history_draft.clear();
+            state.history_cursor = None;
+            state.history_draft.clear();
             chat.focus = ChatFocus::Composer;
             chat.activity.clear();
             chat.activity_selected = 0;
@@ -221,9 +220,8 @@ pub(crate) fn handle_slash_command(
                     chat.scroll = 0;
                     chat.live_assistant.clear();
                     composer_clear(chat);
-                    chat.prompt_history = build_prompt_history(&chat.messages);
-                    chat.history_cursor = None;
-                    chat.history_draft.clear();
+                    state.history_cursor = None;
+                    state.history_draft.clear();
                     chat.focus = ChatFocus::Composer;
                     chat.activity.clear();
                     chat.activity_selected = 0;

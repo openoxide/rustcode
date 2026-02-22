@@ -2,7 +2,7 @@ use std::sync::atomic::Ordering;
 
 use super::super::ApprovalMode;
 use super::{
-    build_prompt_history, composer_backspace, composer_clear, composer_delete, composer_insert_str,
+    composer_backspace, composer_clear, composer_delete, composer_insert_str,
     composer_kill_line_backward, composer_kill_line_forward, composer_move_down, composer_move_end,
     composer_move_home, composer_move_left, composer_move_right, composer_move_up,
     composer_word_left, composer_word_right, execute_command, filter_slash_commands,
@@ -143,9 +143,8 @@ pub(super) fn handle_chat_key(
                 chat.scroll = 0;
                 chat.live_assistant.clear();
                 composer_clear(chat);
-                chat.prompt_history = build_prompt_history(&chat.messages);
-                chat.history_cursor = None;
-                chat.history_draft.clear();
+                state.history_cursor = None;
+                state.history_draft.clear();
                 chat.focus = ChatFocus::Composer;
                 chat.activity.clear();
                 chat.activity_selected = 0;
@@ -194,9 +193,8 @@ pub(super) fn handle_chat_key(
                         chat.scroll = 0;
                         chat.live_assistant.clear();
                         composer_clear(chat);
-                        chat.prompt_history = build_prompt_history(&chat.messages);
-                        chat.history_cursor = None;
-                        chat.history_draft.clear();
+                        state.history_cursor = None;
+                        state.history_draft.clear();
                         chat.focus = ChatFocus::Composer;
                         chat.activity.clear();
                         chat.activity_selected = 0;
@@ -309,15 +307,15 @@ pub(super) fn handle_chat_key(
         return ChatNav::Stay;
     }
 
-    // ── Alt+key: prompt history navigation ──────────────────────────
+    // ── Alt+Up/Down: move cursor by line in multiline composer ─────
     if chat.focus == ChatFocus::Composer && alt {
         match key.code {
             KeyCode::Up => {
-                history_prev(chat);
+                composer_move_up(chat);
                 return ChatNav::Stay;
             }
             KeyCode::Down => {
-                history_next(chat);
+                composer_move_down(chat);
                 return ChatNav::Stay;
             }
             _ => {}
@@ -378,14 +376,14 @@ pub(super) fn handle_chat_key(
                         (chat.activity_selected + 1).min(chat.activity.len().saturating_sub(1));
                 }
             } else if chat.focus == ChatFocus::Composer {
-                composer_move_down(chat);
+                history_next(state, chat);
             }
         }
         KeyCode::Up => {
             if chat.focus == ChatFocus::Activity {
                 chat.activity_selected = chat.activity_selected.saturating_sub(1);
             } else if chat.focus == ChatFocus::Composer {
-                composer_move_up(chat);
+                history_prev(state, chat);
             }
         }
         KeyCode::Backspace => {

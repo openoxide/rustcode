@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 
 use super::super::{
-    build_prompt_history, build_provider_entries, build_transcript_lines, composer_clear,
-    compute_find_matches, compute_sessions_view, filter_files, filter_provider_entries, push_toast,
-    scan_workspace_files, sort_sessions, AppState, ChatFocus, ChatState, CommandId, Duration,
-    Modal, ProviderManagerStep, Screen, ToastVariant,
+    build_provider_entries, build_transcript_lines, composer_clear, compute_find_matches,
+    compute_sessions_view, filter_files, filter_provider_entries, push_toast, scan_workspace_files,
+    sort_sessions, AppState, ChatFocus, ChatState, CommandId, Duration, Modal, ProviderManagerStep,
+    Screen, ToastVariant,
 };
 use super::filter_models;
 use super::session_ops::refresh_chat_messages;
@@ -60,9 +60,6 @@ pub(crate) fn execute_command(state: &mut AppState, id: CommandId) {
                 composer: String::new(),
                 composer_cursor: 0,
                 paste_buffer: None,
-                prompt_history: Vec::new(),
-                history_cursor: None,
-                history_draft: String::new(),
                 focus: ChatFocus::Composer,
                 activity: VecDeque::new(),
                 activity_selected: 0,
@@ -120,9 +117,8 @@ pub(crate) fn execute_command(state: &mut AppState, id: CommandId) {
                     chat.scroll = 0;
                     chat.live_assistant.clear();
                     composer_clear(&mut chat);
-                    chat.prompt_history = build_prompt_history(&chat.messages);
-                    chat.history_cursor = None;
-                    chat.history_draft.clear();
+                    state.history_cursor = None;
+                    state.history_draft.clear();
                     chat.focus = ChatFocus::Composer;
                     chat.activity.clear();
                     chat.activity_selected = 0;

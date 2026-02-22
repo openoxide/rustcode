@@ -4,8 +4,8 @@ use std::sync::atomic::AtomicU8;
 
 use super::{
     AbortHandle, ActivityItem, ApprovalResponse, Arc, CancellationToken, InteractiveDefaults,
-    InteractiveMsg, InteractiveSubmitMode, MessageRole, ResolvedConfig, SessionInfo, Size,
-    StoredMessage, SystemTime, ToolApprovalRequest,
+    InteractiveMsg, InteractiveSubmitMode, ResolvedConfig, SessionInfo, Size, StoredMessage,
+    SystemTime, ToolApprovalRequest,
 };
 use std::time::Instant;
 
@@ -348,9 +348,6 @@ pub(super) struct ChatState {
     /// Used by the submit handler so the AI receives the full text.
     /// Cleared on any manual edit to the composer, or after submit.
     pub(super) paste_buffer: Option<String>,
-    pub(super) prompt_history: Vec<String>,
-    pub(super) history_cursor: Option<usize>,
-    pub(super) history_draft: String,
     pub(super) focus: ChatFocus,
     pub(super) activity: VecDeque<ActivityItem>,
     pub(super) activity_selected: usize,
@@ -419,6 +416,10 @@ pub(super) struct AppState {
     pub(super) help_open: bool,
     pub(super) modal: Option<Modal>,
     pub(super) defaults: InteractiveDefaults,
+    pub(super) prompt_history_store: rustcode_state::PromptHistoryStore,
+    pub(super) global_prompt_history: Vec<String>,
+    pub(super) history_cursor: Option<usize>,
+    pub(super) history_draft: String,
 
     pub(super) pending_approval: Option<PendingApproval>,
     /// Index of the currently highlighted option in the inline approval selector.
@@ -456,30 +457,6 @@ pub(super) struct AppState {
     pub(super) llm_cell: Option<Arc<std::sync::RwLock<Arc<dyn rustcode_llm::LlmClient>>>>,
     /// Cached git diff stats — refreshed after each successful run completion.
     pub(super) git_stat: Option<GitStat>,
-}
-
-pub(super) fn build_prompt_history(messages: &[StoredMessage]) -> Vec<String> {
-    let mut out = Vec::new();
-    for msg in messages {
-        if msg.role != MessageRole::User {
-            continue;
-        }
-        let Some(text) = msg.content.as_str() else {
-            continue;
-        };
-        let trimmed = text.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if out.last().is_some_and(|last| last == trimmed) {
-            continue;
-        }
-        out.push(trimmed.to_string());
-    }
-    while out.len() > 200 {
-        out.remove(0);
-    }
-    out
 }
 
 pub(super) enum ChatNav {

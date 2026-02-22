@@ -90,20 +90,18 @@ pub(crate) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
     chat.activity.clear();
     chat.activity_selected = 0;
 
-    let trimmed = prompt.trim();
-    if !trimmed.is_empty()
-        && chat
-            .prompt_history
-            .last()
-            .is_none_or(|last| last.as_str() != trimmed)
-    {
-        chat.prompt_history.push(trimmed.to_string());
-        while chat.prompt_history.len() > 200 {
-            chat.prompt_history.remove(0);
+    if rustcode_state::push_prompt_history_entry(&mut state.global_prompt_history, &prompt) {
+        if let Err(err) = state.prompt_history_store.append(&prompt) {
+            push_toast(
+                state,
+                ToastVariant::Warning,
+                format!("failed to save prompt history: {err}"),
+                Duration::from_secs(3),
+            );
         }
     }
-    chat.history_cursor = None;
-    chat.history_draft.clear();
+    state.history_cursor = None;
+    state.history_draft.clear();
     chat.focus = ChatFocus::Composer;
 
     state.request_seq = state.request_seq.saturating_add(1);

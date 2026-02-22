@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
-use rustcode_state::SessionStore;
+use rustcode_state::{PromptHistoryStore, SessionStore};
 use serde_json::Value;
 
 use super::super::*;
@@ -71,9 +71,6 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
             composer: String::new(),
             composer_cursor: 0,
             paste_buffer: None,
-            prompt_history: Vec::new(),
-            history_cursor: None,
-            history_draft: String::new(),
             focus: ChatFocus::Composer,
             activity: VecDeque::new(),
             activity_selected: 0,
@@ -109,6 +106,12 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
             provider: String::new(),
             skills: Vec::new(),
         },
+        prompt_history_store: PromptHistoryStore::with_path(std::path::PathBuf::from(
+            "/tmp/rustcode-test-prompt-history.json",
+        )),
+        global_prompt_history: Vec::new(),
+        history_cursor: None,
+        history_draft: String::new(),
 
         pending_approval: None,
         approval_selection: 0,
@@ -216,9 +219,6 @@ fn chat_screen_hides_system_messages() {
             composer: String::new(),
             composer_cursor: 0,
             paste_buffer: None,
-            prompt_history: Vec::new(),
-            history_cursor: None,
-            history_draft: String::new(),
             focus: ChatFocus::Composer,
             activity: VecDeque::new(),
             activity_selected: 0,
@@ -254,6 +254,12 @@ fn chat_screen_hides_system_messages() {
             provider: String::new(),
             skills: Vec::new(),
         },
+        prompt_history_store: PromptHistoryStore::with_path(std::path::PathBuf::from(
+            "/tmp/rustcode-test-prompt-history.json",
+        )),
+        global_prompt_history: Vec::new(),
+        history_cursor: None,
+        history_draft: String::new(),
         pending_approval: None,
         approval_selection: 0,
         approval_mode: ApprovalMode::Normal,

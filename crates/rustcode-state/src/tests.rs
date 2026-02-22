@@ -239,3 +239,32 @@ fn create_session_stores_git_branch_name() {
 
     assert_eq!(session.branch, "session-branch-test");
 }
+
+#[test]
+fn push_prompt_history_entry_dedupes_and_trims() {
+    let mut history = Vec::new();
+    assert!(!push_prompt_history_entry(&mut history, "   "));
+    assert!(push_prompt_history_entry(&mut history, "  first  "));
+    assert_eq!(history, vec!["first"]);
+    assert!(!push_prompt_history_entry(&mut history, "first"));
+    assert!(push_prompt_history_entry(&mut history, "second"));
+    assert_eq!(history, vec!["first", "second"]);
+}
+
+#[test]
+fn prompt_history_store_round_trip_and_cap() {
+    let root = temp_dir("prompt-history");
+    let path = root.join("prompt-history.json");
+    let store = PromptHistoryStore::with_path(path);
+
+    for i in 0..(PROMPT_HISTORY_LIMIT + 20) {
+        let prompt = format!("prompt-{i}");
+        assert!(store.append(&prompt).expect("append prompt"));
+    }
+    assert!(!store.append("prompt-219").expect("append dedupe"));
+
+    let loaded = store.load().expect("load prompt history");
+    assert_eq!(loaded.len(), PROMPT_HISTORY_LIMIT);
+    assert_eq!(loaded.first().expect("first"), "prompt-20");
+    assert_eq!(loaded.last().expect("last"), "prompt-219");
+}

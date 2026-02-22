@@ -1,9 +1,8 @@
 use std::collections::VecDeque;
 
 use super::{
-    build_prompt_history, compute_sessions_view, execute_command, open_command_palette, push_toast,
-    AppState, ChatFocus, ChatState, CommandId, Duration, KeyCode, KeyEvent, KeyModifiers, Screen,
-    ToastVariant,
+    compute_sessions_view, execute_command, open_command_palette, push_toast, AppState, ChatFocus,
+    ChatState, CommandId, Duration, KeyCode, KeyEvent, KeyModifiers, Screen, ToastVariant,
 };
 
 pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
@@ -43,7 +42,8 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                             push_toast(state, ToastVariant::Error, err, Duration::from_secs(4));
                             Vec::new()
                         });
-                    let prompt_history = build_prompt_history(&messages);
+                    state.history_cursor = None;
+                    state.history_draft.clear();
                     let tokens_in = session.total_input_tokens;
                     let tokens_out = session.total_output_tokens;
                     let cost = session.cost_usd;
@@ -57,9 +57,6 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         composer: String::new(),
                         composer_cursor: 0,
                         paste_buffer: None,
-                        prompt_history,
-                        history_cursor: None,
-                        history_draft: String::new(),
                         focus: ChatFocus::Composer,
                         activity: VecDeque::new(),
                         activity_selected: 0,
@@ -174,7 +171,8 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                     push_toast(state, ToastVariant::Error, err, Duration::from_secs(4));
                     Vec::new()
                 });
-            let prompt_history = build_prompt_history(&messages);
+            state.history_cursor = None;
+            state.history_draft.clear();
             let tokens_in = session.total_input_tokens;
             let tokens_out = session.total_output_tokens;
             let cost = session.cost_usd;
@@ -188,9 +186,6 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 composer: String::new(),
                 composer_cursor: 0,
                 paste_buffer: None,
-                prompt_history,
-                history_cursor: None,
-                history_draft: String::new(),
                 focus: ChatFocus::Composer,
                 activity: VecDeque::new(),
                 activity_selected: 0,

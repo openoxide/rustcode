@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
-use rustcode_state::SessionStore;
+use rustcode_state::{PromptHistoryStore, SessionStore};
 
 use super::super::*;
 use super::buffer_to_string;
@@ -49,9 +49,6 @@ fn activity_details_modal_renders_tool_arguments() {
             composer: String::new(),
             composer_cursor: 0,
             paste_buffer: None,
-            prompt_history: Vec::new(),
-            history_cursor: None,
-            history_draft: String::new(),
             focus: ChatFocus::Activity,
             activity: VecDeque::from([ActivityItem::ToolCall {
                 id: "tc-1".to_string(),
@@ -91,6 +88,12 @@ fn activity_details_modal_renders_tool_arguments() {
             provider: String::new(),
             skills: Vec::new(),
         },
+        prompt_history_store: PromptHistoryStore::with_path(std::path::PathBuf::from(
+            "/tmp/rustcode-test-prompt-history.json",
+        )),
+        global_prompt_history: Vec::new(),
+        history_cursor: None,
+        history_draft: String::new(),
 
         pending_approval: None,
         approval_selection: 0,
@@ -145,6 +148,12 @@ fn command_palette_renders_actions_and_search() {
             provider: String::new(),
             skills: Vec::new(),
         },
+        prompt_history_store: PromptHistoryStore::with_path(std::path::PathBuf::from(
+            "/tmp/rustcode-test-prompt-history.json",
+        )),
+        global_prompt_history: Vec::new(),
+        history_cursor: None,
+        history_draft: String::new(),
         pending_approval: None,
         approval_selection: 0,
         approval_mode: ApprovalMode::Normal,

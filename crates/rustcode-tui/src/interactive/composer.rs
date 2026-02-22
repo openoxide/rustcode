@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use unicode_width::UnicodeWidthChar;
 
-use super::ChatState;
+use super::{AppState, ChatState};
 
 fn char_display_width(ch: char) -> usize {
     if ch == '\t' {
@@ -310,36 +310,36 @@ pub(super) fn composer_kill_line_backward(chat: &mut ChatState) {
     chat.last_typing_time = Some(std::time::Instant::now());
 }
 
-pub(super) fn history_prev(chat: &mut ChatState) {
-    if chat.prompt_history.is_empty() {
+pub(super) fn history_prev(state: &mut AppState, chat: &mut ChatState) {
+    if state.global_prompt_history.is_empty() {
         return;
     }
-    let next = match chat.history_cursor {
+    let next = match state.history_cursor {
         None => {
-            chat.history_draft = chat.composer.clone();
-            chat.prompt_history.len().saturating_sub(1)
+            state.history_draft = chat.composer.clone();
+            state.global_prompt_history.len().saturating_sub(1)
         }
         Some(0) => 0,
         Some(idx) => idx.saturating_sub(1),
     };
-    chat.history_cursor = Some(next);
-    if let Some(value) = chat.prompt_history.get(next) {
+    state.history_cursor = Some(next);
+    if let Some(value) = state.global_prompt_history.get(next) {
         composer_set(chat, value.clone());
     }
 }
 
-pub(super) fn history_next(chat: &mut ChatState) {
-    let Some(idx) = chat.history_cursor else {
+pub(super) fn history_next(state: &mut AppState, chat: &mut ChatState) {
+    let Some(idx) = state.history_cursor else {
         return;
     };
-    if idx + 1 >= chat.prompt_history.len() {
-        chat.history_cursor = None;
-        composer_set(chat, chat.history_draft.clone());
+    if idx + 1 >= state.global_prompt_history.len() {
+        state.history_cursor = None;
+        composer_set(chat, state.history_draft.clone());
         return;
     }
     let next = idx + 1;
-    chat.history_cursor = Some(next);
-    if let Some(value) = chat.prompt_history.get(next) {
+    state.history_cursor = Some(next);
+    if let Some(value) = state.global_prompt_history.get(next) {
         composer_set(chat, value.clone());
     }
 }

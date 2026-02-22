@@ -3,8 +3,8 @@ use std::collections::VecDeque;
 use rustcode_core::SessionInfo;
 
 use super::super::{
-    build_prompt_history, compute_sessions_view, push_toast, sort_sessions, AppState, ChatFocus,
-    ChatState, Duration, Screen, ToastVariant,
+    compute_sessions_view, push_toast, sort_sessions, AppState, ChatFocus, ChatState, Duration,
+    Screen, ToastVariant,
 };
 
 pub(crate) fn refresh_chat_messages(state: &mut AppState, chat: &mut ChatState) {
@@ -97,7 +97,8 @@ pub(crate) fn open_session(state: &mut AppState, session: SessionInfo) {
             push_toast(state, ToastVariant::Error, err, Duration::from_secs(4));
             Vec::new()
         });
-    let prompt_history = build_prompt_history(&messages);
+    state.history_cursor = None;
+    state.history_draft.clear();
     state.screen = Screen::Chat(ChatState {
         total_input_tokens: session.total_input_tokens,
         total_output_tokens: session.total_output_tokens,
@@ -112,9 +113,6 @@ pub(crate) fn open_session(state: &mut AppState, session: SessionInfo) {
         composer: String::new(),
         composer_cursor: 0,
         paste_buffer: None,
-        prompt_history,
-        history_cursor: None,
-        history_draft: String::new(),
         focus: ChatFocus::Composer,
         activity: VecDeque::new(),
         activity_selected: 0,

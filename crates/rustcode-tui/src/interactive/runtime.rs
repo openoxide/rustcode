@@ -10,9 +10,9 @@ use futures_util::StreamExt;
 use super::inline_terminal::InlineTerminal;
 use super::state::compute_desired_height;
 use super::{
-    build_prompt_history, composer_insert_str, compute_sessions_view, disable_raw_mode,
-    drain_toasts, enable_raw_mode, execute, handle_key, io, render, sort_sessions, AppState,
-    ApprovalMode, ChatFocus, ChatState, InteractiveServices, InteractiveStart, Screen, TuiError,
+    composer_insert_str, compute_sessions_view, disable_raw_mode, drain_toasts, enable_raw_mode,
+    execute, handle_key, io, render, sort_sessions, AppState, ApprovalMode, ChatFocus, ChatState,
+    InteractiveServices, InteractiveStart, Screen, TuiError,
 };
 
 mod event_stream;
@@ -106,6 +106,14 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
     let mut sessions = session_backend.list_sessions().map_err(TuiError::State)?;
     sort_sessions(&mut sessions);
     let sessions_view = compute_sessions_view(&sessions, "");
+    let prompt_history_store = rustcode_state::PromptHistoryStore::open_default();
+    let global_prompt_history = match prompt_history_store.load() {
+        Ok(history) => history,
+        Err(err) => {
+            eprintln!("warning: failed to load prompt history: {err}");
+            Vec::new()
+        }
+    };
     let mut selected = 0usize;
     let mut screen = Screen::Sessions;
     let mut auto_submit = None;
@@ -130,7 +138,6 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
                     .load_messages(&session.id)
                     .map_err(TuiError::State)?
             };
-            let prompt_history = build_prompt_history(&messages);
             let initial_composer = if should_submit {
                 String::new()
             } else {
@@ -149,9 +156,6 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
                 composer_cursor: initial_composer.len(),
                 paste_buffer: None,
                 composer: initial_composer,
-                prompt_history,
-                history_cursor: None,
-                history_draft: String::new(),
                 focus: ChatFocus::Composer,
                 activity: VecDeque::new(),
                 activity_selected: 0,
@@ -195,6 +199,10 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
         help_open: false,
         modal: None,
         defaults,
+        prompt_history_store,
+        global_prompt_history,
+        history_cursor: None,
+        history_draft: String::new(),
         pending_approval: None,
         approval_selection: 0,
         approval_mode: ApprovalMode::Normal,

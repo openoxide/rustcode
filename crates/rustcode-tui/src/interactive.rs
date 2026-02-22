@@ -83,10 +83,9 @@ use transcript::{
     set_find,
 };
 use types::{
-    build_prompt_history, AppState, ApprovalMode, ChatFocus, ChatNav, ChatState, CommandId,
-    CommandItem, ConnectMethod, FindState, GitStat, Modal, PendingApproval, ProviderEntry,
-    ProviderManagerStep, ProviderOAuthDone, ProviderOAuthStarted, RunningCommand, Screen, Toast,
-    ToastVariant,
+    AppState, ApprovalMode, ChatFocus, ChatNav, ChatState, CommandId, CommandItem, ConnectMethod,
+    FindState, GitStat, Modal, PendingApproval, ProviderEntry, ProviderManagerStep,
+    ProviderOAuthDone, ProviderOAuthStarted, RunningCommand, Screen, Toast, ToastVariant,
 };
 
 pub async fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {

@@ -64,14 +64,13 @@ pub(crate) fn render_help_modal(frame: &mut ratatui::Frame<'_>, state: &AppState
         "  Enter: submit prompt (composer) / open details (activity)",
     ));
     lines.push(Line::raw("  Shift+Enter: insert newline in composer"));
-    lines.push(Line::raw("  Alt+Up/Down: browse prompt history"));
+    lines.push(Line::raw("  Up/Down: browse prompt history (composer)"));
+    lines.push(Line::raw("  Alt+Up/Down: move cursor line in composer"));
     lines.push(Line::raw(
         "  Ctrl+K: kill to end of line  Ctrl+U: kill to start of line",
     ));
     lines.push(Line::raw("  Ctrl+Left/Right: jump word in composer"));
-    lines.push(Line::raw(
-        "  Up/Down: edit text (composer) / select item (activity)",
-    ));
+    lines.push(Line::raw("  Up/Down: select item (activity)"));
     lines.push(Line::raw("  PgUp/PgDn: scroll transcript"));
     lines.push(Line::raw(
         "  / (any focus): move to composer and insert / for slash commands",

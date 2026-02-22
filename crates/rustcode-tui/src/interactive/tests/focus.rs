@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::Arc;
 
-use rustcode_state::SessionStore;
+use rustcode_state::{PromptHistoryStore, SessionStore};
 
 use super::super::*;
 use crate::LocalSessionBackend;
@@ -17,9 +17,6 @@ fn make_chat_state_with_focus(session: SessionInfo, focus: ChatFocus) -> ChatSta
         composer: String::new(),
         composer_cursor: 0,
         paste_buffer: None,
-        prompt_history: Vec::new(),
-        history_cursor: None,
-        history_draft: String::new(),
         focus,
         activity: VecDeque::new(),
         activity_selected: 0,
@@ -82,6 +79,12 @@ fn make_focus_state(session: SessionInfo) -> AppState {
             provider: String::new(),
             skills: Vec::new(),
         },
+        prompt_history_store: PromptHistoryStore::with_path(std::path::PathBuf::from(
+            "/tmp/rustcode-test-prompt-history.json",
+        )),
+        global_prompt_history: Vec::new(),
+        history_cursor: None,
+        history_draft: String::new(),
         pending_approval: None,
         approval_selection: 0,
         approval_mode: ApprovalMode::Normal,
