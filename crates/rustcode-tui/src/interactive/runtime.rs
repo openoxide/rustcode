@@ -183,6 +183,9 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
                 plan_title: None,
                 plan_steps: Vec::new(),
                 todos: Vec::new(),
+                cached_transcript: std::cell::RefCell::new(Vec::new()),
+                transcript_dirty: std::cell::Cell::new(true),
+                last_transcript_width: std::cell::Cell::new(0),
             });
             if should_submit {
                 auto_submit = prompt;
@@ -267,9 +270,16 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
                         let screen_is_chat = matches!(state.screen, Screen::Chat(_));
                         _last_screen_is_chat = screen_is_chat;
 
-                        // Update real terminal size.
+                        // Update real terminal size; mark transcript dirty on resize
+                        // so cached lines are rebuilt for the new width.
                         if let Ok((w, h)) = InlineTerminal::size() {
-                            state.last_area = ratatui::layout::Size { width: w, height: h };
+                            let old = state.last_area;
+                            if old.width != w || old.height != h {
+                                state.last_area = ratatui::layout::Size { width: w, height: h };
+                                if let Screen::Chat(chat) = &state.screen {
+                                    chat.transcript_dirty.set(true);
+                                }
+                            }
                         }
 
                         let desired = compute_desired_height(&state);

@@ -46,25 +46,32 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
                         id,
                         name,
                         arguments,
-                    } => Some(ActivityItem::ToolCall {
-                        id: id.clone(),
-                        name: name.clone(),
-                        arguments: arguments.clone(),
-                    }),
+                    } => {
+                        chat.transcript_dirty.set(true);
+                        Some(ActivityItem::ToolCall {
+                            id: id.clone(),
+                            name: name.clone(),
+                            arguments: arguments.clone(),
+                        })
+                    }
                     EventPayload::ToolResult {
                         id,
                         name,
                         ok,
                         output,
-                    } => Some(ActivityItem::ToolResult {
-                        id: id.clone(),
-                        name: name.clone(),
-                        ok: *ok,
-                        output: output.clone(),
-                    }),
+                    } => {
+                        chat.transcript_dirty.set(true);
+                        Some(ActivityItem::ToolResult {
+                            id: id.clone(),
+                            name: name.clone(),
+                            ok: *ok,
+                            output: output.clone(),
+                        })
+                    }
                     EventPayload::OutputChunk { text } => {
                         if event.scope == EventScope::Command {
                             chat.live_assistant.push_str(text);
+                            chat.transcript_dirty.set(true);
                             if chat.live_assistant.len() > 64 * 1024 {
                                 let keep = 48 * 1024;
                                 let mut start = chat.live_assistant.len().saturating_sub(keep);
@@ -80,6 +87,7 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
                     }
                     EventPayload::ReasoningChunk { text } => {
                         chat.live_reasoning.push_str(text);
+                        chat.transcript_dirty.set(true);
                         if chat.live_reasoning.len() > 64 * 1024 {
                             let keep = 48 * 1024;
                             let mut start = chat.live_reasoning.len().saturating_sub(keep);
@@ -144,6 +152,7 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
                     EventPayload::Completed => {
                         chat.running = None;
                         chat.composer_cleared_by_ctrl_c = false;
+                        chat.transcript_dirty.set(true);
                         // Clear live plan/todo widgets so they don't
                         // persist into the next conversation turn.
                         chat.plan_title = None;
@@ -195,6 +204,7 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
                             .iter()
                             .map(|s| (s.description.clone(), s.status.clone()))
                             .collect();
+                        chat.transcript_dirty.set(true);
                         None
                     }
                     EventPayload::TodoUpdate { todos } => {
@@ -202,6 +212,7 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
                             .iter()
                             .map(|t| (t.content.clone(), t.status.clone(), t.priority.clone()))
                             .collect();
+                        chat.transcript_dirty.set(true);
                         None
                     }
                     EventPayload::ServeRequest { .. } => None,
@@ -263,6 +274,7 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
         InteractiveMsg::RunEnded { ok, message } => {
             // Phase 1: immediate state updates (non-blocking).
             if let Screen::Chat(chat) = &mut screen {
+                chat.transcript_dirty.set(true);
                 if let Some(started) = chat.run_started_at.take() {
                     chat.last_run_elapsed = Some(started.elapsed());
                 }
@@ -343,6 +355,7 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
             if let Screen::Chat(chat) = &mut screen {
                 match messages {
                     Ok(messages) => {
+                        chat.transcript_dirty.set(true);
                         let was_at_bottom = chat.scroll == 0;
                         chat.messages = messages;
                         if was_at_bottom {

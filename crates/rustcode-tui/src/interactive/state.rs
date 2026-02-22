@@ -1,6 +1,6 @@
 use super::{
-    approval_options_count, AppState, ChatState, Duration, Screen,
-    SessionInfo, SystemTime, Toast, ToastVariant,
+    approval_options_count, AppState, ChatState, Duration, Screen, SessionInfo, SystemTime, Toast,
+    ToastVariant,
 };
 
 pub(super) fn push_toast(
@@ -107,25 +107,23 @@ fn chat_desired_height(state: &AppState, chat: &ChatState, term_height: u16) -> 
         composer_h
     };
 
-    // Status bar: always 3 rows.
-    let status_h = 3u16;
+    // Fixed overhead: mode bar (1) + status bar (3).
+    let fixed_h = 1u16 + 3;
 
-    // Use the wrapped transcript line count cached from the last render pass
-    // (updated every frame in render_chat via Cell).  This avoids calling the
-    // expensive `build_transcript_lines` a second time each frame.
-    // On the very first frame (before any render), the cache is 0, so we
-    // fall back to the 40% minimum which is a safe default.
+    // Ensure transcript + bottom + fixed <= term_height.
+    // If the sum exceeds terminal, shrink bottom first, then transcript.
+    let max_content = term_height.saturating_sub(fixed_h);
+    let bottom_h = bottom_h.min(max_content.saturating_sub(3)); // leave at least 3 for transcript
+
+    // Use the wrapped transcript line count cached from the last render pass.
     let wrapped = chat.last_transcript_wrapped_count.get() as u16;
-    // Minimum height: ~40% of terminal height so the transcript is always
-    // prominent relative to the composer, with a floor of 8 rows.
     let forty_pct = (term_height * 2 / 5).max(8);
-    let transcript_min = forty_pct.max(bottom_h);
-    let transcript_h = (wrapped + 2).max(transcript_min);
+    let transcript_min = forty_pct.min(max_content.saturating_sub(bottom_h));
+    let transcript_h = (wrapped + 2)
+        .max(transcript_min)
+        .min(max_content.saturating_sub(bottom_h));
 
-    // Mode bar: 1 row between transcript and composer.
-    let mode_bar_h = 1u16;
-
-    (transcript_h + mode_bar_h + bottom_h + status_h).min(term_height)
+    (transcript_h + fixed_h + bottom_h).min(term_height)
 }
 
 /// Count the number of visual lines `text` occupies when word-wrapped at

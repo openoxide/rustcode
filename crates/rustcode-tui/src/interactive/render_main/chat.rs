@@ -2,8 +2,8 @@ use super::super::{
     apply_find_highlight, approval_options_count, build_transcript_lines, composer_cursor_visual,
     render_activity, render_activity_details_modal, render_approval_inline,
     render_approval_selector, word_wrap_text, AppState, ApprovalMode, Block, Borders, ChatFocus,
-    ChatState, Clear, Constraint, Direction, Layout, Line, Modal, Modifier, Paragraph, Span,
-    Style, Wrap,
+    ChatState, Clear, Constraint, Direction, Layout, Line, Modal, Modifier, Paragraph, Span, Style,
+    Wrap,
 };
 use super::{format_tokens, truncate_with_ellipsis};
 use crate::interactive::theme;
@@ -12,7 +12,9 @@ mod footer;
 use self::footer::build_footer_lines;
 
 pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState) {
-    let h_constraints: Vec<Constraint> = if chat.activity_hidden {
+    // Auto-hide activity panel on narrow terminals (< 60 cols).
+    let effective_hidden = chat.activity_hidden || frame.area().width < 60;
+    let h_constraints: Vec<Constraint> = if effective_hidden {
         vec![Constraint::Percentage(100)]
     } else {
         vec![Constraint::Percentage(72), Constraint::Percentage(28)]
@@ -24,7 +26,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
 
     // Dynamic composer height: expands with content including visual wrapping.
     // Pre-compute inner width from the left pane (frame width * percentage - 2 borders).
-    let left_pane_w = if chat.activity_hidden {
+    let left_pane_w = if effective_hidden {
         frame.area().width
     } else {
         frame.area().width * 72 / 100
@@ -46,13 +48,19 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         composer_height
     };
 
+    // Clamp the bottom pane so the transcript always gets at least 3 rows.
+    let available = root[0].height;
+    let fixed_h = 1u16 + 3; // mode bar + status bar
+    let remaining = available.saturating_sub(fixed_h);
+    let clamped_bottom = bottom_height.min(remaining.saturating_sub(3));
+
     let left = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),                // [0] transcript
-            Constraint::Length(1),             // [1] mode bar
-            Constraint::Length(bottom_height), // [2] composer / approval
-            Constraint::Length(3),             // [3] status bar
+            Constraint::Min(remaining.saturating_sub(clamped_bottom).max(1)), // [0] transcript
+            Constraint::Length(1),                                            // [1] mode bar
+            Constraint::Length(clamped_bottom), // [2] composer / approval
+            Constraint::Length(3),              // [3] status bar
         ])
         .split(root[0]);
 
@@ -103,7 +111,9 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     if chat.context_limit > 0 && chat.last_total_tokens > 0 {
         // Exclude cache reads from context usage — cached tokens don't consume
         // new context window space, so the % should reflect "real" usage.
-        let effective = chat.last_total_tokens.saturating_sub(chat.cache_read_tokens);
+        let effective = chat
+            .last_total_tokens
+            .saturating_sub(chat.cache_read_tokens);
         let pct = ((effective as f64 / chat.context_limit as f64) * 100.0).min(100.0);
         let pct_color = if pct < 50.0 {
             theme::CTX_LOW
@@ -141,42 +151,66 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         }
     }
 
-    let mut lines = build_transcript_lines(chat);
+    let transcript_inner_h = left[0].height.saturating_sub(2).max(1) as usize;
+    let inner_w = left[0].width.saturating_sub(2).max(1) as usize;
+
+    // ── Transcript caching: only rebuild when dirty ────────────────────
+    // Always rebuild while a run is active — the transcript contains animated
+    // spinners and elapsed timers that update with `SystemTime::now()`.
+    let needs_rebuild = chat.transcript_dirty.get() || chat.running.is_some();
+    let width_changed = chat.last_transcript_width.get() != inner_w;
+
+    let mut lines = if needs_rebuild {
+        let built = build_transcript_lines(chat);
+        *chat.cached_transcript.borrow_mut() = built.clone();
+        chat.transcript_dirty.set(false);
+        built
+    } else {
+        chat.cached_transcript.borrow().clone()
+    };
     lines = apply_find_highlight(lines, chat.find.as_ref());
 
     // Append inline approval previews: committed (approved, awaiting result) first,
     // then the current pending approval (if any).
+    // Committed approvals are cached and only re-rendered when width changes.
     {
-        let inner_w = left[0].width.saturating_sub(2);
+        let inner_w16 = left[0].width.saturating_sub(2);
         let ws_root = app
             .config
             .as_ref()
             .map(|c| c.workspace_root.clone())
             .unwrap_or_default();
-        for req in &chat.committed_approvals {
-            lines.extend(render_approval_inline(req, inner_w, &ws_root));
+        for ca in &chat.committed_approvals {
+            if ca.width == inner_w16 && !ca.lines.is_empty() {
+                lines.extend(ca.lines.clone());
+            } else {
+                lines.extend(render_approval_inline(&ca.request, inner_w16, &ws_root));
+            }
         }
         if let Some(pending) = &app.pending_approval {
-            lines.extend(render_approval_inline(&pending.request, inner_w, &ws_root));
+            lines.extend(render_approval_inline(
+                &pending.request,
+                inner_w16,
+                &ws_root,
+            ));
         }
     }
 
-    let transcript_inner_h = left[0].height.saturating_sub(2).max(1) as usize;
-    let inner_w = left[0].width.saturating_sub(2).max(1) as usize;
-
     // Pad diff lines so the background colour fills the entire row width.
-    // Lines with a bg style (diff add/delete) are padded with trailing spaces
-    // to `inner_w` so the coloured background forms a solid rectangle block.
-    for line in &mut lines {
-        if let Some(bg_color) = line.style.bg {
-            let used: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
-            if inner_w > used {
-                line.spans.push(Span::styled(
-                    " ".repeat(inner_w - used),
-                    Style::default().bg(bg_color),
-                ));
+    // Only re-pad when width changes or transcript was rebuilt.
+    if needs_rebuild || width_changed {
+        for line in &mut lines {
+            if let Some(bg_color) = line.style.bg {
+                let used: usize = line.spans.iter().map(|s| s.content.chars().count()).sum();
+                if inner_w > used {
+                    line.spans.push(Span::styled(
+                        " ".repeat(inner_w - used),
+                        Style::default().bg(bg_color),
+                    ));
+                }
             }
         }
+        chat.last_transcript_width.set(inner_w);
     }
 
     // Account for line wrapping: each logical line may span multiple visual rows.
@@ -248,30 +282,38 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                 .add_modifier(Modifier::BOLD),
         };
         let icon_label = format!("{} {}", mode.icon(), mode.label());
-        let hint = "(Shift + Tab)";
-        let mode_line = Line::from(vec![
-            Span::raw(" "),
-            Span::styled(icon_label, mode_style),
-            Span::raw(" "),
-            Span::styled(
-                hint,
+        let mut mode_spans = vec![Span::raw(" "), Span::styled(icon_label, mode_style)];
+        // Hide the keyboard hint on narrow terminals (< 30 cols).
+        if frame.area().width >= 30 {
+            mode_spans.push(Span::raw(" "));
+            mode_spans.push(Span::styled(
+                "(Shift + Tab)",
                 Style::default()
                     .fg(theme::MUTED)
                     .add_modifier(Modifier::DIM),
-            ),
-        ]);
+            ));
+        }
+        let mode_line = Line::from(mode_spans);
         frame.render_widget(Paragraph::new(mode_line), left[1]);
     }
 
+    let term_w = frame.area().width;
     let model_label = if chat.session.model.trim().is_empty() {
         app.defaults.model.as_str()
     } else {
         chat.session.model.as_str()
     };
-    let model_label_display = truncate_with_ellipsis(model_label, 36);
-    let provider_label_display = provider_label
-        .as_deref()
-        .map(|label| truncate_with_ellipsis(label, 18));
+    // Adaptive truncation: shorter model label on narrow terminals.
+    let model_max = if term_w < 30 { 16 } else { 36 };
+    let model_label_display = truncate_with_ellipsis(model_label, model_max);
+    // Hide provider label entirely when < 25 cols.
+    let provider_label_display = if term_w >= 25 {
+        provider_label
+            .as_deref()
+            .map(|label| truncate_with_ellipsis(label, 18))
+    } else {
+        None
+    };
 
     let mut composer_title_spans = vec![
         Span::styled("</>", Style::default().add_modifier(Modifier::BOLD)),
@@ -412,8 +454,9 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         chat.running.is_some(),
         latest_toast,
         composer_starts_with_query,
-        chat.activity_hidden,
+        effective_hidden,
         has_error,
+        frame.area().width,
     );
 
     let help = Paragraph::new(vec![status_line, hints_line]).block(
@@ -423,7 +466,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     );
     frame.render_widget(help, left[3]);
 
-    if !chat.activity_hidden {
+    if !effective_hidden {
         // Constrain the activity panel to not extend below the status bar.
         // The status bar (3 rows) + mode bar (1 row) occupy the bottom of the left pane.
         let activity_area = {

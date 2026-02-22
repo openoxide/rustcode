@@ -74,9 +74,7 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
                         ApprovalResponse::AllowOnce => {
                             format!("approved once [{}]", pending.request.tool)
                         }
-                        ApprovalResponse::AllowAllCommands => {
-                            "allowed all edits".to_string()
-                        }
+                        ApprovalResponse::AllowAllCommands => "allowed all edits".to_string(),
                         ApprovalResponse::AllowAllToolsAutopilot => {
                             "approved all tools (auto-pilot mode)".to_string()
                         }
@@ -87,7 +85,12 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
                     state.approval_selection = 0;
                     if matches!(response, ApprovalResponse::AllowOnce) {
                         if let Screen::Chat(chat) = &mut state.screen {
-                            chat.committed_approvals.push(pending.request);
+                            chat.committed_approvals.push(super::CachedApproval {
+                                request: pending.request,
+                                lines: Vec::new(),
+                                width: 0,
+                            });
+                            chat.transcript_dirty.set(true);
                         }
                     }
                     // Switch TUI approval mode to match the selected policy.
@@ -103,7 +106,11 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
                     } else if matches!(response, ApprovalResponse::AllowAllCommands) {
                         let screen = std::mem::replace(&mut state.screen, Screen::Sessions);
                         if let Screen::Chat(mut chat) = screen {
-                            set_approval_mode(state, super::ApprovalMode::AcceptEdits, Some(&mut chat));
+                            set_approval_mode(
+                                state,
+                                super::ApprovalMode::AcceptEdits,
+                                Some(&mut chat),
+                            );
                             state.screen = Screen::Chat(chat);
                         } else {
                             state.screen = screen;

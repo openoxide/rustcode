@@ -90,16 +90,29 @@ impl InlineTerminal {
         F: FnOnce(&mut ratatui::Frame<'_>),
     {
         // Detect terminal resize.
+        let prev_screen_w = self.screen_width;
+        let prev_screen_h = self.screen_height;
         if let Ok((w, h)) = crossterm::terminal::size() {
             self.screen_width = w;
             self.screen_height = h;
         }
+        let screen_resized =
+            self.screen_width != prev_screen_w || self.screen_height != prev_screen_h;
 
         let height = desired_height.min(self.screen_height).max(1);
         let width = self.screen_width;
 
         // Compute new viewport position.
         let mut new_y = self.viewport.y;
+
+        // When the terminal grows back after being shrunk, the emulator may
+        // pull old content from scrollback into the newly visible rows.
+        // Reanchor the viewport to the bottom of the screen to avoid ghost
+        // content appearing below our viewport.
+        if screen_resized {
+            new_y = self.screen_height.saturating_sub(height);
+        }
+
         let new_bottom = new_y.saturating_add(height);
 
         if new_bottom > self.screen_height {
@@ -127,7 +140,13 @@ impl InlineTerminal {
             self.render_terminal.backend_mut().resize(width, height);
         }
 
-        if viewport_changed {
+        if screen_resized {
+            // Terminal size changed — clear the ENTIRE screen to wipe ghost
+            // content that may have been pulled from scrollback or left behind
+            // when the terminal shrank then grew.
+            self.clear_region(0, self.screen_height)
+                .map_err(|e| TuiError::Io(e.to_string()))?;
+        } else if viewport_changed {
             // Clear from the topmost extent to the bottommost extent of
             // both old and new viewports to eliminate all ghost lines.
             let clear_top = old_viewport.y.min(new_viewport.y);

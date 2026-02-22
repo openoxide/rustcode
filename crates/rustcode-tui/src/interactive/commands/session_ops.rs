@@ -9,7 +9,10 @@ use super::super::{
 
 pub(crate) fn refresh_chat_messages(state: &mut AppState, chat: &mut ChatState) {
     match state.backend.load_messages(&chat.session.id) {
-        Ok(messages) => chat.messages = messages,
+        Ok(messages) => {
+            chat.messages = messages;
+            chat.transcript_dirty.set(true);
+        }
         Err(err) => {
             state.status = Some(format!("failed to load transcript: {err}"));
             push_toast(
@@ -130,12 +133,15 @@ pub(crate) fn open_session(state: &mut AppState, session: SessionInfo) {
         last_typing_time: None,
         context_limit: 0,
         last_max_scroll: std::cell::Cell::new(0),
-                last_transcript_wrapped_count: std::cell::Cell::new(0),
+        last_transcript_wrapped_count: std::cell::Cell::new(0),
         run_started_at: None,
         last_run_elapsed: None,
         plan_title: None,
         plan_steps: Vec::new(),
         todos: Vec::new(),
+        cached_transcript: std::cell::RefCell::new(Vec::new()),
+        transcript_dirty: std::cell::Cell::new(true),
+        last_transcript_width: std::cell::Cell::new(0),
     });
     if let Some(idx) = state.sessions.iter().position(|s| s.id == session_id) {
         state.selected = idx;

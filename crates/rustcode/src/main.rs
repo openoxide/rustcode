@@ -3,8 +3,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use clap::{
-    Parser,
     error::ErrorKind::{DisplayHelpOnMissingArgumentOrSubcommand, MissingSubcommand},
+    Parser,
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;

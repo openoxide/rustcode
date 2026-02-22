@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 
-use rustcode_core::{ExecutionError, TranscriptRecorder};
 use rustcode_core::session::StoredMessage;
+use rustcode_core::{ExecutionError, TranscriptRecorder};
 
 use crate::{FileTranscriptRecorder, SessionStore};
 

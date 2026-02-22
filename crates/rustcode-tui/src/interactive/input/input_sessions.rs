@@ -78,12 +78,15 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         cache_read_tokens: 0,
                         cache_write_tokens: 0,
                         last_max_scroll: std::cell::Cell::new(0),
-                last_transcript_wrapped_count: std::cell::Cell::new(0),
+                        last_transcript_wrapped_count: std::cell::Cell::new(0),
                         run_started_at: None,
                         last_run_elapsed: None,
                         plan_title: None,
                         plan_steps: Vec::new(),
                         todos: Vec::new(),
+                        cached_transcript: std::cell::RefCell::new(Vec::new()),
+                        transcript_dirty: std::cell::Cell::new(true),
+                        last_transcript_width: std::cell::Cell::new(0),
                     });
                 }
                 state.sessions_filter_active = false;
@@ -216,6 +219,9 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 plan_title: None,
                 plan_steps: Vec::new(),
                 todos: Vec::new(),
+                cached_transcript: std::cell::RefCell::new(Vec::new()),
+                transcript_dirty: std::cell::Cell::new(true),
+                last_transcript_width: std::cell::Cell::new(0),
             });
         }
         _ => {}

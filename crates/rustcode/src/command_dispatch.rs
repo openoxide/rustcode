@@ -53,8 +53,12 @@ pub(crate) fn build_engine_command(
         }
         TopCommand::List { path } => rustcode_core::command::Command::List { path },
         TopCommand::Read { path } => rustcode_core::command::Command::Read { path },
-        TopCommand::Write { path, contents } => rustcode_core::command::Command::Write { path, contents },
-        TopCommand::Edit { path, from, to } => rustcode_core::command::Command::Edit { path, from, to },
+        TopCommand::Write { path, contents } => {
+            rustcode_core::command::Command::Write { path, contents }
+        }
+        TopCommand::Edit { path, from, to } => {
+            rustcode_core::command::Command::Edit { path, from, to }
+        }
         TopCommand::Tui(_) => rustcode_core::command::Command::Tui,
         TopCommand::Serve { listen } => rustcode_core::command::Command::Serve { listen },
         TopCommand::Version => rustcode_core::command::Command::Version,

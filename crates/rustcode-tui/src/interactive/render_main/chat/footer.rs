@@ -6,12 +6,16 @@ use crate::interactive::theme;
 const RUNNING_FRAMES: &[char] = &['◐', '◓', '◑', '◒'];
 const RUNNING_DOTS: &[&str] = &["   ", ".  ", ".. ", "..."];
 
+/// Build the two footer lines (status + hints).
+///
+/// `available_width` controls progressive hint degradation on narrow terminals.
 pub(super) fn build_footer_lines(
     is_running: bool,
     latest_toast: Option<(String, ToastVariant)>,
     composer_starts_with_query: bool,
     activity_hidden: bool,
     has_error: bool,
+    available_width: u16,
 ) -> (Line<'static>, Line<'static>) {
     let (status_text, status_style) = if let Some((message, variant)) = latest_toast {
         let style = match variant {
@@ -55,101 +59,132 @@ pub(super) fn build_footer_lines(
     status_spans.push(error_hint);
     let status_line = Line::from(status_spans);
 
-    let hints_line = if composer_starts_with_query {
-        let mut spans = vec![
-            Span::styled(" ", Style::default()),
-            Span::styled(
-                "Ctrl+P",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":cmds  ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                "Ctrl+N",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":new  ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                "Ctrl+Q",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":sessions  ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                "Ctrl+C",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":cancel  ", Style::default().fg(theme::MUTED)),
-        ];
-        if !activity_hidden {
-            spans.push(Span::styled(
-                "Alt+Tab",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(
-                ":switch focus  ",
-                Style::default().fg(theme::MUTED),
-            ));
-            spans.push(Span::styled(
-                "Ctrl+W",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(
-                ":toggle activity  ",
-                Style::default().fg(theme::MUTED),
-            ));
-        }
+    let w = available_width;
+
+    let hints_line = if w < 30 {
+        // Ultra-narrow: just the help shortcut.
+        Line::from(vec![Span::styled(
+            " ?:help",
+            Style::default().fg(theme::MUTED),
+        )])
+    } else if composer_starts_with_query {
+        build_query_hints(activity_hidden, has_error, w)
+    } else {
+        build_default_hints(activity_hidden, has_error, w)
+    };
+
+    (status_line, hints_line)
+}
+
+/// Hints shown when composer text starts with `?`.
+fn build_query_hints(activity_hidden: bool, has_error: bool, w: u16) -> Line<'static> {
+    let mut spans = vec![
+        Span::styled(" ", Style::default()),
+        Span::styled(
+            "Ctrl+P",
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(":cmds  ", Style::default().fg(theme::MUTED)),
+    ];
+    if w >= 50 {
         spans.push(Span::styled(
-            "/",
+            "Ctrl+N",
             Style::default()
                 .fg(theme::ACCENT)
                 .add_modifier(Modifier::BOLD),
         ));
-        spans.push(if has_error {
-            Span::styled(":cmd  Ctrl+E:error", Style::default().fg(theme::MUTED))
-        } else {
-            Span::styled(":cmd", Style::default().fg(theme::MUTED))
-        });
+        spans.push(Span::styled(":new  ", Style::default().fg(theme::MUTED)));
+        spans.push(Span::styled(
+            "Ctrl+Q",
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            ":sessions  ",
+            Style::default().fg(theme::MUTED),
+        ));
+        spans.push(Span::styled(
+            "Ctrl+C",
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(":cancel  ", Style::default().fg(theme::MUTED)));
+    }
+    if w >= 50 && !activity_hidden {
+        spans.push(Span::styled(
+            "Alt+Tab",
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            ":switch focus  ",
+            Style::default().fg(theme::MUTED),
+        ));
+        spans.push(Span::styled(
+            "Ctrl+W",
+            Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            ":toggle activity  ",
+            Style::default().fg(theme::MUTED),
+        ));
+    }
+    spans.push(Span::styled(
+        "/",
+        Style::default()
+            .fg(theme::ACCENT)
+            .add_modifier(Modifier::BOLD),
+    ));
+    spans.push(if has_error {
+        Span::styled(":cmd  Ctrl+E:error", Style::default().fg(theme::MUTED))
+    } else {
+        Span::styled(":cmd", Style::default().fg(theme::MUTED))
+    });
+    if w >= 70 {
         spans.push(Span::styled(
             "  Ctrl+O:toggle tools",
             Style::default()
                 .fg(theme::MUTED)
                 .add_modifier(Modifier::DIM),
         ));
-        Line::from(spans)
+    }
+    Line::from(spans)
+}
+
+/// Default hints shown when composer is empty or has normal text.
+fn build_default_hints(activity_hidden: bool, has_error: bool, w: u16) -> Line<'static> {
+    let error_part = if has_error {
+        Span::styled(
+            "  Ctrl+E:error",
+            Style::default()
+                .fg(theme::WARNING)
+                .add_modifier(Modifier::BOLD),
+        )
     } else {
-        let error_part = if has_error {
-            Span::styled(
-                "  Ctrl+E:error",
-                Style::default()
-                    .fg(theme::WARNING)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else {
-            Span::raw("")
-        };
-        let mut spans = vec![
-            Span::styled(" Ctrl+P", Style::default().fg(theme::MUTED)),
-            Span::styled(" cmds", Style::default().fg(theme::MUTED)),
-            Span::styled("   /", Style::default().fg(theme::MUTED)),
-            Span::styled(" cmd", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                "   ? bindings",
-                Style::default()
-                    .fg(theme::MUTED)
-                    .add_modifier(Modifier::DIM),
-            ),
-        ];
+        Span::raw("")
+    };
+    let mut spans = vec![
+        Span::styled(" Ctrl+P", Style::default().fg(theme::MUTED)),
+        Span::styled(" cmds", Style::default().fg(theme::MUTED)),
+    ];
+    if w >= 50 {
+        spans.push(Span::styled("   /", Style::default().fg(theme::MUTED)));
+        spans.push(Span::styled(" cmd", Style::default().fg(theme::MUTED)));
+        spans.push(Span::styled(
+            "   ? bindings",
+            Style::default()
+                .fg(theme::MUTED)
+                .add_modifier(Modifier::DIM),
+        ));
+    }
+    if w >= 70 {
         if activity_hidden {
             spans.push(Span::styled(
                 "   Ctrl+W",
@@ -178,9 +213,7 @@ pub(super) fn build_footer_lines(
                 Style::default().fg(theme::MUTED),
             ));
         }
-        spans.push(error_part);
-        Line::from(spans)
-    };
-
-    (status_line, hints_line)
+    }
+    spans.push(error_part);
+    Line::from(spans)
 }

@@ -34,7 +34,10 @@ pub(crate) fn touch_file(path: &Path) -> Result<(), StateError> {
     Ok(())
 }
 
-pub(crate) fn write_json_atomic<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), StateError> {
+pub(crate) fn write_json_atomic<T: serde::Serialize>(
+    path: &Path,
+    value: &T,
+) -> Result<(), StateError> {
     if let Some(parent) = path.parent() {
         ensure_dir(parent)?;
     }

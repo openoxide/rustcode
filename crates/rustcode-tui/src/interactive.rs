@@ -83,8 +83,8 @@ use transcript::{
     set_find,
 };
 use types::{
-    AppState, ApprovalMode, ChatFocus, ChatNav, ChatState, CommandId, CommandItem, ConnectMethod,
-    FindState, GitStat, Modal, PendingApproval, ProviderEntry, ProviderManagerStep,
+    AppState, ApprovalMode, CachedApproval, ChatFocus, ChatNav, ChatState, CommandId, CommandItem,
+    ConnectMethod, FindState, GitStat, Modal, PendingApproval, ProviderEntry, ProviderManagerStep,
     ProviderOAuthDone, ProviderOAuthStarted, RunningCommand, Screen, Toast, ToastVariant,
 };
 

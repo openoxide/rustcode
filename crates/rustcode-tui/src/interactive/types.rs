@@ -1,10 +1,11 @@
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 
 use std::sync::atomic::AtomicU8;
 
 use super::{
     AbortHandle, ActivityItem, ApprovalResponse, Arc, CancellationToken, InteractiveDefaults,
-    InteractiveMsg, InteractiveSubmitMode, ResolvedConfig, SessionInfo, Size, StoredMessage,
+    InteractiveMsg, InteractiveSubmitMode, Line, ResolvedConfig, SessionInfo, Size, StoredMessage,
     SystemTime, ToolApprovalRequest,
 };
 use std::time::Instant;
@@ -88,6 +89,13 @@ pub(super) enum Screen {
 pub(super) struct PendingApproval {
     pub(super) request: ToolApprovalRequest,
     pub(super) reply: tokio::sync::oneshot::Sender<ApprovalResponse>,
+}
+
+/// Pre-rendered approval preview cached at the width it was rendered for.
+pub(super) struct CachedApproval {
+    pub(super) request: ToolApprovalRequest,
+    pub(super) lines: Vec<Line<'static>>,
+    pub(super) width: u16,
 }
 
 pub(super) struct RunningCommand {
@@ -368,7 +376,7 @@ pub(super) struct ChatState {
     pub(super) pending_prompt: Option<String>,
     /// Tool approval requests that were approved but whose results are not yet
     /// loaded into `messages`. Rendered in the transcript until `RunEnded` fires.
-    pub(super) committed_approvals: Vec<ToolApprovalRequest>,
+    pub(super) committed_approvals: Vec<CachedApproval>,
     /// Whether composer was just cleared by Ctrl+C (for "press again to exit" flow).
     pub(super) composer_cleared_by_ctrl_c: bool,
     /// Timestamp of last typing activity in composer.
@@ -406,6 +414,14 @@ pub(super) struct ChatState {
     pub(super) plan_steps: Vec<(String, String)>,
     /// Current todo list: (content, status, priority).
     pub(super) todos: Vec<(String, String, String)>,
+
+    // ── Transcript cache (avoids rebuilding thousands of Line objects every frame) ───
+    /// Cached transcript lines from the last `build_transcript_lines` call.
+    pub(super) cached_transcript: RefCell<Vec<Line<'static>>>,
+    /// Whether the transcript needs rebuilding (set on mutations, cleared after build).
+    pub(super) transcript_dirty: Cell<bool>,
+    /// The inner width used for the last diff-line padding pass.
+    pub(super) last_transcript_width: Cell<usize>,
 }
 
 /// Cached result of `git diff --shortstat HEAD`.

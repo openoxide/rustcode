@@ -89,15 +89,18 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
             last_total_tokens: 0,
             context_limit: 0,
             cost_usd: 0.0,
-                cache_read_tokens: 0,
-                cache_write_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
             last_max_scroll: std::cell::Cell::new(0),
-                last_transcript_wrapped_count: std::cell::Cell::new(0),
+            last_transcript_wrapped_count: std::cell::Cell::new(0),
             run_started_at: None,
             last_run_elapsed: None,
             plan_title: None,
             plan_steps: Vec::new(),
             todos: Vec::new(),
+            cached_transcript: std::cell::RefCell::new(Vec::new()),
+            transcript_dirty: std::cell::Cell::new(true),
+            last_transcript_width: std::cell::Cell::new(0),
         }),
         status: None,
         toasts: Vec::new(),
@@ -155,6 +158,7 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
     if let Screen::Chat(chat) = &mut state.screen {
         chat.tool_details = true;
         chat.output_details = true;
+        chat.transcript_dirty.set(true);
     }
     terminal.draw(|frame| render(frame, &state)).expect("draw");
     let text = buffer_to_string(terminal.backend().buffer());
@@ -240,15 +244,18 @@ fn chat_screen_hides_system_messages() {
             last_total_tokens: 0,
             context_limit: 0,
             cost_usd: 0.0,
-                cache_read_tokens: 0,
-                cache_write_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
             last_max_scroll: std::cell::Cell::new(0),
-                last_transcript_wrapped_count: std::cell::Cell::new(0),
+            last_transcript_wrapped_count: std::cell::Cell::new(0),
             run_started_at: None,
             last_run_elapsed: None,
             plan_title: None,
             plan_steps: Vec::new(),
             todos: Vec::new(),
+            cached_transcript: std::cell::RefCell::new(Vec::new()),
+            transcript_dirty: std::cell::Cell::new(true),
+            last_transcript_width: std::cell::Cell::new(0),
         }),
         status: None,
         toasts: Vec::new(),

@@ -249,6 +249,7 @@ pub(super) fn handle_chat_key(
                 chat.tool_details = expand;
                 chat.output_details = expand;
                 chat.show_reasoning = expand;
+                chat.transcript_dirty.set(true);
                 push_toast(
                     state,
                     ToastVariant::Info,
@@ -562,7 +563,12 @@ pub(in crate::interactive) fn set_approval_mode(
                     .send(super::super::ApprovalResponse::AllowOnce);
                 state.approval_selection = 0;
                 if let Some(chat) = chat {
-                    chat.committed_approvals.push(pending.request);
+                    chat.committed_approvals.push(super::super::CachedApproval {
+                        request: pending.request,
+                        lines: Vec::new(),
+                        width: 0,
+                    });
+                    chat.transcript_dirty.set(true);
                 }
             } else {
                 // AcceptEdits but this is a command — put it back for manual approval

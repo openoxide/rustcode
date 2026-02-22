@@ -9,7 +9,7 @@ use crate::helpers::{
     detect_git_branch, ensure_dir, new_message_id, new_session_id, now_unix_ms, read_json_file,
     set_owner_read_write_only, touch_file, write_json_atomic,
 };
-use crate::{StateError, SessionStore};
+use crate::{SessionStore, StateError};
 
 impl SessionStore {
     #[must_use]

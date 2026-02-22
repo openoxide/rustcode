@@ -87,6 +87,9 @@ pub(crate) fn execute_command(state: &mut AppState, id: CommandId) {
                 plan_title: None,
                 plan_steps: Vec::new(),
                 todos: Vec::new(),
+                cached_transcript: std::cell::RefCell::new(Vec::new()),
+                transcript_dirty: std::cell::Cell::new(true),
+                last_transcript_width: std::cell::Cell::new(0),
             });
             push_toast(
                 state,

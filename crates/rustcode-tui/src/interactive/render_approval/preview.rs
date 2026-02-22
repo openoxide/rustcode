@@ -109,7 +109,7 @@ pub(super) fn render_approval_preview(
                 Span::styled(format!("{n:>3} "), Style::default().fg(theme::MUTED)),
                 Span::styled("  ", Style::default()),
             ];
-            spans.extend(code_spans(line, &mut hl));
+            spans.extend(code_spans_truncated(line, &mut hl, w));
             out.push(padded_line(spans, Style::default(), w));
             displayed += 1;
         }
@@ -125,7 +125,11 @@ pub(super) fn render_approval_preview(
                 Span::styled(format!("{n:>3} "), Style::default().fg(theme::DIFF_DEL_FG)),
                 Span::styled("- ", Style::default().fg(theme::DIFF_DEL_FG)),
             ];
-            spans.extend(code_spans(old_lines[old_changed_start + i], &mut hl_del));
+            spans.extend(code_spans_truncated(
+                old_lines[old_changed_start + i],
+                &mut hl_del,
+                w,
+            ));
             out.push(padded_line(
                 spans,
                 Style::default().bg(theme::DIFF_DEL_BG),
@@ -154,7 +158,11 @@ pub(super) fn render_approval_preview(
                 Span::styled(format!("{n:>3} "), Style::default().fg(theme::DIFF_ADD_FG)),
                 Span::styled("+ ", Style::default().fg(theme::DIFF_ADD_FG)),
             ];
-            spans.extend(code_spans(new_lines[new_changed_start + i], &mut hl_add));
+            spans.extend(code_spans_truncated(
+                new_lines[new_changed_start + i],
+                &mut hl_add,
+                w,
+            ));
             out.push(padded_line(
                 spans,
                 Style::default().bg(theme::DIFF_ADD_BG),
@@ -184,7 +192,7 @@ pub(super) fn render_approval_preview(
                 Span::styled(format!("{n:>3} "), Style::default().fg(theme::MUTED)),
                 Span::styled("  ", Style::default()),
             ];
-            spans.extend(code_spans(old_lines[old_idx], &mut hl));
+            spans.extend(code_spans_truncated(old_lines[old_idx], &mut hl, w));
             out.push(padded_line(spans, Style::default(), w));
             // (last context line, no need to track displayed further)
         }
@@ -232,7 +240,7 @@ pub(super) fn render_approval_preview(
                 Span::styled(format!("{n:>3} "), Style::default().fg(theme::DIFF_ADD_FG)),
                 Span::styled("+ ", Style::default().fg(theme::DIFF_ADD_FG)),
             ];
-            spans.extend(code_spans(raw, &mut hl_write));
+            spans.extend(code_spans_truncated(raw, &mut hl_write, w));
             out.push(padded_line(
                 spans,
                 Style::default().bg(theme::DIFF_ADD_BG),
@@ -320,7 +328,7 @@ pub(super) fn render_multiedit_preview(
                 Span::styled("  ", Style::default()),
                 Span::styled("- ", Style::default().fg(theme::DIFF_DEL_FG)),
             ];
-            spans.extend(code_spans(raw, &mut hl_del));
+            spans.extend(code_spans_truncated(raw, &mut hl_del, width));
             out.push(padded_line(
                 spans,
                 Style::default().bg(theme::DIFF_DEL_BG),
@@ -345,7 +353,7 @@ pub(super) fn render_multiedit_preview(
                 Span::styled("  ", Style::default()),
                 Span::styled("+ ", Style::default().fg(theme::DIFF_ADD_FG)),
             ];
-            spans.extend(code_spans(raw, &mut hl_add));
+            spans.extend(code_spans_truncated(raw, &mut hl_add, width));
             out.push(padded_line(
                 spans,
                 Style::default().bg(theme::DIFF_ADD_BG),
@@ -389,6 +397,24 @@ pub(super) fn code_spans(text: &str, hl: &mut Option<HighlightState>) -> Vec<Spa
         text.to_string(),
         Style::default().fg(theme::TEXT),
     )]
+}
+
+/// Like [`code_spans`] but truncates `text` to `max_width` chars first.
+///
+/// Avoids feeding extremely long lines (e.g. minified JS) into the
+/// syntax highlighter which would allocate many spans and slow rendering.
+pub(super) fn code_spans_truncated(
+    text: &str,
+    hl: &mut Option<HighlightState>,
+    max_width: usize,
+) -> Vec<Span<'static>> {
+    if text.len() <= max_width {
+        return code_spans(text, hl);
+    }
+    let truncated: String = text.chars().take(max_width).collect();
+    let mut spans = code_spans(&truncated, hl);
+    spans.push(Span::styled("…", Style::default().fg(theme::MUTED)));
+    spans
 }
 
 /// Build a `Line` whose spans are padded with trailing spaces so the background

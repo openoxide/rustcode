@@ -1,6 +1,10 @@
 use std::path::Path;
 
-pub(super) fn build_environment_block(model: &str, workspace_root: &Path, is_git_repo: bool) -> String {
+pub(super) fn build_environment_block(
+    model: &str,
+    workspace_root: &Path,
+    is_git_repo: bool,
+) -> String {
     let platform = if cfg!(target_os = "macos") {
         "macOS"
     } else if cfg!(target_os = "linux") {

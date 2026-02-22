@@ -83,6 +83,7 @@ pub(crate) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
     chat.run_started_at = Some(std::time::Instant::now());
     chat.last_run_elapsed = None;
     chat.pending_prompt = Some(prompt.clone());
+    chat.transcript_dirty.set(true);
     chat.composer_cleared_by_ctrl_c = false;
     chat.scroll = 0; // auto-scroll to bottom on new prompt
     state.status = None;
@@ -159,11 +160,7 @@ pub(crate) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
 /// Submit a compact command to the engine to summarize context.
 ///
 /// Like `submit_prompt`, but sends `Command::Compact` instead of an agent prompt.
-pub(crate) fn submit_compact(
-    state: &mut AppState,
-    chat: &mut ChatState,
-    focus: Option<String>,
-) {
+pub(crate) fn submit_compact(state: &mut AppState, chat: &mut ChatState, focus: Option<String>) {
     let Some(config) = state.config.clone() else {
         push_toast(
             state,

@@ -369,9 +369,7 @@ impl Engine {
             publisher,
             EventScope::Command,
             EventPayload::OutputChunk {
-                text: format!(
-                    "context compacted: {before} messages → {after} messages"
-                ),
+                text: format!("context compacted: {before} messages → {after} messages"),
             },
             context,
         )

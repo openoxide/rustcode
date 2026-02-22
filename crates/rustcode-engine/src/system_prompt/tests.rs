@@ -1,5 +1,5 @@
-use super::*;
 use super::environment::build_environment_block;
+use super::*;
 
 fn mock_tools() -> Vec<rustcode_llm::ToolSpec> {
     vec![
@@ -117,7 +117,15 @@ fn build_system_prompt_includes_tool_summary() {
 
 #[test]
 fn build_system_prompt_no_tools() {
-    let prompt = build_system_prompt("gpt-4o", Path::new("/tmp/test"), false, &[], &[], None, None);
+    let prompt = build_system_prompt(
+        "gpt-4o",
+        Path::new("/tmp/test"),
+        false,
+        &[],
+        &[],
+        None,
+        None,
+    );
     assert!(!prompt.contains("<tools>"));
 }
 

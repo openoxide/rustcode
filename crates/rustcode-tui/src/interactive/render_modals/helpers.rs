@@ -1,5 +1,5 @@
 use crate::interactive::theme;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
@@ -187,11 +187,12 @@ pub(super) fn render_slash_help(frame: &mut ratatui::Frame<'_>, query: &str, sel
 /// the number of matches up to 10 rows.
 fn slash_popup_rect(r: Rect, item_count: usize) -> Rect {
     let content_h = (item_count as u16).clamp(1, 10);
-    // +2 for borders
-    let h = content_h + 2;
-    let w = r.width / 2;
-    // Position above the composer+footer (~8 rows from bottom)
+    // +2 for borders, clamp to available terminal height
+    let h = (content_h + 2).min(r.height.saturating_sub(2));
+    let w = (r.width / 2).max(20.min(r.width));
+    // Position above the composer+footer (~8 rows from bottom), clamped to r.y
     let y = r.y + r.height.saturating_sub(h + 8);
+    let y = y.max(r.y);
     Rect {
         x: r.x + 1,
         y,
@@ -201,22 +202,16 @@ fn slash_popup_rect(r: Rect, item_count: usize) -> Rect {
 }
 
 /// Compute a centered rectangle within `r` using percentage dimensions.
+///
+/// Clamps the result so it never produces a zero-width or zero-height rect
+/// and always fits within the container, even on very small terminals.
 pub(crate) fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
+    let w = ((r.width as u32 * percent_x as u32) / 100) as u16;
+    let h = ((r.height as u32 * percent_y as u32) / 100) as u16;
+    // Ensure minimum usable size, clamped to the container.
+    let w = w.max(20.min(r.width)).min(r.width);
+    let h = h.max(5.min(r.height)).min(r.height);
+    let x = r.x + (r.width.saturating_sub(w)) / 2;
+    let y = r.y + (r.height.saturating_sub(h)) / 2;
+    Rect::new(x, y, w, h)
 }
