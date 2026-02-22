@@ -112,6 +112,7 @@ pub async fn handle_tui_command(tui: TuiCommand, cli: &Cli) -> Result<()> {
                 }
             }
 
+            let mode_flag = handles.mode_flag.clone();
             let services = rustcode_tui::InteractiveServices {
                 backend,
                 defaults,
@@ -122,6 +123,7 @@ pub async fn handle_tui_command(tui: TuiCommand, cli: &Cli) -> Result<()> {
                 executor,
                 llm_cell: None,
                 submit_mode: rustcode_tui::InteractiveSubmitMode::Run,
+                mode_flag,
             };
             rustcode_tui::run_interactive(services)
                 .await
@@ -307,6 +309,7 @@ pub async fn handle_tui_default(
     let backend: Arc<dyn rustcode_tui::SessionBackend> =
         Arc::new(rustcode_tui::LocalSessionBackend::new(store.clone()));
 
+    let mode_flag = handles.mode_flag.clone();
     let services = rustcode_tui::InteractiveServices {
         backend,
         defaults,
@@ -317,6 +320,7 @@ pub async fn handle_tui_default(
         executor,
         llm_cell,
         submit_mode: rustcode_tui::InteractiveSubmitMode::Agent,
+        mode_flag,
     };
     rustcode_tui::run_interactive(services)
         .await

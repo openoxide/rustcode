@@ -49,10 +49,17 @@ impl Engine {
             &tools,
             self.skills.all(),
             memory_summary.as_deref(),
+            options.mode_hint.as_deref(),
         );
 
         let mut messages = self
-            .build_initial_messages(&system_prompt, &prompt, history, context)
+            .build_initial_messages(
+                &system_prompt,
+                &prompt,
+                history,
+                context,
+                options.mode_hint.as_deref(),
+            )
             .await?;
 
         let mut context_tracker = ContextTracker::new(&context.config.model);
@@ -238,6 +245,7 @@ impl Engine {
         prompt: &str,
         history: Vec<StoredMessage>,
         context: &CommandContext,
+        mode_hint: Option<&str>,
     ) -> Result<Vec<ChatMessage>, ExecutionError> {
         let mut messages = Vec::new();
         if history.is_empty() {
@@ -268,17 +276,33 @@ impl Engine {
             });
         } else {
             messages.extend(stored_messages_to_chat(history));
-            if !matches!(messages.first().map(|m| m.role), Some(ChatRole::System)) {
-                messages.insert(
-                    0,
-                    ChatMessage {
-                        role: ChatRole::System,
-                        content: Value::String(system_prompt.to_string()),
-                        tool_call_id: None,
-                        tool_name: None,
-                        tool_calls: Vec::new(),
-                    },
-                );
+            // Always replace the first system message with the current system prompt
+            // so mode switches (Plan → Build) take effect immediately.
+            let fresh_system = ChatMessage {
+                role: ChatRole::System,
+                content: Value::String(system_prompt.to_string()),
+                tool_call_id: None,
+                tool_name: None,
+                tool_calls: Vec::new(),
+            };
+            if matches!(messages.first().map(|m| m.role), Some(ChatRole::System)) {
+                messages[0] = fresh_system;
+            } else {
+                messages.insert(0, fresh_system);
+            }
+        }
+
+        // Inject a mode reminder right before the user prompt so the LLM
+        // picks up mode changes (e.g. Plan → Build) even in long conversations.
+        if let Some(hint) = mode_hint {
+            if let Some(section) = crate::system_prompt::mode_reminder(hint) {
+                messages.push(ChatMessage {
+                    role: ChatRole::System,
+                    content: Value::String(section.to_string()),
+                    tool_call_id: None,
+                    tool_name: None,
+                    tool_calls: Vec::new(),
+                });
             }
         }
 

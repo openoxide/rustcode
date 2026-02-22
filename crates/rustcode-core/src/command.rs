@@ -9,6 +9,8 @@ pub struct AgentOptions {
     pub max_list_entries: usize,
     pub max_tool_result_bytes: usize,
     pub max_write_bytes: usize,
+    /// Optional mode hint injected into the system prompt (e.g. "build", "plan").
+    pub mode_hint: Option<String>,
 }
 
 impl Default for AgentOptions {
@@ -24,6 +26,7 @@ impl Default for AgentOptions {
             max_list_entries: 2000,
             max_tool_result_bytes: 50 * 1024,
             max_write_bytes: 256 * 1024,
+            mode_hint: None,
         }
     }
 }

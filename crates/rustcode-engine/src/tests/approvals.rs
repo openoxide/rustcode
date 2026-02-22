@@ -38,6 +38,7 @@ async fn mutating_tools_require_approval_when_no_allow_rule_and_no_approver() {
         max_list_entries: 100,
         max_tool_result_bytes: 1024,
         max_write_bytes: 1024,
+        mode_hint: None,
     };
     let mut state = AgentState::default();
     let result = engine
@@ -139,6 +140,7 @@ async fn mutating_tools_can_be_allowed_by_permissions_without_prompt() {
         max_list_entries: 100,
         max_tool_result_bytes: 4096,
         max_write_bytes: 1024,
+        mode_hint: None,
     };
     let mut state = AgentState::default();
     let output = engine
@@ -197,6 +199,7 @@ async fn exec_permission_rule_can_match_full_command_line() {
         max_list_entries: 100,
         max_tool_result_bytes: 4096,
         max_write_bytes: 1024,
+        mode_hint: None,
     };
     let mut state = AgentState::default();
     let output = engine
@@ -266,6 +269,7 @@ async fn exec_permission_rule_precedence_prefers_last_match_across_targets() {
         max_list_entries: 100,
         max_tool_result_bytes: 1024,
         max_write_bytes: 1024,
+        mode_hint: None,
     };
     let mut state = AgentState::default();
     let result = engine
@@ -328,6 +332,7 @@ async fn mutating_tools_can_be_denied_by_permissions_without_prompt() {
         max_list_entries: 100,
         max_tool_result_bytes: 1024,
         max_write_bytes: 1024,
+        mode_hint: None,
     };
     let mut state = AgentState::default();
     let result = engine
@@ -390,6 +395,7 @@ async fn mutating_tools_ask_rule_triggers_approver() {
         max_list_entries: 100,
         max_tool_result_bytes: 4096,
         max_write_bytes: 1024,
+        mode_hint: None,
     };
     let mut state = AgentState::default();
     let output = engine

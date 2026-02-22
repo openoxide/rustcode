@@ -445,6 +445,7 @@ async fn main() -> Result<()> {
                 max_list_entries,
                 max_tool_result_bytes,
                 max_write_bytes,
+                mode_hint: None,
             },
             history: agent_history,
         },

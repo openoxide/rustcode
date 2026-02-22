@@ -46,8 +46,15 @@ fn system_prompt_includes_all_components() {
     // Create instruction file
     std::fs::write(temp_dir.join("RUSTCODE.md"), "# Custom Instructions").unwrap();
 
-    let prompt =
-        system_prompt::build_system_prompt("claude-3.5-sonnet", &temp_dir, true, &[], &[], None);
+    let prompt = system_prompt::build_system_prompt(
+        "claude-3.5-sonnet",
+        &temp_dir,
+        true,
+        &[],
+        &[],
+        None,
+        None,
+    );
 
     // Check all components are present
     assert!(prompt.contains("You are rustcode"));
@@ -64,14 +71,15 @@ fn system_prompt_model_hints() {
     let temp = std::env::temp_dir();
 
     let claude_prompt =
-        system_prompt::build_system_prompt("claude-3.5-sonnet", &temp, false, &[], &[], None);
+        system_prompt::build_system_prompt("claude-3.5-sonnet", &temp, false, &[], &[], None, None);
     assert!(claude_prompt.contains("Claude model"));
 
-    let gpt_prompt = system_prompt::build_system_prompt("gpt-4o", &temp, false, &[], &[], None);
+    let gpt_prompt =
+        system_prompt::build_system_prompt("gpt-4o", &temp, false, &[], &[], None, None);
     assert!(gpt_prompt.contains("OpenAI model"));
 
     let gemini_prompt =
-        system_prompt::build_system_prompt("gemini-2.0-flash", &temp, false, &[], &[], None);
+        system_prompt::build_system_prompt("gemini-2.0-flash", &temp, false, &[], &[], None, None);
     assert!(gemini_prompt.contains("Gemini model"));
 }
 

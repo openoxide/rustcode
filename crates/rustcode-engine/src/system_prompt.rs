@@ -66,18 +66,18 @@ suggest natural next steps if any exist.
 - When done, respond with a clear, final answer without tool calls.
 
 ## Planning & Tracking
-- For complex multi-step tasks, use the `plan` tool at the start to outline your \
-approach. Update the plan as you complete each step by calling `plan` again with \
-updated step statuses (`completed`, `in_progress`, `pending`, `blocked`).
-- Use `todowrite` when you need a structured checklist of items to work through. \
-Update todo statuses (`in_progress`, `completed`) as you progress.
-- Plans and todos are rendered live in the UI — keep them up to date so the user \
-can track your progress.";
+- Do NOT use the `plan` tool unless the user explicitly asks you to plan, or the task \
+genuinely requires coordinating 5+ distinct steps across multiple files. Most tasks — \
+bug fixes, small features, refactors, single-file changes — should be done directly \
+without planning. Bias heavily toward action over planning.
+- Use `todowrite` only for large multi-file tasks where tracking progress is genuinely \
+useful. Do not create todos for simple or moderate tasks.
+- When you do use plans or todos, keep them updated with step statuses.";
 
 /// Build the full system prompt.
 ///
 /// Combines the base identity, persistent memory, model-specific hints, tool summary,
-/// available skills, environment block, and any loaded instruction files.
+/// available skills, environment block, mode-specific behaviour, and loaded instruction files.
 #[must_use]
 pub fn build_system_prompt(
     model: &str,
@@ -86,8 +86,9 @@ pub fn build_system_prompt(
     tools: &[rustcode_llm::ToolSpec],
     skills: &[rustcode_skills::SkillFile],
     memory_summary: Option<&str>,
+    mode_hint: Option<&str>,
 ) -> String {
-    let mut parts = Vec::with_capacity(7);
+    let mut parts = Vec::with_capacity(8);
 
     // 1. Base identity + guidelines
     parts.push(BASE_PROMPT.to_string());
@@ -120,7 +121,12 @@ pub fn build_system_prompt(
     // 6. Environment block
     parts.push(build_environment_block(model, workspace_root, is_git_repo));
 
-    // 7. Loaded instructions
+    // 7. Mode-specific behaviour
+    if let Some(section) = mode_hint.and_then(mode_section) {
+        parts.push(section.to_string());
+    }
+
+    // 8. Loaded instructions
     let instruction_files = instructions::load_instructions(workspace_root);
     let formatted = instructions::format_instructions(&instruction_files);
     if !formatted.is_empty() {
@@ -128,6 +134,88 @@ pub fn build_system_prompt(
     }
 
     parts.join("\n\n")
+}
+
+/// Short mode reminder injected before each user message in ongoing conversations.
+///
+/// Ensures the LLM picks up mode switches (e.g. Plan → Build) even when the
+/// conversation history is long.
+#[must_use]
+pub fn mode_reminder(mode: &str) -> Option<&'static str> {
+    match mode {
+        "build" => Some(
+            "[Mode switched to Build] You are now in Build mode. \
+             All tools are available but require user approval. Proceed with implementation.",
+        ),
+        "accept_edits" => Some(
+            "[Mode switched to Accept Edits] File operations are auto-approved. \
+             Shell commands still require approval. Prefer file tools over bash.",
+        ),
+        "yolo" => Some(
+            "[Mode switched to Yolo] All tools are auto-approved. \
+             Work efficiently. Be careful with destructive operations.",
+        ),
+        "plan" => Some(
+            "[Mode switched to Plan] You are in read-only Plan mode. \
+             Do NOT call write/edit/bash/exec tools — they will be denied. \
+             Only use read, glob, grep, list, codesearch, plan, todowrite, question. \
+             When ready to implement, tell the user to switch to Build mode (Shift+Tab).",
+        ),
+        _ => None,
+    }
+}
+
+/// Mode-specific system prompt section.
+///
+/// Returns behavioural instructions tailored to the current approval mode.
+fn mode_section(mode: &str) -> Option<&'static str> {
+    match mode {
+        "build" => Some(
+            "## Active Mode: Build\n\
+             You are in **Build mode** — the standard working mode.\n\
+             - All tool calls (file writes, edits, commands) require user approval before execution.\n\
+             - Proceed normally: read code, analyze, then make changes. The user will approve or \
+             deny each tool call interactively.\n\
+             - Do not ask whether to proceed — just call the tools and the user will decide.",
+        ),
+        "accept_edits" => Some(
+            "## Active Mode: Accept Edits\n\
+             You are in **Accept Edits mode**.\n\
+             - File operations (read, write, edit, glob, grep, apply_patch, multiedit) are \
+             **auto-approved** — you can freely read and modify files without waiting.\n\
+             - Shell commands (bash, exec, pty_exec) still require user approval.\n\
+             - Prefer file-based tools over shell commands when possible. For example, use \
+             `write` or `apply_patch` instead of `bash` with sed/echo.\n\
+             - Do not ask whether to proceed with file changes — they are approved automatically.",
+        ),
+        "yolo" => Some(
+            "## Active Mode: Yolo\n\
+             You are in **Yolo mode** — all tools are auto-approved.\n\
+             - Every tool call (file writes, edits, shell commands) is approved automatically.\n\
+             - Work efficiently: chain tool calls, run tests, make changes without hesitation.\n\
+             - Be extra careful with destructive operations (deleting files, force-pushing, \
+             dropping data) — there is no approval gate, so double-check before executing \
+             anything irreversible.\n\
+             - Do not ask whether to proceed — just do the work.",
+        ),
+        "plan" => Some(
+            "## Active Mode: Plan\n\
+             You are in **Plan mode** — read-only research and analysis.\n\
+             - You may ONLY use read-only tools: `read`, `glob`, `grep`, `list`, `codesearch`, \
+             `plan`, `todowrite`, `question`.\n\
+             - ALL write/edit/exec tools will be **automatically denied**. Do NOT call `write`, \
+             `apply_patch`, `multiedit`, `bash`, `exec`, or `pty_exec` — they will fail.\n\
+             - Focus on understanding the codebase: read files, search for patterns, analyze \
+             architecture, gather context, and formulate a plan.\n\
+             - Present your findings and proposed plan to the user.\n\
+             - When you have finished your analysis and are ready to implement changes, \
+             tell the user: \"I've completed my analysis. Switch to Build mode (Shift+Tab) \
+             to start implementing the changes.\"\n\
+             - ALWAYS end your final response with a suggestion to switch to Build mode \
+             when there is work to be done.",
+        ),
+        _ => None,
+    }
 }
 
 /// Model-specific behavior hints.
@@ -300,6 +388,7 @@ mod tests {
             &mock_tools(),
             &[],
             None,
+            None,
         );
         assert!(prompt.contains("You are rustcode"));
         assert!(prompt.contains("production-grade"));
@@ -313,6 +402,7 @@ mod tests {
             false,
             &mock_tools(),
             &[],
+            None,
             None,
         );
         assert!(prompt.contains("Editing Constraints"));
@@ -328,6 +418,7 @@ mod tests {
             &mock_tools(),
             &[],
             None,
+            None,
         );
         assert!(prompt.contains("Tool Usage Policy"));
     }
@@ -340,6 +431,7 @@ mod tests {
             false,
             &mock_tools(),
             &[],
+            None,
             None,
         );
         assert!(prompt.contains("Git & Workspace Hygiene"));
@@ -354,6 +446,7 @@ mod tests {
             true,
             &mock_tools(),
             &[],
+            None,
             None,
         );
         assert!(prompt.contains("<environment>"));
@@ -371,6 +464,7 @@ mod tests {
             &mock_tools(),
             &[],
             None,
+            None,
         );
         assert!(prompt.contains("<tools>"));
         assert!(prompt.contains("**read**"));
@@ -381,7 +475,15 @@ mod tests {
 
     #[test]
     fn build_system_prompt_no_tools() {
-        let prompt = build_system_prompt("gpt-4o", Path::new("/tmp/test"), false, &[], &[], None);
+        let prompt = build_system_prompt(
+            "gpt-4o",
+            Path::new("/tmp/test"),
+            false,
+            &[],
+            &[],
+            None,
+            None,
+        );
         assert!(!prompt.contains("<tools>"));
     }
 
@@ -476,5 +578,54 @@ mod tests {
     fn is_git_repo_detects_git_dir() {
         // /tmp is unlikely to be a git repo
         assert!(!is_git_repo(Path::new("/tmp/nonexistent-git-test")));
+    }
+
+    #[test]
+    fn mode_section_plan_contains_read_only() {
+        let section = mode_section("plan").expect("plan mode should have a section");
+        assert!(section.contains("Plan mode"));
+        assert!(section.contains("read-only"));
+        assert!(section.contains("Build mode"));
+    }
+
+    #[test]
+    fn mode_section_build_contains_approval() {
+        let section = mode_section("build").expect("build mode should have a section");
+        assert!(section.contains("Build mode"));
+        assert!(section.contains("approval"));
+    }
+
+    #[test]
+    fn mode_section_yolo_contains_auto_approved() {
+        let section = mode_section("yolo").expect("yolo mode should have a section");
+        assert!(section.contains("auto-approved"));
+    }
+
+    #[test]
+    fn mode_section_accept_edits_contains_file_operations() {
+        let section =
+            mode_section("accept_edits").expect("accept_edits mode should have a section");
+        assert!(section.contains("File operations"));
+        assert!(section.contains("auto-approved"));
+    }
+
+    #[test]
+    fn mode_section_unknown_returns_none() {
+        assert!(mode_section("unknown").is_none());
+    }
+
+    #[test]
+    fn build_system_prompt_includes_mode_section() {
+        let prompt = build_system_prompt(
+            "gpt-4o",
+            Path::new("/tmp/test"),
+            false,
+            &mock_tools(),
+            &[],
+            None,
+            Some("plan"),
+        );
+        assert!(prompt.contains("Active Mode: Plan"));
+        assert!(prompt.contains("read-only"));
     }
 }
