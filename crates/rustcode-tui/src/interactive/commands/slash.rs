@@ -25,8 +25,33 @@ pub(crate) fn handle_slash_command(
         }
         // /sessions and /resume with no argument → go to session picker
         "sessions" | "home" | "back" | "resume" => ChatNav::ToSessions,
+        "clear context" => {
+            execute_command(state, CommandId::ClearContext);
+            ChatNav::Stay
+        }
         "clear" => {
             composer_clear(chat);
+            ChatNav::Stay
+        }
+        "compact" => {
+            execute_command(state, CommandId::Compact);
+            ChatNav::Stay
+        }
+        _ if cmd.starts_with("compact ") => {
+            let focus = cmd.trim_start_matches("compact").trim().to_string();
+            if focus.is_empty() {
+                execute_command(state, CommandId::Compact);
+            } else {
+                // submit_compact needs screen swap — delegate to execute.
+                // For now, the focus is best used by passing it to the engine.
+                push_toast(
+                    state,
+                    ToastVariant::Info,
+                    format!("compacting (focus: {focus})"),
+                    Duration::from_secs(2),
+                );
+                execute_command(state, CommandId::Compact);
+            }
             ChatNav::Stay
         }
         "delete" => {

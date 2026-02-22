@@ -38,6 +38,8 @@ fn make_chat_state(session: SessionInfo) -> ChatState {
         last_total_tokens: 0,
         context_limit: 0,
         cost_usd: 0.0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
         last_max_scroll: std::cell::Cell::new(0),
                 last_transcript_wrapped_count: std::cell::Cell::new(0),
         run_started_at: None,

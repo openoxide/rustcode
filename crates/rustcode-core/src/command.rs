@@ -41,6 +41,11 @@ pub enum Command {
         options: AgentOptions,
         history: Vec<StoredMessage>,
     },
+    /// Compact the current session's context by summarizing history via LLM.
+    Compact {
+        history: Vec<StoredMessage>,
+        focus: Option<String>,
+    },
     Exec {
         command: String,
         args: Vec<String>,

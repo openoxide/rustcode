@@ -11,6 +11,8 @@ pub(super) use slash::handle_slash_command;
 /// Shown in the [`Modal::SlashHelp`] autocomplete popup.
 pub(super) const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/clear", "Clear composer input"),
+    ("/clear context", "Reset conversation (keep session)"),
+    ("/compact", "Summarize context to free tokens"),
     ("/delete", "Delete current session"),
     ("/find <query>", "Search transcript"),
     ("/fork", "Fork current session  (Ctrl+F)"),

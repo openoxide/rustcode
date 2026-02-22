@@ -2,14 +2,14 @@ use super::super::{
     apply_find_highlight, approval_options_count, build_transcript_lines, composer_cursor_visual,
     render_activity, render_activity_details_modal, render_approval_inline,
     render_approval_selector, word_wrap_text, AppState, ApprovalMode, Block, Borders, ChatFocus,
-    ChatState, Clear, Constraint, Direction, Duration, Layout, Line, Modal, Modifier, Paragraph,
-    Span, Style, SystemTime, ToastVariant, Wrap,
+    ChatState, Clear, Constraint, Direction, Layout, Line, Modal, Modifier, Paragraph, Span,
+    Style, Wrap,
 };
 use super::{format_tokens, truncate_with_ellipsis};
 use crate::interactive::theme;
 
-const RUNNING_FRAMES: &[char] = &['◐', '◓', '◑', '◒'];
-const RUNNING_DOTS: &[&str] = &["   ", ".  ", ".. ", "..."];
+mod footer;
+use self::footer::build_footer_lines;
 
 pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: &ChatState) {
     let h_constraints: Vec<Constraint> = if chat.activity_hidden {
@@ -101,7 +101,10 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         ));
     }
     if chat.context_limit > 0 && chat.last_total_tokens > 0 {
-        let pct = ((chat.last_total_tokens as f64 / chat.context_limit as f64) * 100.0).min(100.0);
+        // Exclude cache reads from context usage — cached tokens don't consume
+        // new context window space, so the % should reflect "real" usage.
+        let effective = chat.last_total_tokens.saturating_sub(chat.cache_read_tokens);
+        let pct = ((effective as f64 / chat.context_limit as f64) * 100.0).min(100.0);
         let pct_color = if pct < 50.0 {
             theme::CTX_LOW
         } else if pct < 75.0 {
@@ -111,8 +114,16 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         };
         transcript_title_spans.push(Span::raw("  "));
         transcript_title_spans.push(Span::styled(
-            format!("{pct:.0}% used"),
+            format!("{pct:.0}% ctx"),
             Style::default().fg(pct_color),
+        ));
+    }
+    if chat.cache_read_tokens > 0 {
+        let cached = format_tokens(chat.cache_read_tokens);
+        transcript_title_spans.push(Span::raw("  "));
+        transcript_title_spans.push(Span::styled(
+            format!("{cached} cached"),
+            Style::default().fg(theme::MUTED),
         ));
     }
     if let Some(find) = &chat.find {
@@ -391,178 +402,19 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         }
     }
 
-    // Line 1: running/toast status only (errors are shown in transcript).
-    let (status_text, status_style, has_error) = if let Some(toast) = app.toasts.last() {
-        let style = match toast.variant {
-            ToastVariant::Info => Style::default().fg(theme::ACCENT),
-            ToastVariant::Success => Style::default().fg(theme::SUCCESS),
-            ToastVariant::Warning => Style::default().fg(theme::SECONDARY),
-            ToastVariant::Error => Style::default().fg(theme::ERROR),
-        };
-        (toast.message.clone(), style, false)
-    } else {
-        (String::new(), Style::default(), false)
-    };
-    // Bright yellow hint when error is set — draws attention
-    let error_hint = if has_error {
-        Span::styled(
-            "  Ctrl+E:details",
-            Style::default()
-                .fg(theme::WARNING)
-                .add_modifier(Modifier::BOLD),
-        )
-    } else {
-        Span::raw("")
-    };
-    let mut status_spans = Vec::new();
-    if chat.running.is_some() {
-        let ms = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_else(|_| Duration::from_secs(0))
-            .as_millis();
-        let frame_char = RUNNING_FRAMES[(ms / 120 % RUNNING_FRAMES.len() as u128) as usize];
-        let dots = RUNNING_DOTS[(ms / 300 % RUNNING_DOTS.len() as u128) as usize];
-        status_spans.push(Span::styled(
-            format!(" {frame_char} running{dots}"),
-            Style::default()
-                .fg(theme::ACCENT)
-                .add_modifier(Modifier::BOLD),
-        ));
-    }
-    status_spans.push(Span::styled(status_text, status_style));
-    status_spans.push(error_hint);
-    let status_line = Line::from(status_spans);
-
-    // When the composer starts with '?' show expanded bindings; otherwise a compact hint.
+    let latest_toast = app
+        .toasts
+        .last()
+        .map(|toast| (toast.message.clone(), toast.variant.clone()));
+    let has_error = false;
     let composer_starts_with_query = chat.composer.starts_with('?');
-    let hints_line = if composer_starts_with_query {
-        // Expanded bindings visible when user types '?' first
-        let mut spans = vec![
-            Span::styled(" ", Style::default()),
-            Span::styled(
-                "Ctrl+P",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":cmds  ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                "Ctrl+N",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":new  ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                "Ctrl+Q",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":sessions  ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                "Ctrl+C",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":cancel  ", Style::default().fg(theme::MUTED)),
-        ];
-        if !chat.activity_hidden {
-            spans.push(Span::styled(
-                "Alt+Tab",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(
-                ":switch focus  ",
-                Style::default().fg(theme::MUTED),
-            ));
-            spans.push(Span::styled(
-                "Ctrl+W",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ));
-            spans.push(Span::styled(
-                ":toggle activity  ",
-                Style::default().fg(theme::MUTED),
-            ));
-        }
-        spans.push(Span::styled(
-            "/",
-            Style::default()
-                .fg(theme::ACCENT)
-                .add_modifier(Modifier::BOLD),
-        ));
-        spans.push(if has_error {
-            Span::styled(":cmd  Ctrl+E:error", Style::default().fg(theme::MUTED))
-        } else {
-            Span::styled(":cmd", Style::default().fg(theme::MUTED))
-        });
-        spans.push(Span::styled(
-            "  Ctrl+O:toggle tools",
-            Style::default()
-                .fg(theme::MUTED)
-                .add_modifier(Modifier::DIM),
-        ));
-        Line::from(spans)
-    } else {
-        // Compact hint — just enough to orient a new user
-        let error_part = if has_error {
-            Span::styled(
-                "  Ctrl+E:error",
-                Style::default()
-                    .fg(theme::WARNING)
-                    .add_modifier(Modifier::BOLD),
-            )
-        } else {
-            Span::raw("")
-        };
-        let mut spans = vec![
-            Span::styled(" Ctrl+P", Style::default().fg(theme::MUTED)),
-            Span::styled(" cmds", Style::default().fg(theme::MUTED)),
-            Span::styled("   /", Style::default().fg(theme::MUTED)),
-            Span::styled(" cmd", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                "   ? bindings",
-                Style::default()
-                    .fg(theme::MUTED)
-                    .add_modifier(Modifier::DIM),
-            ),
-        ];
-        if chat.activity_hidden {
-            spans.push(Span::styled(
-                "   Ctrl+W",
-                Style::default()
-                    .fg(theme::MUTED)
-                    .add_modifier(Modifier::DIM),
-            ));
-            spans.push(Span::styled(
-                " open activity",
-                Style::default()
-                    .fg(theme::MUTED)
-                    .add_modifier(Modifier::DIM),
-            ));
-        } else {
-            spans.push(Span::styled(
-                "   Alt+Tab",
-                Style::default().fg(theme::MUTED),
-            ));
-            spans.push(Span::styled(
-                " switch focus",
-                Style::default().fg(theme::MUTED),
-            ));
-            spans.push(Span::styled("   Ctrl+W", Style::default().fg(theme::MUTED)));
-            spans.push(Span::styled(
-                " toggle activity",
-                Style::default().fg(theme::MUTED),
-            ));
-        }
-        spans.push(error_part);
-        Line::from(spans)
-    };
+    let (status_line, hints_line) = build_footer_lines(
+        chat.running.is_some(),
+        latest_toast,
+        composer_starts_with_query,
+        chat.activity_hidden,
+        has_error,
+    );
 
     let help = Paragraph::new(vec![status_line, hints_line]).block(
         Block::default()

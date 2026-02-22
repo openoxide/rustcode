@@ -25,7 +25,7 @@ use self::event_stream::TuiEvent;
 use self::events::{drain_messages, poll_provider_oauth};
 use self::frame_scheduler::FrameScheduler;
 use self::git::refresh_git_stat_async;
-pub(super) use self::submit::submit_prompt;
+pub(super) use self::submit::{submit_compact, submit_prompt};
 
 /// Run the interactive TUI event loop using async `tokio::select!`.
 ///
@@ -174,6 +174,8 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
                 last_total_tokens: tokens_in + tokens_out,
                 context_limit: 0,
                 cost_usd: cost,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
                 last_max_scroll: std::cell::Cell::new(0),
                 last_transcript_wrapped_count: std::cell::Cell::new(0),
                 run_started_at: None,

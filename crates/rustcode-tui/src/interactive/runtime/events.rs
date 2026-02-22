@@ -6,6 +6,12 @@ use super::super::{
 };
 use super::git::refresh_git_stat_async;
 
+mod failure;
+mod session;
+
+use self::failure::clean_failure_message;
+use self::session::auto_rename_session;
+
 /// Drain **all** queued messages without blocking.
 ///
 /// Called on draw frames to catch up with any messages that arrived between
@@ -156,16 +162,31 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
                         output_tokens,
                         total_tokens,
                         context_limit,
-                        ..
+                        cache_read,
+                        cache_write,
                     } => {
                         chat.total_input_tokens += input_tokens;
                         chat.total_output_tokens += output_tokens;
                         chat.last_total_tokens = *total_tokens;
                         chat.context_limit = *context_limit;
+                        chat.cache_read_tokens += cache_read;
+                        chat.cache_write_tokens += cache_write;
                         // Estimate cost: ~$3/Mtok input, ~$15/Mtok output (avg across providers)
                         let step_cost = (*input_tokens as f64 * 3.0 + *output_tokens as f64 * 15.0)
                             / 1_000_000.0;
                         chat.cost_usd += step_cost;
+                        // Warn when context is getting full (≥80%)
+                        if *context_limit > 0 && *total_tokens > 0 {
+                            let pct = (*total_tokens as f64 / *context_limit as f64) * 100.0;
+                            if pct >= 80.0 {
+                                push_toast(
+                                    state,
+                                    ToastVariant::Warning,
+                                    format!("context {pct:.0}% full — use /compact to free tokens"),
+                                    Duration::from_secs(5),
+                                );
+                            }
+                        }
                         None
                     }
                     EventPayload::PlanUpdate { title, steps } => {
@@ -472,145 +493,4 @@ pub(super) fn poll_provider_oauth(state: &mut AppState) {
             }
         }
     }
-}
-
-/// Convert a raw executor/LLM error string into a short, actionable message
-/// suitable for the status footer and toast notification.
-///
-/// The full technical detail is preserved in `ActivityItem::Failure` for
-/// debugging via Ctrl+E.  The pattern matching targets the `{kind:?}` Debug
-/// representations embedded by `LlmError::Classified`'s Display impl.
-fn clean_failure_message(msg: &str) -> String {
-    let lower = msg.to_lowercase();
-
-    // Auth failures — API key missing or rejected
-    if lower.contains("authfailed")
-        || lower.contains("authentication failed")
-        || lower.contains("invalid api key")
-        || lower.contains("invalid_api_key")
-        || lower.contains("unauthorized")
-        || lower.contains("api key")
-        || (lower.contains("401") && lower.contains("provider"))
-    {
-        return "Authentication failed — connect your provider in /providers (Ctrl+A)".to_string();
-    }
-
-    // Rate limit / quota exhausted
-    if lower.contains("ratelimit")
-        || lower.contains("rate limit")
-        || lower.contains("too many requests")
-        || lower.contains("quota")
-        || lower.contains("429")
-    {
-        return "Rate limit or usage quota reached — please wait before retrying".to_string();
-    }
-
-    // Context window overflow
-    if lower.contains("contextoverflow")
-        || lower.contains("context limit")
-        || lower.contains("context_length_exceeded")
-        || lower.contains("context window")
-        || lower.contains("maximum context")
-    {
-        return "Context limit exceeded — use /compact or send a shorter message".to_string();
-    }
-
-    // Provider service temporarily unavailable
-    if lower.contains("serviceunavailable")
-        || lower.contains("service unavailable")
-        || lower.contains("temporarily unavailable")
-        || lower.contains("overloaded")
-        || lower.contains("internal server error")
-        || lower.contains("500")
-        || lower.contains("502")
-        || lower.contains("503")
-    {
-        return "Provider temporarily unavailable — please try again".to_string();
-    }
-
-    // Invalid request
-    if lower.contains("invalidrequest") {
-        return "Request rejected by provider — see activity for details".to_string();
-    }
-
-    // Config / no executor — no provider connected
-    if lower.contains("configuration error")
-        || lower.contains("not set")
-        || lower.contains("api key env")
-        || lower.contains("executor not available")
-        || lower.contains("llm init failed")
-    {
-        return "No provider connected — use /providers (Ctrl+A) to connect one".to_string();
-    }
-
-    // Specific timeout patterns (before generic network catch-all)
-    if lower.contains("timed out waiting for provider response chunk") {
-        return "Stream timed out — model may be slow to respond, try again".to_string();
-    }
-    if lower.contains("timed out waiting for provider response headers") {
-        return "Connection timed out — provider did not respond, retries exhausted".to_string();
-    }
-
-    // Connection errors
-    if lower.contains("connection reset") || lower.contains("connection refused") {
-        return "Connection lost — check your network and try again".to_string();
-    }
-
-    // Generic network / transport errors
-    if lower.contains("network error")
-        || lower.contains("connection")
-        || lower.contains("timed out")
-        || lower.contains("transport")
-    {
-        return "Network error — check your connection and try again".to_string();
-    }
-
-    // Generic: strip "provider error (X): " prefix to expose the clean body
-    if let Some(idx) = msg.find("): ") {
-        let rest = msg[idx + 3..].trim();
-        if !rest.is_empty() && rest.len() < 120 {
-            return format!("Request failed: {rest}");
-        }
-    }
-
-    // Last resort: return as-is but capped at 120 chars
-    let capped: String = msg.chars().take(120).collect();
-    if capped.len() < msg.len() {
-        format!("{capped}…")
-    } else {
-        capped
-    }
-}
-
-/// Auto-rename an untitled session from the first user message.
-///
-/// Runs on a blocking thread — performs disk I/O via `update_session_title`.
-fn auto_rename_session(
-    backend: &dyn crate::SessionBackend,
-    session_id: &str,
-    session_model: &str,
-    _live_reasoning: &str,
-    messages: Option<&[rustcode_core::StoredMessage]>,
-) -> Option<rustcode_core::SessionInfo> {
-    let messages = messages?;
-    let first_user = messages.iter().find(|m| m.role == MessageRole::User)?;
-    let text = first_user.content.as_str()?;
-    let clean = text.trim().replace('\n', " ");
-    if clean.is_empty() {
-        return None;
-    }
-    let title = if clean.chars().count() > 50 {
-        let short: String = clean.chars().take(50).collect();
-        if let Some(pos) = short.rfind(' ') {
-            format!("{}…", &short[..pos])
-        } else {
-            format!("{short}…")
-        }
-    } else {
-        clean
-    };
-    let mut info = backend.update_session_title(session_id, Some(title)).ok()?;
-    // Renaming must never alter the active model label.
-    info.model = session_model.to_string();
-    Some(info)
 }

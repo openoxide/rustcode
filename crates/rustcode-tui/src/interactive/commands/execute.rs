@@ -78,6 +78,8 @@ pub(crate) fn execute_command(state: &mut AppState, id: CommandId) {
                 last_total_tokens: 0,
                 context_limit: 0,
                 cost_usd: 0.0,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
                 last_max_scroll: std::cell::Cell::new(0),
                 last_transcript_wrapped_count: std::cell::Cell::new(0),
                 run_started_at: None,
@@ -397,6 +399,64 @@ pub(crate) fn execute_command(state: &mut AppState, id: CommandId) {
             state.modal = Some(Modal::ModeSelect {
                 selected: state.approval_mode as usize,
             });
+        }
+        CommandId::Compact => {
+            let Screen::Chat(mut chat) = std::mem::replace(&mut state.screen, Screen::Sessions)
+            else {
+                push_toast(
+                    state,
+                    ToastVariant::Warning,
+                    "open a session first",
+                    Duration::from_secs(3),
+                );
+                return;
+            };
+            super::super::submit_compact(state, &mut chat, None);
+            state.screen = Screen::Chat(chat);
+        }
+        CommandId::ClearContext => {
+            let Screen::Chat(mut chat) = std::mem::replace(&mut state.screen, Screen::Sessions)
+            else {
+                push_toast(
+                    state,
+                    ToastVariant::Warning,
+                    "open a session first",
+                    Duration::from_secs(3),
+                );
+                return;
+            };
+            // Clear on-disk messages
+            if let Err(err) = state.backend.clear_messages(&chat.session.id) {
+                push_toast(state, ToastVariant::Error, err, Duration::from_secs(4));
+                state.screen = Screen::Chat(chat);
+                return;
+            }
+            // Reset TUI state
+            chat.messages.clear();
+            chat.live_assistant.clear();
+            chat.live_reasoning.clear();
+            chat.activity.clear();
+            chat.activity_selected = 0;
+            chat.scroll = 0;
+            chat.total_input_tokens = 0;
+            chat.total_output_tokens = 0;
+            chat.last_total_tokens = 0;
+            chat.context_limit = 0;
+            chat.cost_usd = 0.0;
+            chat.cache_read_tokens = 0;
+            chat.cache_write_tokens = 0;
+            chat.plan_title = None;
+            chat.plan_steps.clear();
+            chat.todos.clear();
+            chat.find = None;
+            chat.committed_approvals.clear();
+            push_toast(
+                state,
+                ToastVariant::Success,
+                "context cleared",
+                Duration::from_secs(2),
+            );
+            state.screen = Screen::Chat(chat);
         }
     }
 }

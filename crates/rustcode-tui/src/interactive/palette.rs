@@ -196,6 +196,34 @@ pub(super) fn build_command_items(
     });
 
     items.push(CommandItem {
+        id: CommandId::Compact,
+        title: "Compact context".to_string(),
+        detail: "Summarize conversation to free tokens  /compact".to_string(),
+        enabled: in_chat && !chat_running,
+        disabled_reason: if !in_chat {
+            Some("Open a session first".to_string())
+        } else if chat_running {
+            Some("Cannot compact while running".to_string())
+        } else {
+            None
+        },
+    });
+
+    items.push(CommandItem {
+        id: CommandId::ClearContext,
+        title: "Clear context".to_string(),
+        detail: "Reset conversation, keep session  /clear context".to_string(),
+        enabled: in_chat && !chat_running,
+        disabled_reason: if !in_chat {
+            Some("Open a session first".to_string())
+        } else if chat_running {
+            Some("Cannot clear while running".to_string())
+        } else {
+            None
+        },
+    });
+
+    items.push(CommandItem {
         id: CommandId::Quit,
         title: "Quit".to_string(),
         detail: "Exit the app  Ctrl+C twice".to_string(),
@@ -399,6 +427,14 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
                 .and_then(|s| s.title.clone())
                 .unwrap_or_else(|| session_id.clone());
             state.modal = Some(Modal::DeleteConfirm { session_id, title });
+            true
+        }
+        "compact" => {
+            execute_command(state, CommandId::Compact);
+            true
+        }
+        "clear" => {
+            execute_command(state, CommandId::ClearContext);
             true
         }
         _ => false,

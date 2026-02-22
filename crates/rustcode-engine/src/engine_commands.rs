@@ -282,6 +282,101 @@ impl Engine {
 
         Ok(normalized)
     }
+
+    /// Run context compaction as a user-initiated command.
+    ///
+    /// Converts stored history → ChatMessage, runs `compact_context`,
+    /// saves the compacted messages back to disk, and emits the summary.
+    async fn run_compact(
+        &self,
+        history: Vec<StoredMessage>,
+        focus: Option<String>,
+        context: &CommandContext,
+        publisher: Arc<dyn EventPublisher>,
+    ) -> Result<(), ExecutionError> {
+        use crate::agent_util::stored_messages_to_chat;
+
+        if history.is_empty() {
+            self.emit(
+                publisher,
+                EventScope::Command,
+                EventPayload::OutputChunk {
+                    text: "nothing to compact — conversation is empty".to_string(),
+                },
+                context,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let mut messages = stored_messages_to_chat(history);
+
+        // Inject a focus hint as a user message before compacting so the
+        // summarization LLM prioritises the requested area.
+        if let Some(ref focus_text) = focus {
+            messages.push(rustcode_llm::ChatMessage {
+                role: rustcode_llm::ChatRole::User,
+                content: Value::String(format!(
+                    "When summarising, focus especially on: {focus_text}"
+                )),
+                tool_call_id: None,
+                tool_name: None,
+                tool_calls: Vec::new(),
+            });
+        }
+
+        let before = messages.len();
+        self.compact_context(&mut messages, context).await?;
+        let after = messages.len();
+
+        // Save the compacted messages back to disk by clearing the session
+        // and re-recording each message.
+        let store = SessionStore::open_default();
+        if let Err(err) = store.clear_messages(&context.session.session_id) {
+            tracing::warn!("failed to clear messages during compact: {err}");
+        }
+        for msg in &messages {
+            let stored = StoredMessage {
+                id: self.new_message_id(),
+                role: match msg.role {
+                    rustcode_llm::ChatRole::System => MessageRole::System,
+                    rustcode_llm::ChatRole::User => MessageRole::User,
+                    rustcode_llm::ChatRole::Assistant => MessageRole::Assistant,
+                    rustcode_llm::ChatRole::Tool => MessageRole::Tool,
+                },
+                created_at_unix_ms: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as i64)
+                    .unwrap_or(0),
+                content: msg.content.clone(),
+                reasoning: None,
+                tool_call_id: msg.tool_call_id.clone(),
+                tool_name: msg.tool_name.clone(),
+                tool_calls: msg
+                    .tool_calls
+                    .iter()
+                    .map(|call| rustcode_core::session::StoredToolCall {
+                        id: call.id.clone(),
+                        name: call.name.clone(),
+                        arguments: call.arguments.clone(),
+                    })
+                    .collect(),
+            };
+            let _ = store.append_message(&context.session.session_id, &stored);
+        }
+
+        self.emit(
+            publisher,
+            EventScope::Command,
+            EventPayload::OutputChunk {
+                text: format!(
+                    "context compacted: {before} messages → {after} messages"
+                ),
+            },
+            context,
+        )
+        .await
+    }
 }
 
 #[async_trait]
@@ -370,6 +465,10 @@ impl CommandExecutor for Engine {
                 }
 
                 result
+            }
+            Command::Compact { history, focus } => {
+                self.run_compact(history, focus, &context, publisher.clone())
+                    .await
             }
             Command::Exec { command, args } => {
                 self.run_exec(command, args, &context, publisher.clone())

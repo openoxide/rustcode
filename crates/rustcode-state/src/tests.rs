@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rustcode_core::session::{MessageRole, StoredToolCall};
+use rustcode_core::session::{MessageRole, StoredMessage, StoredToolCall};
 
 use super::*;
 

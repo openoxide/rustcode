@@ -45,6 +45,9 @@ pub trait SessionBackend: Send + Sync {
     ) -> Result<(), String>;
 
     fn delete_session(&self, session_id: &str) -> Result<(), String>;
+
+    /// Clear all messages from a session's transcript without deleting the session.
+    fn clear_messages(&self, session_id: &str) -> Result<(), String>;
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +134,12 @@ impl SessionBackend for LocalSessionBackend {
     fn delete_session(&self, session_id: &str) -> Result<(), String> {
         self.store
             .delete_session(session_id)
+            .map_err(|err| err.to_string())
+    }
+
+    fn clear_messages(&self, session_id: &str) -> Result<(), String> {
+        self.store
+            .clear_messages(session_id)
             .map_err(|err| err.to_string())
     }
 }
@@ -278,5 +287,9 @@ impl SessionBackend for RemoteSessionBackend {
 
     fn delete_session(&self, _session_id: &str) -> Result<(), String> {
         Err("delete is not supported in tui attach mode".to_string())
+    }
+
+    fn clear_messages(&self, _session_id: &str) -> Result<(), String> {
+        Err("clear is not supported in tui attach mode".to_string())
     }
 }

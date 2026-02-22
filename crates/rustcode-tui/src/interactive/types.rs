@@ -315,6 +315,10 @@ pub(super) enum CommandId {
     ViewMemory,
     /// Cycle through approval modes (Normal → Accept Edits → YOLO → Plan).
     CycleMode,
+    /// Compact context by summarizing history via LLM.
+    Compact,
+    /// Clear conversation context (keep session).
+    ClearContext,
 }
 
 #[derive(Debug, Clone)]
@@ -380,6 +384,10 @@ pub(super) struct ChatState {
     pub(super) context_limit: u64,
     /// Estimated cumulative cost in USD.
     pub(super) cost_usd: f64,
+    /// Cumulative cache read tokens.
+    pub(super) cache_read_tokens: u64,
+    /// Cumulative cache write tokens.
+    pub(super) cache_write_tokens: u64,
     /// Last `max_scroll` value computed by the render pass — updated each frame
     /// via `Cell` interior mutability so the scroll event handler can clamp
     /// `scroll` immediately without phantom over-scrolling.

@@ -73,7 +73,7 @@ use render_approval::{
 use render_main::render;
 use render_modals::{centered_rect, render_help_modal, render_modal};
 use render_provider::render_provider_manager_modal;
-use runtime::submit_prompt;
+use runtime::{submit_compact, submit_prompt};
 use state::{
     compute_sessions_view, drain_toasts, format_age, push_toast, sort_sessions,
     transcript_area_height,

@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn missing_subcommand_can_be_mapped_to_tui() {
+    let err = Cli::try_parse_from(["rustcode"]).expect_err("must fail before fallback");
+    assert!(matches!(
+        err.kind(),
+        clap::error::ErrorKind::MissingSubcommand
+            | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+    ));
+
+    let cli = Cli::try_parse_from(["rustcode", "tui"]).expect("tui fallback should parse");
+    match cli.command {
+        TopCommand::Tui(_) => {}
+        _ => panic!("expected tui command"),
+    }
+}
+
+#[test]
 fn invalid_command_is_rejected() {
     let err = Cli::try_parse_from(["rustcode", "not-a-command"]).expect_err("must fail");
     let message = err.to_string();

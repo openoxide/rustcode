@@ -155,3 +155,95 @@ pub(crate) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
         abort_handle: run_task.abort_handle(),
     });
 }
+
+/// Submit a compact command to the engine to summarize context.
+///
+/// Like `submit_prompt`, but sends `Command::Compact` instead of an agent prompt.
+pub(crate) fn submit_compact(
+    state: &mut AppState,
+    chat: &mut ChatState,
+    focus: Option<String>,
+) {
+    let Some(config) = state.config.clone() else {
+        push_toast(
+            state,
+            ToastVariant::Error,
+            "config not loaded",
+            Duration::from_secs(4),
+        );
+        return;
+    };
+    let Some(executor) = state.executor.clone() else {
+        push_toast(
+            state,
+            ToastVariant::Error,
+            "LLM executor not available",
+            Duration::from_secs(4),
+        );
+        return;
+    };
+
+    let history = match state.backend.load_messages(&chat.session.id) {
+        Ok(h) => h,
+        Err(err) => {
+            push_toast(
+                state,
+                ToastVariant::Error,
+                format!("failed to load history: {err}"),
+                Duration::from_secs(4),
+            );
+            return;
+        }
+    };
+
+    if history.is_empty() {
+        push_toast(
+            state,
+            ToastVariant::Info,
+            "nothing to compact — conversation is empty",
+            Duration::from_secs(3),
+        );
+        return;
+    }
+
+    let cancellation = CancellationToken::new();
+    chat.run_started_at = Some(std::time::Instant::now());
+    chat.last_run_elapsed = None;
+    chat.scroll = 0;
+    state.status = None;
+    chat.live_assistant.clear();
+    chat.activity.clear();
+    chat.activity_selected = 0;
+
+    state.request_seq = state.request_seq.saturating_add(1);
+    let seq = state.request_seq;
+    let session_id = chat.session.id.clone();
+    let request_id = format!("tui-compact-{seq}");
+
+    let tx = state.tx.clone();
+    let publisher: Arc<dyn EventPublisher> = Arc::new(TuiPublisher::new(tx.clone()));
+    let cancellation_for_task = cancellation.clone();
+    let run_task = tokio::spawn(async move {
+        let context = CommandContext::with_cancellation(
+            config,
+            SessionMeta {
+                session_id,
+                request_id,
+                started_at: SystemTime::now(),
+            },
+            cancellation_for_task,
+        );
+
+        let command = Command::Compact { history, focus };
+        let result = executor.execute(command, context, publisher).await;
+        let (ok, message) = match result {
+            Ok(()) => (true, None),
+            Err(err) => (false, Some(err.to_string())),
+        };
+        let _ = tx.send(InteractiveMsg::RunEnded { ok, message });
+    });
+    chat.running = Some(RunningCommand {
+        cancellation,
+        abort_handle: run_task.abort_handle(),
+    });
+}

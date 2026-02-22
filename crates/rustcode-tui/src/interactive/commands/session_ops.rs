@@ -104,6 +104,8 @@ pub(crate) fn open_session(state: &mut AppState, session: SessionInfo) {
         total_output_tokens: session.total_output_tokens,
         last_total_tokens: session.total_input_tokens + session.total_output_tokens,
         cost_usd: session.cost_usd,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
         session,
         messages,
         scroll: 0,
