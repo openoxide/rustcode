@@ -110,9 +110,7 @@ pub(super) fn render_provider_manager_modal(
                 .saturating_add(4)
                 .saturating_add(query.chars().count() as u16);
             let y = rows[0].y.saturating_add(1);
-            if x < area.x + area.width && y < area.y + area.height {
-                frame.set_cursor_position((x, y));
-            }
+            theme::render_block_cursor(frame, x, y, area);
         }
 
         ProviderManagerStep::MethodSelect {
@@ -224,9 +222,7 @@ pub(super) fn render_provider_manager_modal(
             // Cursor position in key input field
             let cx = key_inner.x.saturating_add(*cursor as u16);
             let cy = key_inner.y;
-            if cx < area.x + area.width && cy < area.y + area.height {
-                frame.set_cursor_position((cx, cy));
-            }
+            theme::render_block_cursor(frame, cx, cy, area);
         }
 
         ProviderManagerStep::OAuthStarting {

@@ -114,7 +114,5 @@ pub(super) fn render_model_select_modal(
         .saturating_add(4)
         .saturating_add(query.chars().count() as u16);
     let y = rows[0].y.saturating_add(1);
-    if x < area.x + area.width && y < area.y + area.height {
-        frame.set_cursor_position((x, y));
-    }
+    theme::render_block_cursor(frame, x, y, area);
 }

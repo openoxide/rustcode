@@ -53,7 +53,7 @@ impl TuiEventStream {
 fn map_crossterm_event(event: CtEvent) -> Option<TuiEvent> {
     match event {
         CtEvent::Key(key) => {
-            if key.kind == KeyEventKind::Press {
+            if key.kind == KeyEventKind::Press || key.kind == KeyEventKind::Repeat {
                 Some(TuiEvent::Key(key))
             } else {
                 None
@@ -157,6 +157,20 @@ mod tests {
     fn map_converts_resize_to_draw() {
         let resize = CtEvent::Resize(80, 24);
         assert!(matches!(map_crossterm_event(resize), Some(TuiEvent::Draw)));
+    }
+
+    #[test]
+    fn map_converts_repeat_events() {
+        let repeat = CtEvent::Key(KeyEvent {
+            code: KeyCode::Backspace,
+            modifiers: KeyModifiers::NONE,
+            kind: KeyEventKind::Repeat,
+            state: crossterm::event::KeyEventState::NONE,
+        });
+        assert!(matches!(
+            map_crossterm_event(repeat),
+            Some(TuiEvent::Key(_))
+        ));
     }
 
     #[test]

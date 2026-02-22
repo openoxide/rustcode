@@ -84,6 +84,8 @@ fn make_focus_state(session: SessionInfo) -> AppState {
         },
         pending_approval: None,
         approval_selection: 0,
+        approval_mode: ApprovalMode::Normal,
+        mode_flag: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),
@@ -142,4 +144,22 @@ fn tab_does_not_change_focus_in_chat() {
         panic!("expected chat screen")
     };
     assert_eq!(chat.focus, ChatFocus::Composer);
+}
+
+#[test]
+fn shift_enter_inserts_newline_in_composer() {
+    let mut state = make_focus_state(make_session());
+    if let Screen::Chat(chat) = &mut state.screen {
+        chat.composer = "hello".to_string();
+        chat.composer_cursor = chat.composer.len();
+    }
+
+    let key = KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
+    assert!(!handle_key(&mut state, key));
+
+    let Screen::Chat(chat) = state.screen else {
+        panic!("expected chat screen")
+    };
+    assert_eq!(chat.composer, "hello\n");
+    assert_eq!(chat.composer_cursor, chat.composer.len());
 }

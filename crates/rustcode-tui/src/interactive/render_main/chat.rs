@@ -1,9 +1,9 @@
 use super::super::{
     apply_find_highlight, approval_options_count, build_transcript_lines, composer_cursor_visual,
     render_activity, render_activity_details_modal, render_approval_inline,
-    render_approval_selector, AppState, Block, Borders, ChatFocus, ChatState, Clear, Constraint,
-    Direction, Duration, Layout, Line, Modal, Modifier, Paragraph, Span, Style, SystemTime,
-    ToastVariant, Wrap,
+    render_approval_selector, word_wrap_text, AppState, ApprovalMode, Block, Borders, ChatFocus,
+    ChatState, Clear, Constraint, Direction, Duration, Layout, Line, Modal, Modifier, Paragraph,
+    Span, Style, SystemTime, ToastVariant, Wrap,
 };
 use super::{format_tokens, truncate_with_ellipsis};
 use crate::interactive::theme;
@@ -22,14 +22,20 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         .constraints(h_constraints)
         .split(frame.area());
 
-    // Dynamic composer height: expands with newlines (min 5 = 3 content + 2 borders,
-    // max 8 = 6 content + 2 borders).
-    let composer_content_lines = if chat.composer.is_empty() {
+    // Dynamic composer height: expands with content including visual wrapping.
+    // Pre-compute inner width from the left pane (frame width * percentage - 2 borders).
+    let left_pane_w = if chat.activity_hidden {
+        frame.area().width
+    } else {
+        frame.area().width * 72 / 100
+    };
+    let composer_inner_w = left_pane_w.saturating_sub(2).max(1) as usize;
+    let composer_visual_lines = if chat.composer.is_empty() {
         1
     } else {
-        chat.composer.split('\n').count().max(1)
+        word_wrap_text(&chat.composer, composer_inner_w).len()
     };
-    let composer_height = (composer_content_lines as u16 + 2).clamp(5, 8);
+    let composer_height = (composer_visual_lines as u16 + 2).max(5);
 
     // When the approval selector is shown, enlarge the bottom pane to fit
     // the vertical option list (options + hint line + 2 borders).
@@ -43,15 +49,16 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     let left = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(1),
-            Constraint::Length(bottom_height),
-            Constraint::Length(3),
+            Constraint::Min(1),                // [0] transcript
+            Constraint::Length(1),             // [1] mode bar
+            Constraint::Length(bottom_height), // [2] composer / approval
+            Constraint::Length(3),             // [3] status bar
         ])
         .split(root[0]);
 
     // Extract provider name from config or model string (e.g., "openrouter" or "opencode/gpt-4o")
     let provider_label = {
-        let mut provider_str = app.defaults.provider.as_str();
+        let mut provider_str = app.defaults.provider.trim();
         if provider_str.is_empty() {
             let model = app.defaults.model.as_str();
             if let Some((p, _)) = model.split_once('/') {
@@ -61,19 +68,18 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             }
         }
 
-        if provider_str.eq_ignore_ascii_case("openai") {
-            "OpenAI".to_string()
+        if provider_str.is_empty() || provider_str.eq_ignore_ascii_case("null") {
+            None
+        } else if provider_str.eq_ignore_ascii_case("openai") {
+            Some("OpenAI".to_string())
         } else {
             // Title-case the provider name
             let mut chars = provider_str.chars();
-            match chars.next() {
-                Some(first) => {
-                    let mut s = first.to_uppercase().to_string();
-                    s.extend(chars);
-                    s
-                }
-                None => app.defaults.model.clone(),
-            }
+            chars.next().map(|first| {
+                let mut s = first.to_uppercase().to_string();
+                s.extend(chars);
+                s
+            })
         }
     };
     // Build transcript title spans with distinct colors per metric.
@@ -211,13 +217,48 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
     frame.render_widget(Clear, left[0]);
     frame.render_widget(transcript, left[0]);
 
+    // ─── Mode bar (1 row between transcript and composer) ────────────────
+    {
+        let mode = app.approval_mode;
+        let mode_style = match mode {
+            ApprovalMode::Yolo => Style::default()
+                .fg(theme::WARNING)
+                .add_modifier(Modifier::BOLD),
+            ApprovalMode::AcceptEdits => Style::default()
+                .fg(theme::WARNING)
+                .add_modifier(Modifier::BOLD),
+            ApprovalMode::Plan => Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+            ApprovalMode::Normal => Style::default()
+                .fg(theme::ACCENT)
+                .add_modifier(Modifier::BOLD),
+        };
+        let icon_label = format!("{} {}", mode.icon(), mode.label());
+        let hint = "(Shift + Tab)";
+        let mode_line = Line::from(vec![
+            Span::raw(" "),
+            Span::styled(icon_label, mode_style),
+            Span::raw(" "),
+            Span::styled(
+                hint,
+                Style::default()
+                    .fg(theme::MUTED)
+                    .add_modifier(Modifier::DIM),
+            ),
+        ]);
+        frame.render_widget(Paragraph::new(mode_line), left[1]);
+    }
+
     let model_label = if chat.session.model.trim().is_empty() {
         app.defaults.model.as_str()
     } else {
         chat.session.model.as_str()
     };
     let model_label_display = truncate_with_ellipsis(model_label, 36);
-    let provider_label_display = truncate_with_ellipsis(&provider_label, 18);
+    let provider_label_display = provider_label
+        .as_deref()
+        .map(|label| truncate_with_ellipsis(label, 18));
 
     let mut composer_title_spans = vec![
         Span::styled("</>", Style::default().add_modifier(Modifier::BOLD)),
@@ -228,14 +269,16 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                 .fg(theme::SUCCESS)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::raw("  "),
-        Span::styled(
+    ];
+    if let Some(provider_label_display) = provider_label_display {
+        composer_title_spans.push(Span::raw("  "));
+        composer_title_spans.push(Span::styled(
             format!("[{provider_label_display}]"),
             Style::default()
                 .fg(theme::INFO)
                 .add_modifier(Modifier::BOLD),
-        ),
-    ];
+        ));
+    }
     // Show character count when the composer has content
     if !chat.composer.is_empty() {
         composer_title_spans.push(Span::raw("  "));
@@ -264,9 +307,9 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         Style::default()
     };
     if let Some(pending) = &app.pending_approval {
-        render_approval_selector(frame, left[1], &pending.request, app.approval_selection);
+        render_approval_selector(frame, left[2], &pending.request, app.approval_selection);
     } else {
-        let composer_area = left[1];
+        let composer_area = left[2];
         let inner_w = composer_area.width.saturating_sub(2);
         let inner_h = composer_area.height.saturating_sub(2);
         let (cursor_row, cursor_col) = if chat.focus == ChatFocus::Composer {
@@ -316,14 +359,22 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
         }
 
         let composer_inner = composer_block.inner(composer_area);
-        let composer = Paragraph::new(composer_text)
-            .style(composer_style)
-            .block(composer_block)
-            .wrap(Wrap { trim: false })
-            .scroll((composer_scroll as u16, 0));
+        // Manually character-wrap the composer text so the visual layout
+        // matches `composer_cursor_visual` exactly.  Using ratatui's
+        // `Wrap { trim: false }` would word-wrap, causing a mismatch
+        // between the computed cursor position and the rendered text when
+        // the composer is narrow (e.g. activity panel open).
+        let wrapped_lines = word_wrap_text(composer_text, inner_w.max(1) as usize);
+        let visible: Vec<Line<'_>> = wrapped_lines
+            .into_iter()
+            .skip(composer_scroll)
+            .take(inner_h as usize)
+            .map(|s| Line::from(Span::styled(s, composer_style)))
+            .collect();
+        let composer = Paragraph::new(visible).block(composer_block);
         frame.render_widget(composer, composer_area);
 
-        // Show cursor when composing, even if the slash-help popup is open.
+        // Render a block cursor when composing (reversed cell at cursor position).
         let slash_help_open = matches!(&app.modal, Some(Modal::SlashHelp { .. }));
         if chat.focus == ChatFocus::Composer
             && !app.help_open
@@ -334,11 +385,7 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             let y = composer_inner
                 .y
                 .saturating_add((cursor_row.saturating_sub(composer_scroll)) as u16);
-            if x < composer_area.x + composer_area.width
-                && y < composer_area.y + composer_area.height
-            {
-                frame.set_cursor_position((x, y));
-            }
+            theme::render_block_cursor(frame, x, y, composer_area);
         }
     }
 
@@ -483,7 +530,20 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
                     .add_modifier(Modifier::DIM),
             ),
         ];
-        if !chat.activity_hidden {
+        if chat.activity_hidden {
+            spans.push(Span::styled(
+                "   Ctrl+W",
+                Style::default()
+                    .fg(theme::MUTED)
+                    .add_modifier(Modifier::DIM),
+            ));
+            spans.push(Span::styled(
+                " open activity",
+                Style::default()
+                    .fg(theme::MUTED)
+                    .add_modifier(Modifier::DIM),
+            ));
+        } else {
             spans.push(Span::styled(
                 "   Alt+Tab",
                 Style::default().fg(theme::MUTED),
@@ -507,12 +567,23 @@ pub(super) fn render_chat(frame: &mut ratatui::Frame<'_>, app: &AppState, chat: 
             .borders(Borders::TOP)
             .border_style(Style::default().fg(theme::MUTED)),
     );
-    frame.render_widget(help, left[2]);
+    frame.render_widget(help, left[3]);
 
     if !chat.activity_hidden {
-        render_activity(frame, root[1], chat);
+        // Constrain the activity panel to not extend below the status bar.
+        // The status bar (3 rows) + mode bar (1 row) occupy the bottom of the left pane.
+        let activity_area = {
+            let full = root[1];
+            let status_h = 3u16 + 1; // status bar + mode bar
+            let h = full.height.saturating_sub(status_h);
+            ratatui::layout::Rect::new(full.x, full.y, full.width, h)
+        };
+        render_activity(frame, activity_area, chat);
     }
     if chat.details_open {
         render_activity_details_modal(frame, chat);
     }
 }
+
+// `word_wrap_text` lives in composer.rs alongside `composer_cursor_visual`
+// so the wrapping logic stays in one place.

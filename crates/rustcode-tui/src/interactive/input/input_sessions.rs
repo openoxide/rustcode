@@ -64,7 +64,7 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                         activity: VecDeque::new(),
                         activity_selected: 0,
                         details_open: false,
-                        activity_hidden: false,
+                        activity_hidden: true,
                         tool_details: false,
                         output_details: false,
                         find: None,
@@ -124,6 +124,9 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
         }
         KeyCode::Char('d' | 'D') if ctrl => {
             execute_command(state, CommandId::DeleteSession);
+        }
+        KeyCode::Char('f' | 'F') if ctrl => {
+            state.sessions_filter_active = true;
         }
         KeyCode::Char('r' | 'R') if ctrl => {
             execute_command(state, CommandId::Refresh);
@@ -192,7 +195,7 @@ pub(super) fn handle_sessions_key(state: &mut AppState, key: KeyEvent) -> bool {
                 activity: VecDeque::new(),
                 activity_selected: 0,
                 details_open: false,
-                activity_hidden: false,
+                activity_hidden: true,
                 tool_details: false,
                 output_details: false,
                 find: None,

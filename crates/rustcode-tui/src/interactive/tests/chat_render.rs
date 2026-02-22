@@ -112,6 +112,8 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
 
         pending_approval: None,
         approval_selection: 0,
+        approval_mode: ApprovalMode::Normal,
+        mode_flag: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),
@@ -138,8 +140,8 @@ fn chat_screen_renders_tool_messages_and_toggle_label() {
     assert!(text.contains("read"), "text={text}");
     assert!(text.contains("(ctrl+o to expand)"), "text={text}");
     assert!(text.contains("model:null"), "text={text}");
-    assert!(text.contains("[Null]"), "text={text}"); // provider label
-                                                     // "ok=true" and "Output:" were removed in the new compact rendering
+    assert!(!text.contains("[Null]"), "text={text}"); // null provider is hidden
+                                                      // "ok=true" and "Output:" were removed in the new compact rendering
     assert!(!text.contains("ok=true"), "text={text}");
     assert!(!text.contains("Output:"), "text={text}");
 
@@ -254,6 +256,8 @@ fn chat_screen_hides_system_messages() {
         },
         pending_approval: None,
         approval_selection: 0,
+        approval_mode: ApprovalMode::Normal,
+        mode_flag: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),

@@ -25,9 +25,19 @@ pub(super) fn render(frame: &mut ratatui::Frame<'_>, state: &AppState) {
 }
 
 pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) {
+    // Layout: list + optional search bar + footer
+    let search_h = if state.sessions_filter_active {
+        3u16
+    } else {
+        0
+    };
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(3)])
+        .constraints([
+            Constraint::Min(1),
+            Constraint::Length(search_h),
+            Constraint::Length(3),
+        ])
         .split(frame.area());
 
     let items = if state.sessions_view.is_empty() {
@@ -107,28 +117,43 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
     }
     frame.render_stateful_widget(list, chunks[0], &mut list_state);
 
+    // ─── Search bar (visible when filter is active) ────────────────────────────
+    if state.sessions_filter_active {
+        let search_text = if state.sessions_filter.is_empty() {
+            "Search sessions..."
+        } else {
+            state.sessions_filter.as_str()
+        };
+        let search_style = if state.sessions_filter.is_empty() {
+            Style::default().add_modifier(Modifier::DIM)
+        } else {
+            Style::default()
+        };
+        let search_block = Block::default()
+            .title(Span::styled(
+                "Search",
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD),
+            ))
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(theme::BORDER_FOCUS));
+        let search_inner = search_block.inner(chunks[1]);
+        let search = Paragraph::new(Span::styled(search_text, search_style)).block(search_block);
+        frame.render_widget(search, chunks[1]);
+
+        // Block cursor in search bar.
+        let filter_len = state.sessions_filter.chars().count() as u16;
+        let cx = search_inner.x.saturating_add(filter_len);
+        let cy = search_inner.y;
+        theme::render_block_cursor(frame, cx, cy, chunks[1]);
+    }
+
     // ─── Footer: 2-line layout matching chat screen ───────────────────────────
     let model_label = state.defaults.model.as_str();
 
-    // Line 1: contextual status — filter mode, error/toast, or just model label
-    let (main_text, main_style) = if state.sessions_filter_active {
-        let text = if state.sessions_filter.is_empty() {
-            " filter: ".to_string()
-        } else {
-            format!(" filter: {}", state.sessions_filter)
-        };
-        (
-            text,
-            Style::default()
-                .fg(theme::ACCENT)
-                .add_modifier(Modifier::BOLD),
-        )
-    } else if !state.sessions_filter.is_empty() {
-        (
-            format!(" filter:{}", state.sessions_filter),
-            Style::default().fg(theme::ACCENT),
-        )
-    } else if let Some(toast) = state.toasts.last() {
+    // Line 1: contextual status — toast or model label
+    let (main_text, main_style) = if let Some(toast) = state.toasts.last() {
         let style = match toast.variant {
             ToastVariant::Info => Style::default().fg(theme::ACCENT),
             ToastVariant::Success => Style::default().fg(theme::SUCCESS),
@@ -149,37 +174,22 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
         ),
     ]);
 
-    // Line 2: key hints — filter-mode aware, styled like chat screen compact hints
+    // Line 2: key hints
     let hints_line = if state.sessions_filter_active {
         Line::from(vec![
-            Span::styled(
-                " Enter",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":open  ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                "Esc",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":clear  ", Style::default().fg(theme::MUTED)),
-            Span::styled(
-                "↑↓",
-                Style::default()
-                    .fg(theme::ACCENT)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(":select", Style::default().fg(theme::MUTED)),
+            Span::styled(" Esc", Style::default().fg(theme::MUTED)),
+            Span::styled(" close", Style::default().fg(theme::MUTED)),
+            Span::styled("   Enter", Style::default().fg(theme::MUTED)),
+            Span::styled(" open", Style::default().fg(theme::MUTED)),
+            Span::styled("   ↓", Style::default().fg(theme::MUTED)),
+            Span::styled(" select", Style::default().fg(theme::MUTED)),
         ])
     } else {
         Line::from(vec![
             Span::styled(" Ctrl+P", Style::default().fg(theme::MUTED)),
             Span::styled(" cmds", Style::default().fg(theme::MUTED)),
-            Span::styled("   /", Style::default().fg(theme::MUTED)),
-            Span::styled(" filter", Style::default().fg(theme::MUTED)),
+            Span::styled("   Ctrl+F", Style::default().fg(theme::MUTED)),
+            Span::styled(" search", Style::default().fg(theme::MUTED)),
             Span::styled("   N", Style::default().fg(theme::MUTED)),
             Span::styled(" new", Style::default().fg(theme::MUTED)),
             Span::styled("   E", Style::default().fg(theme::MUTED)),
@@ -200,7 +210,7 @@ pub(super) fn render_sessions(frame: &mut ratatui::Frame<'_>, state: &AppState) 
             .borders(Borders::TOP)
             .border_style(Style::default().fg(theme::BORDER)),
     );
-    frame.render_widget(footer, chunks[1]);
+    frame.render_widget(footer, chunks[2]);
 }
 
 /// Format a number with comma separators (e.g., 19674 → "19,674").

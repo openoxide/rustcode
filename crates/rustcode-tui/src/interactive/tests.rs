@@ -67,6 +67,8 @@ fn sessions_screen_renders_title_and_help() {
 
         pending_approval: None,
         approval_selection: 0,
+        approval_mode: ApprovalMode::Normal,
+        mode_flag: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),

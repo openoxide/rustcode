@@ -87,6 +87,8 @@ fn make_state(session: SessionInfo, pending: PendingApproval, width: u16, height
         },
         pending_approval: Some(pending),
         approval_selection: 0,
+        approval_mode: ApprovalMode::Normal,
+        mode_flag: Arc::new(std::sync::atomic::AtomicU8::new(0)),
         submit_mode: InteractiveSubmitMode::Agent,
         backend: Arc::new(LocalSessionBackend::new(SessionStore::with_root(
             std::path::PathBuf::from("/tmp"),

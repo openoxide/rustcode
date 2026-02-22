@@ -119,7 +119,7 @@ pub(crate) fn open_session(state: &mut AppState, session: SessionInfo) {
         activity: VecDeque::new(),
         activity_selected: 0,
         details_open: false,
-        activity_hidden: false,
+        activity_hidden: true,
         tool_details: false,
         output_details: false,
         find: None,
