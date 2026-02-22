@@ -1,3 +1,4 @@
+use super::super::ApprovalMode;
 use super::input_memory::handle_memory_key;
 use super::input_pm::handle_provider_manager_key;
 use super::input_provider::handle_model_select_key;
@@ -446,6 +447,33 @@ pub(super) fn handle_modal_key(state: &mut AppState, key: KeyEvent) {
         Modal::MemoryViewer { .. } | Modal::MemoryClearConfirm => {
             handle_memory_key(state, modal, key);
         }
+        Modal::ModeSelect { mut selected } => match key.code {
+            KeyCode::Esc => {}
+            KeyCode::Up | KeyCode::Char('k') => {
+                selected = selected.checked_sub(1).unwrap_or(ApprovalMode::COUNT - 1);
+                state.modal = Some(Modal::ModeSelect { selected });
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                selected = (selected + 1) % ApprovalMode::COUNT;
+                state.modal = Some(Modal::ModeSelect { selected });
+            }
+            KeyCode::Enter => {
+                let new_mode = ApprovalMode::from_u8(selected as u8);
+                if new_mode != state.approval_mode {
+                    let screen = std::mem::replace(&mut state.screen, Screen::Sessions);
+                    if let Screen::Chat(mut chat) = screen {
+                        super::super::set_approval_mode(state, new_mode, Some(&mut chat));
+                        state.screen = Screen::Chat(chat);
+                    } else {
+                        state.screen = screen;
+                        super::super::set_approval_mode(state, new_mode, None);
+                    }
+                }
+            }
+            _ => {
+                state.modal = Some(Modal::ModeSelect { selected });
+            }
+        },
         Modal::DeleteConfirm { session_id, title } => match key.code {
             KeyCode::Esc | KeyCode::Char('n') => {}
             KeyCode::Char('y') => match state.backend.delete_session(&session_id) {

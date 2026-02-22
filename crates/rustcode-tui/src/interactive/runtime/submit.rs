@@ -114,6 +114,7 @@ pub(crate) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
     let tx = state.tx.clone();
     let publisher: Arc<dyn EventPublisher> = Arc::new(TuiPublisher::new(tx.clone()));
     let submit_mode = state.submit_mode;
+    let mode_hint = state.approval_mode.mode_hint();
     let cancellation_for_task = cancellation.clone();
     let run_task = tokio::spawn(async move {
         let context = CommandContext::with_cancellation(
@@ -132,6 +133,7 @@ pub(crate) fn submit_prompt(state: &mut AppState, chat: &mut ChatState, prompt: 
                     allow_write: true,
                     allow_edit: true,
                     allow_exec: true,
+                    mode_hint: Some(mode_hint),
                     ..AgentOptions::default()
                 };
                 Command::Agent {

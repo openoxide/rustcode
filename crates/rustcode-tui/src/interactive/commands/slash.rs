@@ -135,6 +135,10 @@ pub(crate) fn handle_slash_command(
             });
             ChatNav::Stay
         }
+        "mode" => {
+            execute_command(state, CommandId::CycleMode);
+            ChatNav::Stay
+        }
         "model" => {
             execute_command(state, CommandId::SwitchModel);
             ChatNav::Stay

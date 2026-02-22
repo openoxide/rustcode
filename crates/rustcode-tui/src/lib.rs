@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -127,6 +128,8 @@ pub struct InteractiveHandles {
     pub tx: mpsc::UnboundedSender<InteractiveMsg>,
     pub rx: mpsc::UnboundedReceiver<InteractiveMsg>,
     pub approver: Arc<dyn ToolApprover>,
+    /// Shared mode flag — stores `ApprovalMode as u8` for lock-free approver access.
+    pub mode_flag: Arc<AtomicU8>,
 }
 
 impl InteractiveHandles {
@@ -134,10 +137,16 @@ impl InteractiveHandles {
     pub fn new() -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
         let policy = Arc::new(Mutex::new(ApprovalPolicy::default()));
+        let mode_flag = Arc::new(AtomicU8::new(0)); // Normal = 0
         Self {
             tx: tx.clone(),
             rx,
-            approver: Arc::new(TuiToolApprover { tx, policy }),
+            approver: Arc::new(TuiToolApprover {
+                tx,
+                policy,
+                mode_flag: Arc::clone(&mode_flag),
+            }),
+            mode_flag,
         }
     }
 }
@@ -172,6 +181,7 @@ impl EventPublisher for TuiPublisher {
 struct TuiToolApprover {
     tx: mpsc::UnboundedSender<InteractiveMsg>,
     policy: Arc<Mutex<ApprovalPolicy>>,
+    mode_flag: Arc<AtomicU8>,
 }
 
 #[derive(Debug, Default)]
@@ -218,6 +228,18 @@ fn is_command_permission(permission: &str) -> bool {
 #[async_trait::async_trait]
 impl ToolApprover for TuiToolApprover {
     async fn approve(&self, request: ToolApprovalRequest) -> Result<bool, ExecutionError> {
+        // Check the shared mode flag for fast-path approval/denial.
+        match self.mode_flag.load(Ordering::Relaxed) {
+            2 => return Ok(true),  // Yolo: auto-approve everything
+            3 => return Ok(false), // Plan: auto-deny everything (read-only)
+            1 => {
+                // AcceptEdits: auto-approve file/edit tools, prompt for commands
+                if !is_command_permission(&request.permission) {
+                    return Ok(true);
+                }
+            }
+            _ => {} // Normal: fall through to interactive approval
+        }
         {
             let policy = self.policy.lock().map_err(|_| {
                 ExecutionError::Executor("approval policy lock poisoned".to_string())
@@ -263,6 +285,9 @@ pub struct InteractiveServices {
     pub llm_cell: Option<Arc<std::sync::RwLock<Arc<dyn rustcode_llm::LlmClient>>>>,
 
     pub submit_mode: InteractiveSubmitMode,
+
+    /// Shared mode flag — owned by `InteractiveHandles`, cloned here for `AppState`.
+    pub mode_flag: Arc<AtomicU8>,
 }
 
 /// Run the interactive TUI event loop.

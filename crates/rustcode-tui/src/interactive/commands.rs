@@ -16,6 +16,7 @@ pub(super) const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/fork", "Fork current session  (Ctrl+F)"),
     ("/help", "Show keybindings and tips"),
     ("/memory", "View memory summary (full modal)"),
+    ("/mode", "Cycle approval mode  (Shift+Tab)"),
     ("/memory on", "Enable memory collection"),
     ("/memory off", "Disable memory collection"),
     ("/memory clear", "Clear all memories (with confirmation)"),

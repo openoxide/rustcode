@@ -1,8 +1,8 @@
 use rustcode_core::event::EventScope;
 
 use super::super::{
-    push_toast, ActivityItem, AppState, ChatFocus, Duration, EventPayload, GitStat, InteractiveMsg,
-    MessageRole, Modal, PendingApproval, ProviderManagerStep, Screen, ToastVariant,
+    push_toast, ActivityItem, AppState, ApprovalMode, ChatFocus, Duration, EventPayload, GitStat,
+    InteractiveMsg, MessageRole, Modal, PendingApproval, ProviderManagerStep, Screen, ToastVariant,
 };
 use super::git::refresh_git_stat_async;
 
@@ -206,8 +206,43 @@ pub(super) fn process_message(state: &mut AppState, msg: InteractiveMsg) {
             }
         }
         InteractiveMsg::ApprovalRequest { request, reply } => {
-            state.pending_approval = Some(PendingApproval { request, reply });
-            state.approval_selection = 0;
+            match state.approval_mode {
+                ApprovalMode::Yolo => {
+                    // Auto-approve everything.
+                    if let Screen::Chat(chat) = &mut screen {
+                        chat.committed_approvals.push(request);
+                    }
+                    let _ = reply.send(crate::ApprovalResponse::AllowOnce);
+                }
+                ApprovalMode::Plan => {
+                    // Auto-deny everything (read-only mode).
+                    let _ = reply.send(crate::ApprovalResponse::Deny);
+                    push_toast(
+                        state,
+                        ToastVariant::Info,
+                        format!("Plan mode — denied [{}]", request.tool),
+                        Duration::from_secs(2),
+                    );
+                }
+                ApprovalMode::AcceptEdits => {
+                    let is_cmd = super::super::approval_is_command_permission(&request.permission);
+                    if is_cmd {
+                        // Command → prompt user.
+                        state.pending_approval = Some(PendingApproval { request, reply });
+                        state.approval_selection = 0;
+                    } else {
+                        // File/edit tool → auto-approve.
+                        if let Screen::Chat(chat) = &mut screen {
+                            chat.committed_approvals.push(request);
+                        }
+                        let _ = reply.send(crate::ApprovalResponse::AllowOnce);
+                    }
+                }
+                ApprovalMode::Normal => {
+                    state.pending_approval = Some(PendingApproval { request, reply });
+                    state.approval_selection = 0;
+                }
+            }
         }
         InteractiveMsg::RunEnded { ok, message } => {
             // Phase 1: immediate state updates (non-blocking).

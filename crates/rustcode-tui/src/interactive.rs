@@ -4,16 +4,12 @@ use std::time::{Duration, SystemTime};
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crossterm::execute;
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
-use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Rect, Size};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
-use ratatui::Terminal;
 
 use tokio::task::AbortHandle;
 use tokio_util::sync::CancellationToken;
@@ -33,6 +29,7 @@ mod activity_item;
 mod commands;
 mod composer;
 mod file_search;
+mod inline_terminal;
 mod input;
 mod markdown;
 mod palette;
@@ -59,10 +56,10 @@ use composer::{
     composer_insert_str, composer_kill_line_backward, composer_kill_line_forward,
     composer_move_down, composer_move_end, composer_move_home, composer_move_left,
     composer_move_right, composer_move_up, composer_word_left, composer_word_right, history_next,
-    history_prev,
+    history_prev, word_wrap_text,
 };
 use file_search::{filter_files, scan_workspace_files};
-use input::handle_key;
+use input::{handle_key, set_approval_mode};
 use palette::{compute_palette_view, maybe_execute_palette_query, open_command_palette};
 use provider_manager::{
     build_provider_entries, filter_provider_entries, provider_connect_methods,
@@ -86,9 +83,10 @@ use transcript::{
     set_find,
 };
 use types::{
-    build_prompt_history, AppState, ChatFocus, ChatNav, ChatState, CommandId, CommandItem,
-    ConnectMethod, FindState, GitStat, Modal, PendingApproval, ProviderEntry, ProviderManagerStep,
-    ProviderOAuthDone, ProviderOAuthStarted, RunningCommand, Screen, Toast, ToastVariant,
+    build_prompt_history, AppState, ApprovalMode, ChatFocus, ChatNav, ChatState, CommandId,
+    CommandItem, ConnectMethod, FindState, GitStat, Modal, PendingApproval, ProviderEntry,
+    ProviderManagerStep, ProviderOAuthDone, ProviderOAuthStarted, RunningCommand, Screen, Toast,
+    ToastVariant,
 };
 
 pub async fn run_interactive(services: InteractiveServices) -> Result<(), TuiError> {

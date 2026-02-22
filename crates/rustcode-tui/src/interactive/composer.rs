@@ -1,6 +1,8 @@
-use super::ChatState;
 use std::time::Instant;
+
 use unicode_width::UnicodeWidthChar;
+
+use super::ChatState;
 
 fn char_display_width(ch: char) -> usize {
     if ch == '\t' {
@@ -180,28 +182,82 @@ pub(super) fn composer_move_down(chat: &mut ChatState) {
     chat.composer_cursor = composer_cursor_from_line_col(&chat.composer, line + 1, col);
 }
 
+/// Compute the visual (row, col) of the cursor in the composer text, using
+/// **word wrapping** that matches `char_wrap_text` and
+/// `composer_wrapped_line_count`.
+///
+/// Words that are wider than `width` fall back to character wrapping.
 pub(super) fn composer_cursor_visual(text: &str, cursor: usize, width: u16) -> (usize, usize) {
     let width = width.max(1) as usize;
     let cursor = cursor.min(text.len());
     let mut row = 0usize;
     let mut col = 0usize;
     let mut byte = 0usize;
-    for ch in text.chars() {
+
+    // Iterate over "segments": sequences of non-space chars (words) and
+    // individual space/newline chars.  Before placing a word, check if it
+    // fits on the current line; if not, wrap the whole word to the next line.
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+
+        // Check cursor before processing this character.
         if byte >= cursor {
             break;
         }
+
         if ch == '\n' {
             row += 1;
             col = 0;
-            byte += 1;
+            byte += ch.len_utf8();
+            i += 1;
             continue;
         }
-        col += char_display_width(ch);
-        byte += ch.len_utf8();
-        if col >= width {
+
+        // Space: place it and advance.
+        if ch == ' ' || ch == '\t' {
+            let cw = char_display_width(ch);
+            col += cw;
+            byte += ch.len_utf8();
+            if col >= width {
+                row += 1;
+                col = 0;
+            }
+            i += 1;
+            continue;
+        }
+
+        // Start of a word — measure its full width.
+        let word_start = i;
+        let mut word_w = 0usize;
+        let mut j = i;
+        while j < chars.len() && chars[j] != ' ' && chars[j] != '\t' && chars[j] != '\n' {
+            word_w += char_display_width(chars[j]);
+            j += 1;
+        }
+
+        // If the word fits in the line width but not at current col, wrap first.
+        if word_w <= width && col > 0 && col + word_w > width {
             row += 1;
             col = 0;
         }
+
+        // Place the word character by character (handles words wider than width).
+        for ch in chars.iter().take(j).skip(word_start) {
+            if byte >= cursor {
+                break;
+            }
+            let cw = char_display_width(*ch);
+            // Character-wrap for oversized words.
+            if col > 0 && col + cw > width {
+                row += 1;
+                col = 0;
+            }
+            col += cw;
+            byte += ch.len_utf8();
+        }
+        i = j;
     }
     (row, col)
 }
@@ -286,4 +342,72 @@ pub(super) fn history_next(chat: &mut ChatState) {
     if let Some(value) = chat.prompt_history.get(next) {
         composer_set(chat, value.clone());
     }
+}
+
+/// Word-wrap `text` into lines of at most `width` display columns.
+///
+/// Words that fit within `width` but would overflow the current line are
+/// moved to the next line as a whole.  Words wider than `width` fall back
+/// to character wrapping.  The wrapping logic matches
+/// [`composer_cursor_visual`] so the cursor and the rendered text agree.
+pub(super) fn word_wrap_text(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    let mut col = 0usize;
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+
+    while i < chars.len() {
+        let ch = chars[i];
+
+        if ch == '\n' {
+            lines.push(std::mem::take(&mut current));
+            col = 0;
+            i += 1;
+            continue;
+        }
+
+        // Space / tab — place directly.
+        if ch == ' ' || ch == '\t' {
+            let cw = ch.width().unwrap_or(1);
+            col += cw;
+            current.push(ch);
+            if col >= width {
+                lines.push(std::mem::take(&mut current));
+                col = 0;
+            }
+            i += 1;
+            continue;
+        }
+
+        // Start of a word — measure full width.
+        let word_start = i;
+        let mut word_w = 0usize;
+        let mut j = i;
+        while j < chars.len() && chars[j] != ' ' && chars[j] != '\t' && chars[j] != '\n' {
+            word_w += chars[j].width().unwrap_or(1);
+            j += 1;
+        }
+
+        // If the word fits within line width but not at current col, wrap first.
+        if word_w <= width && col > 0 && col + word_w > width {
+            lines.push(std::mem::take(&mut current));
+            col = 0;
+        }
+
+        // Place word characters (character-wrap for oversized words).
+        for ch in chars.iter().take(j).skip(word_start) {
+            let cw = ch.width().unwrap_or(1);
+            if col > 0 && col + cw > width {
+                lines.push(std::mem::take(&mut current));
+                col = 0;
+            }
+            current.push(*ch);
+            col += cw;
+        }
+        i = j;
+    }
+    lines.push(current);
+    lines
 }

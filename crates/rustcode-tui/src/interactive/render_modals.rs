@@ -1,6 +1,7 @@
 use super::{
-    render_provider_manager_modal, AppState, Block, Borders, Clear, Constraint, Direction, Layout,
-    Line, List, ListItem, Modal, Modifier, Paragraph, Span, Style, Wrap, SLASH_COMMANDS,
+    render_provider_manager_modal, AppState, ApprovalMode, Block, Borders, Clear, Constraint,
+    Direction, Layout, Line, List, ListItem, Modal, Modifier, Paragraph, Span, Style, Wrap,
+    SLASH_COMMANDS,
 };
 use crate::interactive::theme;
 
@@ -97,9 +98,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                 .saturating_add(3)
                 .saturating_add(query.chars().count() as u16);
             let y = rows[0].y.saturating_add(1);
-            if x < area.x + area.width && y < area.y + area.height {
-                frame.set_cursor_position((x, y));
-            }
+            theme::render_block_cursor(frame, x, y, area);
         }
         Modal::Search {
             query,
@@ -164,9 +163,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                 .saturating_add(3)
                 .saturating_add(query.chars().count() as u16);
             let y = rows[0].y.saturating_add(1);
-            if x < area.x + area.width && y < area.y + area.height {
-                frame.set_cursor_position((x, y));
-            }
+            theme::render_block_cursor(frame, x, y, area);
         }
         Modal::FileSearch {
             query,
@@ -238,9 +235,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                 .saturating_add(3)
                 .saturating_add(query.chars().count() as u16);
             let y = rows[0].y.saturating_add(1);
-            if x < area.x + area.width && y < area.y + area.height {
-                frame.set_cursor_position((x, y));
-            }
+            theme::render_block_cursor(frame, x, y, area);
         }
         Modal::Rename {
             session_id,
@@ -274,9 +269,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                 .saturating_add(title_prefix)
                 .saturating_add(*cursor as u16);
             let y = inner.y.saturating_add(2);
-            if x < area.x + area.width && y < area.y + area.height {
-                frame.set_cursor_position((x, y));
-            }
+            theme::render_block_cursor(frame, x, y, area);
         }
         Modal::DeleteConfirm { session_id, title } => {
             let area = centered_rect(70, 30, frame.area());
@@ -466,9 +459,7 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
                     .x
                     .saturating_add(comment.chars().count() as u16);
                 let cy = comment_inner.y;
-                if cx < area.x + area.width && cy < area.y + area.height {
-                    frame.set_cursor_position((cx, cy));
-                }
+                theme::render_block_cursor(frame, cx, cy, area);
             }
 
             let hint = Paragraph::new(Line::from(vec![
@@ -524,5 +515,60 @@ pub(super) fn render_modal(frame: &mut ratatui::Frame<'_>, modal: &Modal) {
             .block(Block::default().borders(Borders::TOP));
             frame.render_widget(hint, rows[1]);
         }
+        Modal::ModeSelect { selected } => {
+            render_mode_select_modal(frame, *selected);
+        }
     }
+}
+
+fn render_mode_select_modal(frame: &mut ratatui::Frame<'_>, selected: usize) {
+    let modes = [
+        ApprovalMode::Normal,
+        ApprovalMode::AcceptEdits,
+        ApprovalMode::Yolo,
+        ApprovalMode::Plan,
+    ];
+
+    // Small centered modal: 4 items + border + hint = ~9 rows, ~50 cols
+    let area = centered_rect(40, 30, frame.area());
+    frame.render_widget(Clear, area);
+
+    let block = Block::default()
+        .title(" Mode ")
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(theme::ACCENT));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Min(1), Constraint::Length(2)])
+        .split(inner);
+
+    let items: Vec<ListItem> = modes
+        .iter()
+        .enumerate()
+        .map(|(i, mode)| {
+            let marker = if i == selected { ">" } else { " " };
+            let label = format!("{} {} {}", marker, mode.icon(), mode.label());
+            let style = if i == selected {
+                Style::default()
+                    .fg(theme::ACCENT)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(theme::TEXT)
+            };
+            ListItem::new(Line::from(Span::styled(label, style)))
+        })
+        .collect();
+
+    let list = List::new(items);
+    frame.render_widget(list, rows[0]);
+
+    let hint = Paragraph::new(Line::from(vec![Span::styled(
+        "Enter: select  Esc: cancel",
+        Style::default().fg(theme::MUTED),
+    )]))
+    .block(Block::default().borders(Borders::TOP));
+    frame.render_widget(hint, rows[1]);
 }

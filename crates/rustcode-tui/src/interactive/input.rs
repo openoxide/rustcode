@@ -22,6 +22,7 @@ mod input_provider;
 mod input_sessions;
 
 use self::input_chat::handle_chat_key;
+pub(in crate::interactive) use self::input_chat::set_approval_mode;
 use self::input_modals::handle_modal_key;
 use self::input_sessions::handle_sessions_key;
 
@@ -101,6 +102,18 @@ pub(super) fn handle_key(state: &mut AppState, key: KeyEvent) -> bool {
                     );
                     let _ = pending.reply.send(ApprovalResponse::Deny);
                     state.approval_selection = 0;
+                }
+            }
+            // Shift+Tab: cycle approval mode (may auto-resolve this pending approval)
+            KeyCode::BackTab => {
+                // Extract chat mutably for cycle_approval_mode
+                let screen = std::mem::replace(&mut state.screen, Screen::Sessions);
+                if let Screen::Chat(mut chat) = screen {
+                    input_chat::cycle_approval_mode(state, Some(&mut chat));
+                    state.screen = Screen::Chat(chat);
+                } else {
+                    state.screen = screen;
+                    input_chat::cycle_approval_mode(state, None);
                 }
             }
             _ => {}

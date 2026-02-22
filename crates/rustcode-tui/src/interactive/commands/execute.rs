@@ -67,7 +67,7 @@ pub(crate) fn execute_command(state: &mut AppState, id: CommandId) {
                 activity: VecDeque::new(),
                 activity_selected: 0,
                 details_open: false,
-                activity_hidden: false,
+                activity_hidden: true,
                 tool_details: false,
                 output_details: false,
                 find: None,
@@ -395,6 +395,11 @@ pub(crate) fn execute_command(state: &mut AppState, id: CommandId) {
         }
         CommandId::ViewMemory => {
             open_memory_viewer(state);
+        }
+        CommandId::CycleMode => {
+            state.modal = Some(Modal::ModeSelect {
+                selected: state.approval_mode as usize,
+            });
         }
     }
 }

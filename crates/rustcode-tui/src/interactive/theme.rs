@@ -109,3 +109,31 @@ pub(crate) const CTX_MED: Color = Color::Rgb(224, 175, 104);
 
 /// Context usage — high (>75%).
 pub(crate) const CTX_HIGH: Color = Color::Rgb(247, 118, 142);
+
+// ── Cursor ──────────────────────────────────────────────────────────
+
+/// Block cursor foreground (dark background color for contrast).
+pub(crate) const CURSOR_FG: Color = Color::Rgb(30, 30, 46);
+
+/// Block cursor background (light gray block).
+pub(crate) const CURSOR_BG: Color = Color::Rgb(192, 202, 245);
+
+/// Render a block cursor at `(x, y)` in the frame buffer.
+///
+/// Styles the cell at the given position with [`CURSOR_FG`] / [`CURSOR_BG`]
+/// to produce a visible block cursor.  Bounds-checks against `area` so
+/// callers don't need to.
+pub(crate) fn render_block_cursor(
+    frame: &mut ratatui::Frame<'_>,
+    x: u16,
+    y: u16,
+    area: ratatui::layout::Rect,
+) {
+    use ratatui::style::Style;
+
+    if x < area.x + area.width && y < area.y + area.height {
+        let buf = frame.buffer_mut();
+        let cell = &mut buf[(x, y)];
+        cell.set_style(Style::default().fg(CURSOR_FG).bg(CURSOR_BG));
+    }
+}

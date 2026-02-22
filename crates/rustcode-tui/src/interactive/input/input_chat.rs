@@ -1,3 +1,6 @@
+use std::sync::atomic::Ordering;
+
+use super::super::ApprovalMode;
 use super::{
     build_prompt_history, composer_backspace, composer_clear, composer_delete, composer_insert_str,
     composer_kill_line_backward, composer_kill_line_forward, composer_move_down, composer_move_end,
@@ -88,6 +91,12 @@ pub(super) fn handle_chat_key(
 
     if alt && matches!(key.code, KeyCode::Tab) {
         chat.focus = next_focus(chat.focus, chat.activity_hidden);
+        return ChatNav::Stay;
+    }
+
+    // Shift+Tab (BackTab): cycle approval mode.
+    if matches!(key.code, KeyCode::BackTab) {
+        cycle_approval_mode(state, Some(chat));
         return ChatNav::Stay;
     }
 
@@ -522,4 +531,68 @@ fn next_focus(focus: ChatFocus, activity_hidden: bool) -> ChatFocus {
         }
         ChatFocus::Activity => ChatFocus::Composer,
     }
+}
+
+/// Set a specific approval mode and update the shared flag.
+///
+/// If `chat` is provided and the new mode auto-approves, any pending approval
+/// is resolved immediately.
+pub(in crate::interactive) fn set_approval_mode(
+    state: &mut AppState,
+    new_mode: ApprovalMode,
+    chat: Option<&mut ChatState>,
+) {
+    state.approval_mode = new_mode;
+    state.mode_flag.store(new_mode as u8, Ordering::Relaxed);
+    let toast_msg = format!("{} {} mode", new_mode.icon(), new_mode.label());
+    let variant = match new_mode {
+        ApprovalMode::Yolo => ToastVariant::Warning,
+        ApprovalMode::Plan => ToastVariant::Info,
+        ApprovalMode::AcceptEdits => ToastVariant::Warning,
+        ApprovalMode::Normal => ToastVariant::Info,
+    };
+    push_toast(state, variant, toast_msg, Duration::from_secs(3));
+    // Auto-resolve pending approval if the new mode would auto-approve.
+    if matches!(new_mode, ApprovalMode::Yolo | ApprovalMode::AcceptEdits) {
+        if let Some(pending) = state.pending_approval.take() {
+            let is_command =
+                super::super::approval_is_command_permission(&pending.request.permission);
+            let approve = new_mode == ApprovalMode::Yolo || !is_command;
+            if approve {
+                let _ = pending
+                    .reply
+                    .send(super::super::ApprovalResponse::AllowOnce);
+                state.approval_selection = 0;
+                if let Some(chat) = chat {
+                    chat.committed_approvals.push(pending.request);
+                }
+            } else {
+                // AcceptEdits but this is a command — put it back for manual approval
+                state.pending_approval = Some(super::super::PendingApproval {
+                    request: pending.request,
+                    reply: pending.reply,
+                });
+            }
+        }
+    } else if new_mode == ApprovalMode::Plan {
+        // Plan mode auto-denies pending approval
+        if let Some(pending) = state.pending_approval.take() {
+            let _ = pending.reply.send(super::super::ApprovalResponse::Deny);
+            state.approval_selection = 0;
+            push_toast(
+                state,
+                ToastVariant::Info,
+                "Plan mode — tool denied",
+                Duration::from_secs(2),
+            );
+        }
+    }
+}
+
+/// Cycle to the next approval mode.
+pub(in crate::interactive) fn cycle_approval_mode(
+    state: &mut AppState,
+    chat: Option<&mut ChatState>,
+) {
+    set_approval_mode(state, state.approval_mode.next(), chat);
 }

@@ -188,6 +188,14 @@ pub(super) fn build_command_items(
     });
 
     items.push(CommandItem {
+        id: CommandId::CycleMode,
+        title: "Switch mode".to_string(),
+        detail: "Choose approval mode: Build / Accept Edits / Yolo / Plan".to_string(),
+        enabled: true,
+        disabled_reason: None,
+    });
+
+    items.push(CommandItem {
         id: CommandId::Quit,
         title: "Quit".to_string(),
         detail: "Exit the app  Ctrl+C twice".to_string(),
@@ -256,6 +264,10 @@ pub(super) fn maybe_execute_palette_query(state: &mut AppState, query: &str) -> 
         }
         "thinking" | "reasoning" => {
             execute_command(state, CommandId::ToggleReasoning);
+            true
+        }
+        "mode" => {
+            execute_command(state, CommandId::CycleMode);
             true
         }
         "model" | "models" => {

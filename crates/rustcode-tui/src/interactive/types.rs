@@ -1,11 +1,84 @@
 use std::collections::VecDeque;
 
+use std::sync::atomic::AtomicU8;
+
 use super::{
     AbortHandle, ActivityItem, ApprovalResponse, Arc, CancellationToken, InteractiveDefaults,
     InteractiveMsg, InteractiveSubmitMode, MessageRole, ResolvedConfig, SessionInfo, Size,
     StoredMessage, SystemTime, ToolApprovalRequest,
 };
 use std::time::Instant;
+
+/// Controls how tool approval requests are handled.
+///
+/// Stored as `u8` in the shared atomic flag for lock-free access by the approver.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum ApprovalMode {
+    /// Each tool request requires explicit user approval.
+    Normal = 0,
+    /// File/edit permissions auto-approved; commands still require approval.
+    AcceptEdits = 1,
+    /// All tool requests auto-approved — agent works fully autonomously.
+    Yolo = 2,
+    /// Read-only: agent can read but all write/exec approvals are auto-denied.
+    Plan = 3,
+}
+
+impl ApprovalMode {
+    /// Total number of mode variants.
+    pub(super) const COUNT: usize = 4;
+
+    /// Icon shown in the mode bar.
+    #[must_use]
+    pub(super) fn icon(self) -> &'static str {
+        match self {
+            Self::Normal => "🔨",
+            Self::AcceptEdits => "✏️",
+            Self::Yolo => "⚡",
+            Self::Plan => "📋",
+        }
+    }
+
+    /// Display label.
+    #[must_use]
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Normal => "Build",
+            Self::AcceptEdits => "Accept Edits",
+            Self::Yolo => "Yolo",
+            Self::Plan => "Plan",
+        }
+    }
+
+    /// Cycle to the next mode.
+    #[must_use]
+    pub(super) fn next(self) -> Self {
+        Self::from_u8((self as u8 + 1) % Self::COUNT as u8)
+    }
+
+    /// Convert from `u8`.
+    #[must_use]
+    pub(super) fn from_u8(v: u8) -> Self {
+        match v {
+            0 => Self::Normal,
+            1 => Self::AcceptEdits,
+            2 => Self::Yolo,
+            3 => Self::Plan,
+            _ => Self::Normal,
+        }
+    }
+
+    /// System prompt mode hint string.
+    #[must_use]
+    pub(super) fn mode_hint(self) -> String {
+        match self {
+            Self::Normal => "build".to_string(),
+            Self::AcceptEdits => "accept_edits".to_string(),
+            Self::Yolo => "yolo".to_string(),
+            Self::Plan => "plan".to_string(),
+        }
+    }
+}
 
 pub(super) enum Screen {
     Sessions,
@@ -133,6 +206,11 @@ pub(super) enum Modal {
     },
     /// Confirmation dialog before clearing all memories.
     MemoryClearConfirm,
+    /// Approval mode picker — select Build / Accept Edits / Yolo / Plan.
+    ModeSelect {
+        /// Currently highlighted index (0..4).
+        selected: usize,
+    },
 }
 
 /// An entry in the provider manager list.
@@ -235,6 +313,8 @@ pub(super) enum CommandId {
     ManageProviders,
     /// Open memory viewer overlay.
     ViewMemory,
+    /// Cycle through approval modes (Normal → Accept Edits → YOLO → Plan).
+    CycleMode,
 }
 
 #[derive(Debug, Clone)]
@@ -343,6 +423,10 @@ pub(super) struct AppState {
     pub(super) pending_approval: Option<PendingApproval>,
     /// Index of the currently highlighted option in the inline approval selector.
     pub(super) approval_selection: usize,
+    /// Current approval mode.
+    pub(super) approval_mode: ApprovalMode,
+    /// Shared flag read by `TuiToolApprover` — stores `ApprovalMode as u8`.
+    pub(super) mode_flag: Arc<AtomicU8>,
 
     pub(super) submit_mode: InteractiveSubmitMode,
 

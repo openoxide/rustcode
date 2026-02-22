@@ -2,15 +2,17 @@ use std::collections::VecDeque;
 
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    MouseEventKind,
+    KeyboardEnhancementFlags, MouseEventKind, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use futures_util::StreamExt;
 
+use super::inline_terminal::InlineTerminal;
+use super::state::compute_desired_height;
 use super::{
     build_prompt_history, composer_insert_str, compute_sessions_view, disable_raw_mode,
     drain_toasts, enable_raw_mode, execute, handle_key, io, render, sort_sessions, AppState,
-    ChatFocus, ChatState, CrosstermBackend, EnterAlternateScreen, InteractiveServices,
-    InteractiveStart, LeaveAlternateScreen, Screen, Terminal, TuiError,
+    ApprovalMode, ChatFocus, ChatState, InteractiveServices, InteractiveStart, Screen, TuiError,
 };
 
 mod event_stream;
@@ -40,38 +42,59 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
         executor,
         llm_cell,
         submit_mode,
+        mode_flag,
     } = services;
+
+    let keyboard_enhancement_enabled = matches!(
+        crossterm::terminal::supports_keyboard_enhancement(),
+        Ok(true)
+    );
 
     // Install a terminal-restoring panic hook so the panic message is legible.
     let prev_panic_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         let _ = disable_raw_mode();
         let mut stdout = io::stdout();
-        let _ = execute!(
-            stdout,
-            DisableMouseCapture,
-            DisableBracketedPaste,
-            LeaveAlternateScreen
-        );
+        if keyboard_enhancement_enabled {
+            let _ = execute!(
+                stdout,
+                PopKeyboardEnhancementFlags,
+                DisableMouseCapture,
+                DisableBracketedPaste
+            );
+        } else {
+            let _ = execute!(stdout, DisableMouseCapture, DisableBracketedPaste);
+        }
+        // Reset scroll region and show cursor for legible panic output.
+        let _ = std::io::Write::write_all(&mut stdout, b"\x1b[r\n");
+        let _ = crossterm::cursor::Show;
+        let _ = std::io::Write::flush(&mut stdout);
         prev_panic_hook(info);
     }));
 
     let mut stdout = io::stdout();
     enable_raw_mode().map_err(|err| TuiError::Io(err.to_string()))?;
-    execute!(
-        stdout,
-        EnterAlternateScreen,
-        EnableMouseCapture,
-        EnableBracketedPaste
-    )
-    .map_err(|err| TuiError::Io(err.to_string()))?;
-    let _cleanup = TerminalCleanup;
-
-    let term_backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(term_backend).map_err(|err| TuiError::Io(err.to_string()))?;
-    terminal
-        .clear()
+    // Inline mode: no EnterAlternateScreen — previous terminal content stays visible.
+    if keyboard_enhancement_enabled {
+        execute!(
+            stdout,
+            EnableMouseCapture,
+            EnableBracketedPaste,
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES
+            )
+        )
         .map_err(|err| TuiError::Io(err.to_string()))?;
+    } else {
+        execute!(stdout, EnableMouseCapture, EnableBracketedPaste)
+            .map_err(|err| TuiError::Io(err.to_string()))?;
+    }
+
+    let mut terminal = InlineTerminal::new()?;
+    let _cleanup = TerminalCleanup {
+        keyboard_enhancement_enabled,
+    };
 
     // ── Frame scheduler ──
     let (frame_requester, draw_rx, scheduler) = FrameScheduler::new();
@@ -133,7 +156,7 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
                 activity: VecDeque::new(),
                 activity_selected: 0,
                 details_open: false,
-                activity_hidden: false,
+                activity_hidden: true,
                 tool_details: false,
                 output_details: false,
                 find: None,
@@ -174,6 +197,8 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
         defaults,
         pending_approval: None,
         approval_selection: 0,
+        approval_mode: ApprovalMode::Normal,
+        mode_flag,
         submit_mode,
         backend: session_backend,
         config,
@@ -182,9 +207,13 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
         tx: handles.tx,
         rx: handles.rx,
         request_seq: 0,
-        last_area: terminal
-            .size()
-            .map_err(|err| TuiError::Io(err.to_string()))?,
+        last_area: {
+            let (w, h) = InlineTerminal::size()?;
+            ratatui::layout::Size {
+                width: w,
+                height: h,
+            }
+        },
         provider_oauth_start_rx: None,
         provider_oauth_done_rx: None,
         llm_cell,
@@ -201,7 +230,7 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
     // Request an initial draw so the UI appears immediately.
     frame_requester.schedule_frame();
 
-    let mut last_screen_is_chat = matches!(state.screen, Screen::Chat(_));
+    let mut _last_screen_is_chat = matches!(state.screen, Screen::Chat(_));
 
     // Periodic animation tick — ensures spinners, elapsed timers, and thinking
     // animations update smoothly even when no engine messages or input arrive.
@@ -223,20 +252,17 @@ pub(super) async fn run_interactive(services: InteractiveServices) -> Result<(),
                         drain_toasts(&mut state);
                         poll_provider_oauth(&mut state);
 
-                        // Clear terminal on screen transitions.
+                        // Track screen transitions for viewport resize.
                         let screen_is_chat = matches!(state.screen, Screen::Chat(_));
-                        if screen_is_chat != last_screen_is_chat {
-                            let _ = terminal.clear();
-                        }
-                        last_screen_is_chat = screen_is_chat;
+                        _last_screen_is_chat = screen_is_chat;
 
-                        if let Ok(size) = terminal.size() {
-                            state.last_area = size;
+                        // Update real terminal size.
+                        if let Ok((w, h)) = InlineTerminal::size() {
+                            state.last_area = ratatui::layout::Size { width: w, height: h };
                         }
 
-                        terminal
-                            .draw(|frame| render(frame, &state))
-                            .map_err(|err| TuiError::Io(err.to_string()))?;
+                        let desired = compute_desired_height(&state);
+                        terminal.draw(desired, |frame| render(frame, &state))?;
                     }
                     TuiEvent::Key(key) => {
                         if handle_key(&mut state, key) {
@@ -346,17 +372,27 @@ pub(super) fn start_auto_submit(state: &mut AppState, prompt: String) {
     state.screen = Screen::Chat(chat);
 }
 
-struct TerminalCleanup;
+struct TerminalCleanup {
+    keyboard_enhancement_enabled: bool,
+}
 
 impl Drop for TerminalCleanup {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let mut stdout = io::stdout();
-        let _ = execute!(
-            stdout,
-            DisableMouseCapture,
-            DisableBracketedPaste,
-            LeaveAlternateScreen
-        );
+        if self.keyboard_enhancement_enabled {
+            let _ = execute!(
+                stdout,
+                PopKeyboardEnhancementFlags,
+                DisableMouseCapture,
+                DisableBracketedPaste
+            );
+        } else {
+            let _ = execute!(stdout, DisableMouseCapture, DisableBracketedPaste);
+        }
+        // Reset scroll region, show cursor, and newline for clean shell prompt.
+        let _ = execute!(stdout, crossterm::cursor::Show);
+        let _ = std::io::Write::write_all(&mut stdout, b"\x1b[r\n");
+        let _ = std::io::Write::flush(&mut stdout);
     }
 }
